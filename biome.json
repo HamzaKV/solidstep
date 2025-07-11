@@ -1,0 +1,69 @@
+{
+    "$schema": "https://biomejs.dev/schemas/1.9.2/schema.json",
+    "vcs": {
+        "enabled": false,
+        "clientKind": "git",
+        "useIgnoreFile": false
+    },
+    "files": {
+        "ignoreUnknown": false,
+        "ignore": [
+            ".*.js",
+            "node_modules/",
+            "dist/",
+            "build/",
+            "out/",
+            ".next/",
+            "*.json",
+            "payload-types.ts",
+            "*.css"
+        ]
+    },
+    "formatter": {
+        "enabled": true,
+        "indentStyle": "space",
+        "indentWidth": 4
+    },
+    "organizeImports": {
+        "enabled": false
+    },
+    "linter": {
+        "enabled": true,
+        "rules": {
+            "recommended": true,
+            "style": {
+                "useSelfClosingElements": "off",
+                "noNonNullAssertion": "off",
+                "useExponentiationOperator": "off"
+            },
+            "suspicious": {
+                "noExplicitAny": "off",
+                "noArrayIndexKey": "info",
+                "noFallthroughSwitchClause": "warn",
+                "noAssignInExpressions": "warn"
+            },
+            "a11y": {
+                "useKeyWithClickEvents": "info",
+                "noSvgWithoutTitle": "info",
+                "noLabelWithoutControl": "info",
+                "useAltText": "warn",
+                "useMediaCaption": "info",
+                "useValidAnchor": "warn"
+            },
+            "correctness": {
+                "useExhaustiveDependencies": "warn"
+            },
+            "complexity": {
+                "noForEach": "warn"
+            }
+        }
+    },
+    "javascript": {
+        "formatter": {
+            "quoteStyle": "single",
+            "jsxQuoteStyle": "single",
+            "bracketSpacing": true,
+            "semicolons": "always"
+        }
+    }
+}

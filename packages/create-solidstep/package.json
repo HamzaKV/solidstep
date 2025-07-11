@@ -1,0 +1,10 @@
+{
+    "name": "@varlabs/create-solidstep",
+    "version": "0.1.0",
+    "description": "Next Step SolidJS CLI for building web applications.",
+    "type": "module",
+    "bin": "./bin/index.ts",
+    "devDependencies": {
+        "typescript": "^5.0.0"
+    }
+}

@@ -1,0 +1,22 @@
+{
+    "name": "SolidStep App",
+    "version": "1.0.0",
+    "description": "Simple SolidStep application",
+    "type": "module",
+    "scripts": {
+        "dev": "vinxi dev",
+        "build": "vinxi build",
+        "start": "vinxi start"
+    },
+    "keywords": [],
+    "author": "",
+    "dependencies": {
+        "@vinxi/server-functions": "0.5.1",
+        "solid-js": "^1.9.7",
+        "vinxi": "^0.5.8"
+    },
+    "devDependencies": {
+        "typescript": "^5.8.3",
+        "vite-plugin-solid": "^2.11.7"
+    }
+}

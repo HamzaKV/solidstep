@@ -1,0 +1,11 @@
+{
+  "name": "solidstep",
+  "version": "0.1.0",
+  "description": "Next Solid Step towards a more performant web",
+  "type": "module",
+  "packageManager": "pnpm@10.6.2",
+  "dependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@varlabs/monorun": "^0.1.4"
+  }
+}
