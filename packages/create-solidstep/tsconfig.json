@@ -26,6 +26,16 @@
   },
   "include": [
     "bin/**/*",
-    "generate/**/*"
   ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "build",
+    "coverage",
+    "test",
+    "tests",
+    "**/*.spec.ts",
+    "**/*.test.ts",
+    "generate"
+  ]
 }

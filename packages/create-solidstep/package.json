@@ -3,8 +3,55 @@
     "version": "0.1.0",
     "description": "Next Step SolidJS CLI for building web applications.",
     "type": "module",
-    "bin": "./bin/index.ts",
+    "author": "HamzaKV <hamzakv333@gmail.com>",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/HamzaKV/solidstep.git"
+    },
+    "license": "MIT",
+    "bin": {
+        "create-solidstep": "./bin/main.js"
+    },
+    "scripts": {
+        "clean": "rimraf ./dist",
+        "copy-files:root": "copyfiles -u 0 README.md package.json generate/**/* LICENSE ./dist",
+        "dev": "tsx --no-cache ./bin/main -v",
+        "start": "node ./dist/bin/main.js",
+        "build": "pnpm clean && tsc && pnpm copy-files:root",
+        "test:local": "pnpm build && cd ./dist && pnpm link",
+        "test:local:clean": "pnpm unlink && pnpm clean",
+        "git:main": "git checkout \"main\"",
+        "git:push:main": "git push -u origin \"main\" --tags",
+        "patch": "pnpm git:main && npm version patch && pnpm git:push:main",
+        "minor": "pnpm git:main && npm version minor && pnpm git:push:main",
+        "major": "pnpm git:main && npm version major && pnpm git:push:main",
+        "roll": "pnpm build && cd dist && npm publish",
+        "roll:patch": "pnpm patch && pnpm roll",
+        "roll:minor": "pnpm minor && pnpm roll",
+        "roll:major": "pnpm major && pnpm roll"
+    },
     "devDependencies": {
+        "@types/node": "^22.15.17",
+        "copyfiles": "^2.4.1",
+        "rimraf": "^6.0.1",
+        "tsx": "^4.19.4",
         "typescript": "^5.0.0"
+    },
+    "dependencies": {
+        "inquirer": "^12.6.3"
+    },
+    "keywords": [
+        "solidjs",
+        "cli",
+        "create-solidstep",
+        "web-development",
+        "typescript",
+        "npm"
+    ],
+    "engines": {
+        "node": ">=20"
+    },
+    "publishConfig": {
+        "access": "public"
     }
 }
