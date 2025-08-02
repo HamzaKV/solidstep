@@ -39,6 +39,10 @@ export class Router extends BaseFileSystemRouter {
                 type: 'group',
                 parent: parent,
                 path: '/group' + path,
+                $handler: {
+                    src: filePath,
+                    pick: []
+                },
                 $component: {
                     src: filePath,
                     pick: ['default'],
@@ -46,6 +50,10 @@ export class Router extends BaseFileSystemRouter {
                 $loader: {
                     src: filePath,
                     pick: ['loader'],
+                },
+                $options: {
+                    src: filePath,
+                    pick: ['options'],
                 },
             };
         }
@@ -54,6 +62,10 @@ export class Router extends BaseFileSystemRouter {
             return {
                 type: 'route',
                 path: '/route' + path,
+                $handler: {
+                    src: filePath,
+                    pick: []
+                },
                 $component: {
                     src: filePath,
                     pick: ['default'],
@@ -65,6 +77,10 @@ export class Router extends BaseFileSystemRouter {
                 $generateMeta: {
                     src: filePath,
                     pick: ['generateMeta'],
+                },
+                $options: {
+                    src: filePath,
+                    pick: ['options'],
                 },
             };
         }
@@ -73,6 +89,10 @@ export class Router extends BaseFileSystemRouter {
             return {
                 type: 'layout',
                 path: '/layout' + path,
+                $handler: {
+                    src: filePath,
+                    pick: []
+                },
                 $component: {
                     src: filePath,
                     pick: ['default'],
@@ -85,6 +105,10 @@ export class Router extends BaseFileSystemRouter {
                     src: filePath,
                     pick: ['generateMeta'],
                 },
+                $options: {
+                    src: filePath,
+                    pick: ['options'],
+                },
             };
         }
 
@@ -92,6 +116,10 @@ export class Router extends BaseFileSystemRouter {
             return {
                 type: 'error',
                 path: '/error' + path,
+                $handler: {
+                    src: filePath,
+                    pick: []
+                },
                 $component: {
                     src: filePath,
                     pick: ['default'],
@@ -99,6 +127,10 @@ export class Router extends BaseFileSystemRouter {
                 $generateMeta: {
                     src: filePath,
                     pick: ['generateMeta'],
+                },
+                $options: {
+                    src: filePath,
+                    pick: ['options'],
                 },
             };
         }
@@ -107,6 +139,10 @@ export class Router extends BaseFileSystemRouter {
             return {
                 type: 'loading',
                 path: '/loading' + path,
+                $handler: {
+                    src: filePath,
+                    pick: []
+                },
                 $component: {
                     src: filePath,
                     pick: ['default'],
@@ -114,6 +150,10 @@ export class Router extends BaseFileSystemRouter {
                 $generateMeta: {
                     src: filePath,
                     pick: ['generateMeta'],
+                },
+                $options: {
+                    src: filePath,
+                    pick: ['options'],
                 },
             };
         }
@@ -122,6 +162,10 @@ export class Router extends BaseFileSystemRouter {
             return {
                 type: 'not-found',
                 path: '/not-found' + path,
+                $handler: {
+                    src: filePath,
+                    pick: []
+                },
                 $component: {
                     src: filePath,
                     pick: ['default'],
@@ -129,6 +173,10 @@ export class Router extends BaseFileSystemRouter {
                 $generateMeta: {
                     src: filePath,
                     pick: ['generateMeta'],
+                },
+                $options: {
+                    src: filePath,
+                    pick: ['options'],
                 },
             };
         }

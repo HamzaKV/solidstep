@@ -1,11 +1,12 @@
 import { eventHandler } from 'vinxi/http';
 import { getManifest } from 'vinxi/manifest';
 import { generateHydrationScript, renderToString } from 'solid-js/web';
-import { readdir, stat } from 'node:fs/promises';
-import { join, relative, sep } from 'node:path';
 import type { Meta } from './utils/types';
 import type { ServerResponse, IncomingMessage } from 'node:http';
 import fileRoutes, { type RouteModule } from 'vinxi/routes';
+import { RedirectError } from './utils/redirect';
+import { setCache, getCache } from './utils/cache';
+import { handleServerAction } from '@vinxi/server-functions/server-handler';
 
 type Import = {
     src: string;
@@ -19,6 +20,7 @@ type RoutePageEntry = {
         page: Import;
         loader?: Import;
         generateMeta?: Import;
+        options?: Import;
     };
     loadingPage?: {
         manifestPath: string;
@@ -53,16 +55,27 @@ type RoutePageEntry = {
 type RouteEntry = {
     type: 'route';
     handler: Import;
+    manifestPath: string;
 } | RoutePageEntry;
 
 type RouteManifest = {
     [key: string]: RouteEntry;
 };
 
+type FileRoute = RouteModule & {
+    type: 'route' | 'loading' | 'error' | 'not-found' | 'layout' | 'group';
+    $component: Import;
+    $loader?: Import;
+    $generateMeta?: Import;
+    $handler?: Import;
+    $options?: Import;
+    parent?: string; // for groups
+};
+
 const isPageFile = (file: string) =>
-    file.endsWith('page.tsx') 
-    || file.endsWith('page.jsx') 
-    || file.endsWith('page.ts') 
+    file.endsWith('page.tsx')
+    || file.endsWith('page.jsx')
+    || file.endsWith('page.ts')
     || file.endsWith('page.js');
 
 const isRouteFile = (file: string) =>
@@ -71,127 +84,130 @@ const isRouteFile = (file: string) =>
 const parseSegment = (part: string) =>
     part.startsWith('[') ? ':' + part.slice(1, -1).replace(/\.\.\./, '*') : part;
 
-const createRouteManifest = async (baseDir = 'app') => {
+const createRouteManifest = async () => {
     const entries: RouteManifest = {};
 
-    const walk = async (dir: string) => {
-        const contents = await readdir(dir);
-        for (const entry of contents) {
-            const fullPath = join(dir, entry);
-            if ((await stat(fullPath)).isDirectory()) {
-                await walk(fullPath);
-            } else if (isPageFile(fullPath)) {
-                const rel = relative(baseDir, fullPath);
-                const parts = rel.split(sep);
-                const segments = parts.slice(0, -1); // drop 'page.tsx'
+    const allRoutes: FileRoute[] = [];
+    const allLayouts: FileRoute[] = [];
+    const allLoadingPages: FileRoute[] = [];
+    const allErrorPages: FileRoute[] = [];
+    const allGroups: FileRoute[] = [];
+    let notFoundPage: FileRoute | undefined;
 
-                if (segments.find(s => s.startsWith('@'))) {
-                    // don't include parallel routes in the manifest
-                    continue;
-                }
+    for (const fileRoute of (fileRoutes as FileRoute[])) {
+        if (fileRoute.type === 'route') {
+            allRoutes.push(fileRoute);
+        }
 
-                const urlSegments = segments
-                    .filter(s => !(s.startsWith('('))) // drop route groups
-                    .map(parseSegment);
-                const routePath = '/' + urlSegments.join('/');
-                const mainPage = fileRoutes.find(route => {
-                    const path = '/' + route.path.split('/').slice(2).filter(s => !(s.startsWith('('))).map(parseSegment).join('/');
-                    return (route as any).type === 'route' && path === routePath;
-                });
-                const loadingPage = fileRoutes.find(route => {
-                    const path = '/' + route.path.split('/').slice(2).filter(s => !(s.startsWith('('))).map(parseSegment).join('/');
-                    return (route as any).type === 'loading' && path === routePath;
-                });
-                let errorPage: RouteModule;
-                const layouts: RoutePageEntry['layouts'] = [];
-                const fileSegments = segments
-                    .map(parseSegment);
-                for (let i = 0; i < fileSegments.length + 1; i++) {
-                    const route = '/' + fileSegments.slice(0, fileSegments.length-i).join('/');
-                    
-                    for (const fileRoute of fileRoutes) {
-                        const path = '/' + fileRoute.path.split('/').slice(2).map(parseSegment).join('/');
-                        if (!errorPage && (fileRoute as any).type === 'error' && path === route) {
-                            errorPage = fileRoute;
-                        }
-                        if ((fileRoute as any).type === 'layout' && path === route) {
-                            layouts.unshift({
-                                layout: fileRoute.$component,
-                                loader: fileRoute.$loader,
-                                generateMeta: fileRoute.$generateMeta,
-                                manifestPath: fileRoute.path,
-                            });
-                        }
-                    }
-                }
-                let groups: RoutePageEntry['groups'] = {};
-                for (const fileRoute of fileRoutes) {
-                    const groupParentPath = (fileRoute as any).parent ? '/' + (fileRoute as any).parent.split('/').slice(2).filter(s => !(s.startsWith('('))).map(parseSegment).join('/') : '';
-                    if ((fileRoute as any).type === 'group' && groupParentPath === routePath) {
-                        const groupName = fileRoute.path.split('/').filter(s => !(s.startsWith('('))).map(parseSegment).at(-1);
-                        groups[groupName] = {
-                            page: fileRoute.$component,
-                            loader: fileRoute.$loader,
-                            manifestPath: fileRoute.path,
-                        };
-                    }
-                }
-                let notFoundPage: RouteModule | undefined;
-                if (routePath === '/') {
-                    notFoundPage = fileRoutes.find(route => {
-                        const path = '/' + route.path.split('/').slice(2).join('/');
-                        return (route as any).type === 'not-found' && path === routePath;
-                    });
-                }
-                entries[routePath] = {
-                    type: 'page',
-                    mainPage: {
-                        manifestPath: mainPage.path,
-                        page: mainPage.$component,
-                        loader: mainPage.$loader,
-                        generateMeta: mainPage.$generateMeta,
-                    },
-                    loadingPage: loadingPage ? {
-                        page: loadingPage.$component,
-                        generateMeta: loadingPage.$generateMeta,
-                        manifestPath: loadingPage.path,
-                    } : undefined,
-                    errorPage: errorPage ? {
-                        page: errorPage.$component,
-                        generateMeta: errorPage.$generateMeta,
-                        manifestPath: errorPage.path,
-                    } : undefined,
-                    layouts,
-                    groups,
-                    notFoundPage: notFoundPage ? {
-                        page: notFoundPage.$component,
-                        generateMeta: notFoundPage.$generateMeta,
-                        manifestPath: notFoundPage.path,
-                    } : undefined,
-                };
-            } else if (isRouteFile(fullPath)) {
-                const rel = relative(baseDir, fullPath);
-                const parts = rel.split(sep);
-                const segments = parts.slice(0, -1); // drop 'route.ts'
+        if (fileRoute.type === 'layout') {
+            allLayouts.push(fileRoute);
+        }
 
-                const urlSegments = segments
-                    .filter(s => !(s.startsWith('('))) // drop route groups
-                    .map(parseSegment);
+        if (fileRoute.type === 'not-found') {
+            notFoundPage = fileRoute;
+        }
 
-                const routePath = '/' + urlSegments.join('/');
-                const mainRoute = fileRoutes.find(route => {
-                    const path = '/' + route.path.split('/').slice(2).filter(s => !(s.startsWith('('))).map(parseSegment).join('/');
-                    return (route as any).type === 'route' && path === routePath;
-                });
+        if (fileRoute.type === 'loading') {
+            allLoadingPages.push(fileRoute);
+        }
 
-                entries[routePath] = {
-                    type: 'route',
-                    handler: mainRoute.$handler,
-                };
-            }
+        if (fileRoute.type === 'error') {
+            allErrorPages.push(fileRoute);
+        }
+
+        if (fileRoute.type === 'group') {
+            allGroups.push(fileRoute);
         }
     }
-    await walk(baseDir);
+
+    for (const fileRoute of allRoutes) {
+        const segments = fileRoute.path.split('/').slice(2).map(parseSegment);
+        const routePath = '/' + segments.filter(s => !(s.startsWith('('))).join('/');
+        const regex = /\?(?:pick=.*)*/g;
+        const src = fileRoute.$handler.src.replace(regex, '');
+        
+        if (isPageFile(src)) {
+            const loadingPage = allLoadingPages.find(route => {
+                const path = '/' + route.path.split('/').slice(2).map(parseSegment).join('/');
+                return path === routePath;
+            });
+
+            const matchedGroups = allGroups.filter(route => {
+                const parentPath = route.parent ? '/' + route.parent.split('/').slice(2).map(parseSegment).join('/') : '';
+                return parentPath === routePath;
+            });
+            const groups: RoutePageEntry['groups'] = {};
+            if (matchedGroups && matchedGroups.length > 0) {
+                for (const group of matchedGroups) {
+                    const groupName = group.path.split('/').filter(s => !(s.startsWith('('))).map(parseSegment).at(-1);
+                    groups[groupName] = {
+                        manifestPath: group.path,
+                        page: group.$component,
+                        loader: group.$loader,
+                    };
+                }
+            }
+
+            let errorPage: FileRoute | undefined;
+            const layouts: RoutePageEntry['layouts'] = [];
+            for (let i = segments.length; i > (routePath === '/' ? 0 : -1); i--) {
+                const path = '/' + segments.slice(0, i).join('/');
+                if (!errorPage) {
+                    errorPage = allErrorPages.find(route => {
+                        const routePath = '/' + route.path.split('/').slice(2).map(parseSegment).join('/');
+                        return routePath === path;
+                    });
+                }
+                const layout = allLayouts.find(route => {
+                    const routePath = '/' + route.path.split('/').slice(2).map(parseSegment).join('/');
+                    return routePath === path;
+                });
+                if (layout) {
+                    layouts.unshift({
+                        manifestPath: layout.path,
+                        layout: layout.$component,
+                        loader: layout.$loader,
+                        generateMeta: layout.$generateMeta,
+                    });
+                }
+            }
+
+            entries[routePath] = {
+                type: 'page',
+                mainPage: {
+                    manifestPath: fileRoute.path,
+                    page: fileRoute.$component,
+                    loader: fileRoute.$loader,
+                    generateMeta: fileRoute.$generateMeta,
+                    options: fileRoute.$options,
+                },
+                loadingPage: loadingPage ? {
+                    page: loadingPage.$component,
+                    generateMeta: loadingPage.$generateMeta,
+                    manifestPath: loadingPage.path,
+                } : undefined,
+                errorPage: errorPage ? {
+                    page: errorPage.$component,
+                    generateMeta: errorPage.$generateMeta,
+                    manifestPath: errorPage.path,
+                } : undefined,
+                notFoundPage: routePath === '/' && notFoundPage ? {
+                    page: notFoundPage.$component,
+                    generateMeta: notFoundPage.$generateMeta,
+                    manifestPath: notFoundPage.path,
+                } : undefined,
+                layouts: layouts,
+                groups: groups,
+            };
+        } else if (isRouteFile(src)) {
+            entries[routePath] = {
+                type: 'route',
+                handler: fileRoute.$handler,
+                manifestPath: fileRoute.path,
+            };
+        }
+    }
+
     return entries;
 };
 
@@ -199,17 +215,21 @@ const extractRouteParams = (route: string, url: string) => {
     const routeSegments = route.split('/').filter(Boolean);
     const urlSegments = url.split('/').filter(Boolean);
 
-    if (routeSegments.length !== urlSegments.length) return null;
-
     const params = {};
     let matched = true;
 
     for (let i = 0; i < routeSegments.length; i++) {
         const routeSeg = routeSegments[i];
         const urlSeg = urlSegments[i];
-
         const isDynamic = routeSeg.startsWith('[') && routeSeg.endsWith(']');
         if (isDynamic) {
+            if (routeSeg.includes('...')) {
+                // Catch-all parameter
+                const isCatchAll = routeSeg.startsWith('[[') && routeSeg.endsWith(']]');
+                const paramName = routeSeg.slice(isCatchAll ? 5 : 4, isCatchAll ? -2 : -1);
+                params[paramName] = urlSegments.slice(i);
+                break; // No more segments to match
+            }
             const paramName = routeSeg.slice(1, -1);
             params[paramName] = urlSeg;
         } else if (routeSeg !== urlSeg) {
@@ -289,11 +309,36 @@ const render = async (
     entry: RoutePageEntry,
     routeParams: Record<string, string>,
     searchParams: Record<string, string>,
-    req: Request
+    req: Request,
 ) => {
+    const url = req.url || '/';
+    const cachedEntry = getCache<{
+        rendered: string;
+        documentMeta: Meta;
+        documentAssets: any[];
+    }>(url);
+
+    if (cachedEntry && toRender === 'main') {
+        return {
+            rendered: cachedEntry.rendered,
+            documentMeta: cachedEntry.documentMeta,
+            documentAssets: cachedEntry.documentAssets,
+        };
+    }
+
+    let cachingOptions: {
+        ttl: number;
+    } | undefined = undefined;
     let meta: Meta = {};
+    const clientManifest = getManifest('client');
+    const assets = [];
     const compose = entry.layouts.reduceRight(
         (children, layout, index) => async () => {
+            const moduleSrc = layout.layout.src.replace('pick=default', '');
+            const moduleAssets = await clientManifest.inputs[moduleSrc].assets();
+            for (const asset of moduleAssets) {
+                assets.push(asset);
+            }
             const { default: layoutModule } = await layout.layout.import();
             const { loader: layoutLoader } = layout.loader ? await layout.loader.import() : { loader: null };
             const { generateMeta: generateMetaPage } = layout.generateMeta ? await layout.generateMeta.import() : { generateMeta: null };
@@ -308,29 +353,34 @@ const render = async (
                 }
             }
             if (layoutLoader) {
-                const result = await layoutLoader(req);
+                const result = await layoutLoader.loader(req);
                 data = result.data || {};
             }
-            let slots: Record<string, any> = {};
+            const slots: Record<string, any> = {};
+            const slotPromises: any[] = [children()];
             if (index === entry.layouts.length - 1) {
                 // last layout, we can render slots
                 const groups = entry.groups || {};
                 for (const [groupName, group] of Object.entries(groups)) {
-                    const { default: groupPage } = await group.page.import();
-                    const { loader: groupLoader } = group.loader ? await group.loader.import() : { loader: null };
-                    let data = {};
-                    if (groupLoader) {
-                        const result = await groupLoader(req);
-                        data = result.data || {};
-                    }
-                    slots[groupName.replace('@', '')] = () => groupPage({
-                        routeParams,
-                        searchParams,
-                        loaderData: data
-                    });
+                    slotPromises.push(
+                        (async () => {
+                            const { default: groupPage } = await group.page.import();
+                            const { loader: groupLoader } = group.loader ? await group.loader.import() : { loader: null };
+                            let data = {};
+                            if (groupLoader) {
+                                const result = await groupLoader.loader(req);
+                                data = result.data || {};
+                            }
+                            slots[groupName.replace('@', '')] = () => groupPage({
+                                routeParams,
+                                searchParams,
+                                loaderData: data
+                            });
+                        })()
+                    );
                 }
             }
-            const childrenRendered = await children();
+            const [childrenRendered] = await Promise.all(slotPromises);
             return () => layoutModule({
                 children: childrenRendered,
                 routeParams,
@@ -347,12 +397,21 @@ const render = async (
                     : toRender === 'not-found'
                         ? entry.notFoundPage
                         : entry.mainPage;
+            const moduleSrc = pageToRender.page.src.replace('pick=default', '');
+            const moduleAssets = await clientManifest.inputs[moduleSrc].assets();
+            for (const asset of moduleAssets) {
+                assets.push(asset);
+            }
             const { default: page } = await pageToRender.page.import();
             const { loader: pageLoader } = pageToRender.loader ? await pageToRender.loader.import() : { loader: null };
             const { generateMeta } = pageToRender.generateMeta ? await pageToRender.generateMeta.import() : { generateMeta: null };
+            const { options } = pageToRender.options ? await pageToRender.options.import() : { options: {} };
+            if (options?.cache) {
+                cachingOptions = options.cache;
+            }
             let data = {};
             if (pageLoader) {
-                const result = await pageLoader(req);
+                const result = await pageLoader.loader(req);
                 data = result.data || {};
             }
             if (generateMeta) {
@@ -374,15 +433,29 @@ const render = async (
 
     const composed = await compose();
     const rendered = await renderToString(() => composed());
+    
+    if (cachingOptions && toRender === 'main') {
+        setCache(url, {
+            rendered: rendered,
+            documentMeta: meta,
+            documentAssets: assets,
+        }, cachingOptions.ttl);
+    }
+
     return {
         rendered: rendered,
-        documentMeta: meta
+        documentMeta: meta,
+        documentAssets: assets,
     };
 };
 
 let routeManifest: RouteManifest = {};
 
 const handler = eventHandler(async (event) => {
+	if (event.node.req.url.includes('_server')) {
+		return handleServerAction(event);
+	}
+
     const clientManifest = getManifest('client');
 
     if (!routeManifest || Object.keys(routeManifest).length === 0) {
@@ -406,18 +479,26 @@ const handler = eventHandler(async (event) => {
         }
 
         const matched = Object.entries(routeManifest).find(([path, entry]) => {
-            const pattern = path.replace(/:[^/]+/g, '[^/]+').replace(/\*$/, '.*');
+            const pattern = path
+                .replace(/:\[\*[^/\]]+\]/g, '?(.*)?')  // [[...slug]] -> (.*)?
+                .replace(/:\*[^/]*/g, '.*')           // :*slug or :* -> .*
+                .replace(/:[^/]+/g, '[^/]+');        // :post -> [^/]+
+
             const re = new RegExp(`^${pattern}$`);
             return re.test(pathnamePart);
         })?.[1] as RouteEntry;
 
-        const routePath = matched ? (matched as RoutePageEntry).mainPage.manifestPath.split('/').slice(2).join('/') : '/';
+        const routePath = matched && matched.type === 'route' 
+            ? matched.manifestPath.split('/').slice(2).join('/') 
+            : matched && matched.type === 'page' 
+                ? (matched as RoutePageEntry).mainPage.manifestPath.split('/').slice(2).join('/') 
+                : '/';
 
         const routeParams = extractRouteParams(routePath, pathnamePart);
         if (routeParams) {
             Object.assign(params, routeParams.params);
         }
-        
+
         if (matched && matched.type === 'route') {
             const routeModule = await matched.handler.import();
             const reqMethod = req.method?.toUpperCase();
@@ -460,20 +541,6 @@ const handler = eventHandler(async (event) => {
                 }
             };
             const assets = await clientManifest.inputs[clientManifest.handler].assets();
-            const assetsHtml = assets.map((asset) => {
-                const attributeString = Object.entries(asset.attrs)
-                    .map(([key, value]) => `${key}="${value}"`)
-                    .join(' ');
-                if (asset.tag === 'script') {
-                    return `<script ${attributeString}></script>`;
-                }
-                if (asset.tag === 'link') {
-                    return `<link ${attributeString}>`;
-                }
-                if (asset.tag === 'style') {
-                    return `<style ${attributeString}>${asset.children || ''}</style>`;
-                }
-            }).join('\n');
             const manifestHtml = `<script>window.manifest=${JSON.stringify(await clientManifest.json())}</script>`;
             let clientHydrationScript;
 
@@ -483,13 +550,16 @@ const handler = eventHandler(async (event) => {
                 if (!matched) {
                     try {
                         const notFoundPage = routeManifest['/'] as RoutePageEntry;
-                        const { rendered, documentMeta } = await render(
+                        const { rendered, documentMeta, documentAssets } = await render(
                             'not-found',
                             notFoundPage,
                             {},
                             {},
                             req as unknown as Request
                         );
+                        for (const asset of documentAssets) {
+                            assets.push(asset);
+                        }
                         clientHydrationScript = `
                             <script type="module">
                             import main from '${clientManifest.inputs[clientManifest.handler].output.path}';
@@ -509,21 +579,36 @@ const handler = eventHandler(async (event) => {
                     }
                 } else {
                     try {
-                        const { rendered, documentMeta } = await render(
+                        const { rendered, documentMeta, documentAssets } = await render(
                             'loading',
                             matched as RoutePageEntry,
                             params,
                             searchParams,
                             req as unknown as Request
                         );
+                        const assetsHtml = assets.concat(documentAssets).map((asset) => {
+                            const attributeString = Object.entries(asset.attrs)
+                                .map(([key, value]) => `${key}="${value}"`)
+                                .join(' ');
+                            if (asset.tag === 'script') {
+                                return `<script ${attributeString}></script>`;
+                            }
+                            if (asset.tag === 'link') {
+                                return `<link ${attributeString}>`;
+                            }
+                            if (asset.tag === 'style') {
+                                return `<style ${attributeString}>${asset.children || ''}</style>`;
+                            }
+                        }).join('\n');
                         const html = `
                             <!doctype html>
                             <html lang="en">
                                 <head>
                                     ${generateHtmlHead({
-                                    ...meta,
-                                    ...documentMeta,
-                                })}
+                                        ...meta,
+                                        ...documentMeta,
+                                    })}
+                                    ${assetsHtml}
                                     ${generateHydrationScript()}
                                 </head>
                                 <noscript>
@@ -543,14 +628,17 @@ const handler = eventHandler(async (event) => {
                     } catch (e) {
                         // skip
                     }
-                    
-                    const { rendered, documentMeta } = await render(
+
+                    const { rendered, documentMeta, documentAssets } = await render(
                         'main',
                         matched as RoutePageEntry,
                         params,
                         searchParams,
                         req as unknown as Request
                     );
+                    for (const asset of documentAssets) {
+                        assets.push(asset);
+                    }
                     clientHydrationScript = `
                         <script type="module">
                         import main from '${clientManifest.inputs[clientManifest.handler].output.path}';
@@ -564,18 +652,24 @@ const handler = eventHandler(async (event) => {
                     };
                 }
             } catch (e1) {
+                if (e1 instanceof RedirectError) {
+                    throw e1;
+                }
                 try {
                     const errorPage = (matched as RoutePageEntry).errorPage;
                     if (!errorPage) {
                         throw e1;
                     }
-                    const { rendered, documentMeta } = await render(
+                    const { rendered, documentMeta, documentAssets } = await render(
                         'error',
                         matched as RoutePageEntry,
                         params,
                         searchParams,
                         req as unknown as Request
                     );
+                    for (const asset of documentAssets) {
+                        assets.push(asset);
+                    }
                     clientHydrationScript = `
                         <script type="module">
                         import main from '${clientManifest.inputs[clientManifest.handler].output.path}';
@@ -594,11 +688,23 @@ const handler = eventHandler(async (event) => {
             }
 
             if (loading) {
+                const assetsHtml = assets.map((asset) => {
+                    const attributeString = Object.entries(asset.attrs)
+                        .map(([key, value]) => `${key}="${value}"`)
+                        .join(' ');
+                    if (asset.tag === 'link') {
+                        return `<link ${attributeString}>`;
+                    }
+                    if (asset.tag === 'style') {
+                        return `<style ${attributeString}>${asset.children || ''}</style>`;
+                    }
+                    return '';
+                }).join('\n');
                 res.write(`
                     <script>
                     const head = document.querySelector('head');
                     const scripts = Array.from(head.querySelectorAll('script'));
-                    head.innerHTML = \`${generateHtmlHead(meta)}\`;
+                    head.innerHTML = \`${generateHtmlHead(meta) + assetsHtml}\`;
                     scripts.forEach(script => {
                         head.appendChild(script);
                     });
@@ -610,6 +716,20 @@ const handler = eventHandler(async (event) => {
                 res.write(manifestHtml);
                 return res.end(clientHydrationScript);
             } else {
+                const assetsHtml = assets.map((asset) => {
+                    const attributeString = Object.entries(asset.attrs)
+                        .map(([key, value]) => `${key}="${value}"`)
+                        .join(' ');
+                    if (asset.tag === 'script') {
+                        return `<script ${attributeString}></script>`;
+                    }
+                    if (asset.tag === 'link') {
+                        return `<link ${attributeString}>`;
+                    }
+                    if (asset.tag === 'style') {
+                        return `<style ${attributeString}>${asset.children || ''}</style>`;
+                    }
+                }).join('\n');
                 const transformHtml = template
                     .replace(`<!--app-head-->`, generateHtmlHead(meta) + '\n' + assetsHtml + '\n' + generateHydrationScript())
                     .replace(`<!--app-body-->`, (html ?? '') + manifestHtml + clientHydrationScript);
@@ -617,6 +737,11 @@ const handler = eventHandler(async (event) => {
             }
         }
     } catch (e) {
+        if (e instanceof RedirectError) {
+            res.statusCode = 302;
+            res.setHeader('Location', e.message);
+            return res.end('Redirecting...');
+        }
         console.error(e);
         res.statusCode = 500;
         return res.end('Internal Server Error');

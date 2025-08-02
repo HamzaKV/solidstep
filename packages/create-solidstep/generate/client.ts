@@ -8,31 +8,6 @@ const importModule = async (routeModule: any) => {
     if ((import.meta as any).env.DEV) {
         return await manifest.inputs[routeModule.src].import();
     }
-    const assets = await manifest.inputs?.[routeModule.src].assets();
-    if (typeof window !== 'undefined' && assets && assets.length > 0) {
-        const styles = assets.filter(
-            (asset) => asset.tag === 'style' || asset.attrs.rel === 'stylesheet',
-        );
-        for (const asset of styles) {
-            const attributeString = Object.entries(asset.attrs)
-                .map(([key, value]) => `${key}="${value}"`)
-                .join(' ');
-            if (asset.tag === 'style') {
-                document.head.insertAdjacentHTML(
-                    'beforeend',
-                    `<style ${attributeString}>${asset.children}</style>`,
-                );
-            } else {
-                const link = document.createElement('link');
-                link.rel = 'stylesheet';
-                link.href = asset.attrs.href;
-                Object.entries(asset.attrs).forEach(([key, value]) => {
-                    link.setAttribute(key, value);
-                });
-                document.head.appendChild(link);
-            }
-        }
-    }
     return await routeModule.import();
 };
 
@@ -52,8 +27,8 @@ export const main = async (
     if (segments.at(0)) {
         segments.unshift('');
     }
-    let layouts: any[] = [];
-    let groups: Record<string, any> = {};
+    const layouts: any[] = [];
+    const groups: Record<string, any> = {};
     for (let i = 0; i < segments.length; i++) {
         const path = '/' + segments.slice(1, segments.length - i).join('/');
         const layoutModule = fileRoutes.find((route) => {
@@ -77,18 +52,23 @@ export const main = async (
     const compose = layouts.reduceRight(
         (children, layout, index) => async () => {
             const { default: layoutModule } = await importModule(layout.$component);
-            let slots: Record<string, any> = {};
+            const slots: Record<string, any> = {};
+            const slotPromises: Promise<any>[] = [children()];
             if (index === layouts.length - 1) {
                 // last layout, we can render slots
                 for (const [groupName, group] of Object.entries(groups)) {
-                    const { default: groupPage } = await importModule(group.$component);
-                    slots[groupName] = () => groupPage({
-                        routeParams,
-                        searchParams,
-                    });
+                    slotPromises.push(
+                        (async () => {
+                            const { default: groupPage } = await importModule(group.$component);
+                            slots[groupName] = () => groupPage({
+                                routeParams,
+                                searchParams,
+                            });
+                        })()
+                    );
                 }
             }
-            const childrenRendered = await children();
+            const [childrenRendered] = await Promise.all(slotPromises);
             return () => layoutModule({
                 children: childrenRendered,
                 routeParams,

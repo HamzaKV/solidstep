@@ -10,6 +10,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export default createApp({
     server: {
+        experimental: {
+            asyncContext: true,
+        },
     },
     routers: [
         {
@@ -17,28 +20,6 @@ export default createApp({
             type: 'static',
             dir: './public',
             base: '/',
-        },
-        {
-            name: 'ssr',
-            type: 'http',
-            base: '/',
-            handler: './server.ts',
-            target: 'server',
-            plugins: () => [solid({ ssr: true })],
-            link: {
-				client: 'client',
-			},
-            middleware: './app/middleware.ts',
-            routes: (router, app) => {
-                return new Router(
-                    {
-                        dir: path.join(__dirname, 'app'),
-                        extensions: ['jsx', 'js', 'tsx', 'ts'],
-                    },
-                    router,
-                    app
-                );
-            }
         },
         {
             name: 'client',
@@ -58,6 +39,31 @@ export default createApp({
                 );
             }
         },
-        serverFunctions.router(),
+        {
+            name: 'ssr',
+            type: 'http',
+            base: '/',
+            handler: './server.ts',
+            target: 'server',
+            plugins: () => [
+                serverFunctions.server(),
+                solid({ ssr: true })
+            ],
+            // link: {
+			// 	client: 'client',
+			// },
+            middleware: './app/middleware.ts',
+            routes: (router, app) => {
+                return new Router(
+                    {
+                        dir: path.join(__dirname, 'app'),
+                        extensions: ['jsx', 'js', 'tsx', 'ts'],
+                    },
+                    router,
+                    app
+                );
+            }
+        },
+        // serverFunctions.router(),
     ],
 });
