@@ -1,6 +1,6 @@
 {
     "name": "@varlabs/create-solidstep",
-    "version": "0.1.3",
+    "version": "0.1.4",
     "description": "Next Step SolidJS CLI for building web applications.",
     "type": "module",
     "author": "HamzaKV <hamzakv333@gmail.com>",
