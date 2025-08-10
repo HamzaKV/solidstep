@@ -8,7 +8,7 @@ type LoaderOptions = {
 
 export const defineLoader = <T>(loader: LoaderFunction<T>, options?: LoaderOptions) => {
     if (isServer) {
-        return async (request?: Request) => {
+        const fn = async (request?: Request) => {
             try {
                 const loaderData = await loader(request);
                 return {
@@ -20,7 +20,16 @@ export const defineLoader = <T>(loader: LoaderFunction<T>, options?: LoaderOptio
                 throw error; // Re-throw to allow error handling upstream
             }
         };
+
+        return {
+            loader: fn,
+            options: options || {},
+        };
     }
 
     return null; // Return null if not on the server
 };
+
+export type LoaderDataFromFunction<T> = T extends { loader: infer L extends (...args: any) => any }
+    ? Awaited<ReturnType<T['loader']>> extends { data: infer D } ? D : never
+    : never;

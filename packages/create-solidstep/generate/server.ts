@@ -125,7 +125,7 @@ const createRouteManifest = async () => {
         const routePath = '/' + segments.filter(s => !(s.startsWith('('))).join('/');
         const regex = /\?(?:pick=.*)*/g;
         const src = fileRoute.$handler.src.replace(regex, '');
-        
+
         if (isPageFile(src)) {
             const loadingPage = allLoadingPages.find(route => {
                 const path = '/' + route.path.split('/').slice(2).map(parseSegment).join('/');
@@ -136,7 +136,7 @@ const createRouteManifest = async () => {
                 const parentPath = route.parent ? '/' + route.parent.split('/').slice(2).map(parseSegment).join('/') : '';
                 return parentPath === routePath;
             });
-            const groups: RoutePageEntry['groups'] = {};
+            let groups: RoutePageEntry['groups'] = {};
             if (matchedGroups && matchedGroups.length > 0) {
                 for (const group of matchedGroups) {
                     const groupName = group.path.split('/').filter(s => !(s.startsWith('('))).map(parseSegment).at(-1);
@@ -149,7 +149,7 @@ const createRouteManifest = async () => {
             }
 
             let errorPage: FileRoute | undefined;
-            const layouts: RoutePageEntry['layouts'] = [];
+            let layouts: RoutePageEntry['layouts'] = [];
             for (let i = segments.length; i > (routePath === '/' ? 0 : -1); i--) {
                 const path = '/' + segments.slice(0, i).join('/');
                 if (!errorPage) {
@@ -212,7 +212,7 @@ const createRouteManifest = async () => {
 };
 
 const extractRouteParams = (route: string, url: string) => {
-    const routeSegments = route.split('/').filter(Boolean);
+    const routeSegments = route.split('/').filter(s => !(s.startsWith('('))).filter(Boolean);
     const urlSegments = url.split('/').filter(Boolean);
 
     const params = {};

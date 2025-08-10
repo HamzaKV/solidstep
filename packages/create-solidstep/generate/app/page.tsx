@@ -1,4 +1,4 @@
-import { defineLoader } from '../utils/loader';
+import { defineLoader, type LoaderDataFromFunction } from '../utils/loader';
 import { NoHydration } from 'solid-js/web';
 
 export const loader = defineLoader(async () => {
@@ -19,7 +19,7 @@ export const generateMeta = () => ({
     },
 });
 
-type LoaderData = Awaited<ReturnType<Exclude<typeof loader, null>>>['data'];
+type LoaderData = LoaderDataFromFunction<typeof loader>;
 
 const Page = ({
     loaderData

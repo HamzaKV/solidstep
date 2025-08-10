@@ -29,7 +29,7 @@ export default createApp({
             plugins: () => [serverFunctions.client(), solid({ ssr: true })],
             base: '/_build',
             routes: (router, app) => {
-                return new ServerRouter(
+                return new ClientRouter(
                     {
                         dir: path.join(__dirname, 'app'),
                         extensions: ['jsx', 'js', 'tsx', 'ts'],
@@ -54,7 +54,7 @@ export default createApp({
 			// },
             middleware: './app/middleware.ts',
             routes: (router, app) => {
-                return new ClientRouter(
+                return new ServerRouter(
                     {
                         dir: path.join(__dirname, 'app'),
                         extensions: ['jsx', 'js', 'tsx', 'ts'],
