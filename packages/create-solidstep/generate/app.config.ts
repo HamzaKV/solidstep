@@ -1,7 +1,7 @@
 import { createApp } from 'vinxi';
 import solid from 'vite-plugin-solid';
 import { serverFunctions } from '@vinxi/server-functions/plugin';
-import { ServerRouter. ClientRouter } from './utils/router';
+import { ServerRouter, ClientRouter } from './utils/router';
 import path from 'path';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
