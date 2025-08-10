@@ -1,4 +1,4 @@
-import { eventHandler } from 'vinxi/http';
+import { eventHandler, toWebRequest } from 'vinxi/http';
 import { getManifest } from 'vinxi/manifest';
 import { generateHydrationScript, renderToString } from 'solid-js/web';
 import type { Meta } from './utils/types';
