@@ -1,5 +1,5 @@
 import type { Component, JSX } from 'solid-js';
-import 'globals.css';
+import './globals.css';
 
 export const generateMeta = () => ({
     'title': {
