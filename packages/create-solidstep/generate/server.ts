@@ -316,6 +316,7 @@ const render = async (
         rendered: string;
         documentMeta: Meta;
         documentAssets: any[];
+        loaderData: Record<string, any>;
     }>(url);
 
     if (cachedEntry && toRender === 'main') {
@@ -323,6 +324,7 @@ const render = async (
             rendered: cachedEntry.rendered,
             documentMeta: cachedEntry.documentMeta,
             documentAssets: cachedEntry.documentAssets,
+            loaderData: cachedEntry.loaderData,
         };
     }
 
@@ -330,11 +332,12 @@ const render = async (
         ttl: number;
     } | undefined = undefined;
     let meta: Meta = {};
+    let loaderData: Record<string, any> = {};
     const clientManifest = getManifest('client');
     const assets = [];
     const compose = entry.layouts.reduceRight(
         (children, layout, index) => async () => {
-            const moduleSrc = layout.layout.src.replace('pick=default', '');
+            const moduleSrc = `${layout.layout.src}&pick=$css`;
             const moduleAssets = await clientManifest.inputs[moduleSrc].assets();
             for (const asset of moduleAssets) {
                 assets.push(asset);
@@ -355,6 +358,7 @@ const render = async (
             if (layoutLoader) {
                 const result = await layoutLoader.loader(req);
                 data = result.data || {};
+                loaderData[layout.manifestPath] = data;
             }
             const slots: Record<string, any> = {};
             const slotPromises: any[] = [children()];
@@ -364,12 +368,18 @@ const render = async (
                 for (const [groupName, group] of Object.entries(groups)) {
                     slotPromises.push(
                         (async () => {
+                            const moduleSrc = `${group.page.src}&pick=$css`;
+                            const moduleAssets = await clientManifest.inputs[moduleSrc].assets();
+                            for (const asset of moduleAssets) {
+                                assets.push(asset);
+                            }
                             const { default: groupPage } = await group.page.import();
                             const { loader: groupLoader } = group.loader ? await group.loader.import() : { loader: null };
                             let data = {};
                             if (groupLoader) {
                                 const result = await groupLoader.loader(req);
                                 data = result.data || {};
+                                loaderData[group.manifestPath] = data;
                             }
                             slots[groupName.replace('@', '')] = () => groupPage({
                                 routeParams,
@@ -397,7 +407,7 @@ const render = async (
                     : toRender === 'not-found'
                         ? entry.notFoundPage
                         : entry.mainPage;
-            const moduleSrc = pageToRender.page.src.replace('pick=default', '');
+            const moduleSrc = `${pageToRender.page.src}&pick=$css`;
             const moduleAssets = await clientManifest.inputs[moduleSrc].assets();
             for (const asset of moduleAssets) {
                 assets.push(asset);
@@ -413,6 +423,7 @@ const render = async (
             if (pageLoader) {
                 const result = await pageLoader.loader(req);
                 data = result.data || {};
+                loaderData[pageToRender.manifestPath] = data;
             }
             if (generateMeta) {
                 const metaData = await generateMeta(req);
@@ -433,12 +444,13 @@ const render = async (
 
     const composed = await compose();
     const rendered = await renderToString(() => composed());
-    
+
     if (cachingOptions && toRender === 'main') {
         setCache(url, {
             rendered: rendered,
             documentMeta: meta,
             documentAssets: assets,
+            loaderData: loaderData,
         }, cachingOptions.ttl);
     }
 
@@ -446,26 +458,27 @@ const render = async (
         rendered: rendered,
         documentMeta: meta,
         documentAssets: assets,
+        loaderData: loaderData,
     };
 };
 
 let routeManifest: RouteManifest = {};
 
 const handler = eventHandler(async (event) => {
-	if (event.node.req.url.includes('_server')) {
-		return handleServerAction(event);
-	}
-
-    const clientManifest = getManifest('client');
-
-    if (!routeManifest || Object.keys(routeManifest).length === 0) {
-        routeManifest = await createRouteManifest();
-    }
-
     const req = event.node.req;
     const res = event.node.res;
 
     try {
+        if (req.url.includes('_server')) {
+            return handleServerAction(event);
+        }
+
+        const clientManifest = getManifest('client');
+
+        if (!routeManifest || Object.keys(routeManifest).length === 0) {
+            routeManifest = await createRouteManifest();
+        }
+
         const url = req.url || '/';
         // extract route params and search params
         const params: Record<string, string> = {};
@@ -488,10 +501,10 @@ const handler = eventHandler(async (event) => {
             return re.test(pathnamePart);
         })?.[1] as RouteEntry;
 
-        const routePath = matched && matched.type === 'route' 
-            ? matched.manifestPath.split('/').slice(2).join('/') 
-            : matched && matched.type === 'page' 
-                ? (matched as RoutePageEntry).mainPage.manifestPath.split('/').slice(2).join('/') 
+        const routePath = matched && matched.type === 'route'
+            ? matched.manifestPath.split('/').slice(2).join('/')
+            : matched && matched.type === 'page'
+                ? (matched as RoutePageEntry).mainPage.manifestPath.split('/').slice(2).join('/')
                 : '/';
 
         const routeParams = extractRouteParams(routePath, pathnamePart);
@@ -550,12 +563,17 @@ const handler = eventHandler(async (event) => {
                 if (!matched) {
                     try {
                         const notFoundPage = routeManifest['/'] as RoutePageEntry;
-                        const { rendered, documentMeta, documentAssets } = await render(
+                        const { 
+                            rendered, 
+                            documentMeta, 
+                            documentAssets,
+                            loaderData,
+                        } = await render(
                             'not-found',
                             notFoundPage,
                             {},
                             {},
-                            req as unknown as Request
+                            toWebRequest(event)
                         );
                         for (const asset of documentAssets) {
                             assets.push(asset);
@@ -563,7 +581,7 @@ const handler = eventHandler(async (event) => {
                         clientHydrationScript = `
                             <script type="module">
                             import main from '${clientManifest.inputs[clientManifest.handler].output.path}';
-                            main('/not-found/',${JSON.stringify(params)},${JSON.stringify(searchParams)});
+                            main('/not-found/',${JSON.stringify(params)},${JSON.stringify(searchParams)}, ${JSON.stringify(loaderData)});
                             </script>
                         `;
                         html = rendered;
@@ -579,12 +597,17 @@ const handler = eventHandler(async (event) => {
                     }
                 } else {
                     try {
-                        const { rendered, documentMeta, documentAssets } = await render(
+                        const { 
+                            rendered, 
+                            documentMeta, 
+                            documentAssets,
+                            loaderData,
+                        } = await render(
                             'loading',
                             matched as RoutePageEntry,
                             params,
                             searchParams,
-                            req as unknown as Request
+                            toWebRequest(event)
                         );
                         const assetsHtml = assets.concat(documentAssets).map((asset) => {
                             const attributeString = Object.entries(asset.attrs)
@@ -605,9 +628,9 @@ const handler = eventHandler(async (event) => {
                             <html lang="en">
                                 <head>
                                     ${generateHtmlHead({
-                                        ...meta,
-                                        ...documentMeta,
-                                    })}
+                            ...meta,
+                            ...documentMeta,
+                        })}
                                     ${assetsHtml}
                                     ${generateHydrationScript()}
                                 </head>
@@ -621,7 +644,7 @@ const handler = eventHandler(async (event) => {
                         res.write(`
                         <script type="module" data-hydration="loading">
                             import main from '${clientManifest.inputs[clientManifest.handler].output.path}';
-                            main('${(matched as RoutePageEntry).loadingPage.manifestPath}',${JSON.stringify(params)},${JSON.stringify(searchParams)});
+                            main('${(matched as RoutePageEntry).loadingPage.manifestPath}',${JSON.stringify(params)},${JSON.stringify(searchParams)}, ${JSON.stringify(loaderData)});
                         </script>
                         `);
                         loading = true;
@@ -629,12 +652,17 @@ const handler = eventHandler(async (event) => {
                         // skip
                     }
 
-                    const { rendered, documentMeta, documentAssets } = await render(
+                    const { 
+                        rendered, 
+                        documentMeta, 
+                        documentAssets,
+                        loaderData,
+                    } = await render(
                         'main',
                         matched as RoutePageEntry,
                         params,
                         searchParams,
-                        req as unknown as Request
+                        toWebRequest(event)
                     );
                     for (const asset of documentAssets) {
                         assets.push(asset);
@@ -642,7 +670,7 @@ const handler = eventHandler(async (event) => {
                     clientHydrationScript = `
                         <script type="module">
                         import main from '${clientManifest.inputs[clientManifest.handler].output.path}';
-                        main('${(matched as RoutePageEntry).mainPage.manifestPath}',${JSON.stringify(params)},${JSON.stringify(searchParams)});
+                        main('${(matched as RoutePageEntry).mainPage.manifestPath}',${JSON.stringify(params)},${JSON.stringify(searchParams)}, ${JSON.stringify(loaderData)});
                         </script>
                     `;
                     html = rendered;
@@ -660,12 +688,17 @@ const handler = eventHandler(async (event) => {
                     if (!errorPage) {
                         throw e1;
                     }
-                    const { rendered, documentMeta, documentAssets } = await render(
+                    const { 
+                        rendered, 
+                        documentMeta, 
+                        documentAssets,
+                        loaderData,
+                    } = await render(
                         'error',
                         matched as RoutePageEntry,
                         params,
                         searchParams,
-                        req as unknown as Request
+                        toWebRequest(event)
                     );
                     for (const asset of documentAssets) {
                         assets.push(asset);
@@ -673,7 +706,7 @@ const handler = eventHandler(async (event) => {
                     clientHydrationScript = `
                         <script type="module">
                         import main from '${clientManifest.inputs[clientManifest.handler].output.path}';
-                        main('${errorPage.manifestPath}',${JSON.stringify(params)},${JSON.stringify(searchParams)});
+                        main('${errorPage.manifestPath}',${JSON.stringify(params)},${JSON.stringify(searchParams)}, ${JSON.stringify(loaderData)});
                         </script>
                     `;
                     html = rendered;

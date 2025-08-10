@@ -1,7 +1,7 @@
 import { createApp } from 'vinxi';
 import solid from 'vite-plugin-solid';
 import { serverFunctions } from '@vinxi/server-functions/plugin';
-import { Router } from './utils/router';
+import { ServerRouter. ClientRouter } from './utils/router';
 import path from 'path';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -29,7 +29,7 @@ export default createApp({
             plugins: () => [serverFunctions.client(), solid({ ssr: true })],
             base: '/_build',
             routes: (router, app) => {
-                return new Router(
+                return new ServerRouter(
                     {
                         dir: path.join(__dirname, 'app'),
                         extensions: ['jsx', 'js', 'tsx', 'ts'],
@@ -54,7 +54,7 @@ export default createApp({
 			// },
             middleware: './app/middleware.ts',
             routes: (router, app) => {
-                return new Router(
+                return new ClientRouter(
                     {
                         dir: path.join(__dirname, 'app'),
                         extensions: ['jsx', 'js', 'tsx', 'ts'],

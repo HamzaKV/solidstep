@@ -15,6 +15,7 @@ export const main = async (
     modulePath: string,
     routeParams: Record<string, string> = {},
     searchParams: Record<string, string> = {},
+    loaderDataManifest: Record<string, any> = {}
 ) => {
     // find the route that matches the path
     const pageModule = fileRoutes.find((route) => route.path === modulePath);
@@ -22,21 +23,27 @@ export const main = async (
         console.error(`No route found for path: ${modulePath}`);
         return;
     }
+    const pageLoaderData = loaderDataManifest[modulePath];
 
     const segments = modulePath.split('/').slice(2);
     if (segments.at(0)) {
         segments.unshift('');
     }
     const layouts: any[] = [];
+    const layoutLoaderData: any[] = [];
     const groups: Record<string, any> = {};
     for (let i = 0; i < segments.length; i++) {
         const path = '/' + segments.slice(1, segments.length - i).join('/');
+        const loaderData = loaderDataManifest[`/layout${path}`];
         const layoutModule = fileRoutes.find((route) => {
             const routePath = '/' + route.path.split('/').slice(2).join('/');
             return routePath === path && (route as any).type === 'layout';
         });
         if (layoutModule) {
             layouts.unshift(layoutModule);
+        }
+        if (loaderData) {
+            layoutLoaderData.unshift(loaderData);
         }
     }
     const groupModules = fileRoutes.filter((route) => {
@@ -52,6 +59,7 @@ export const main = async (
     const compose = layouts.reduceRight(
         (children, layout, index) => async () => {
             const { default: layoutModule } = await importModule(layout.$component);
+            const loaderData = layoutLoaderData[index] || {};
             const slots: Record<string, any> = {};
             const slotPromises: Promise<any>[] = [children()];
             if (index === layouts.length - 1) {
@@ -60,9 +68,11 @@ export const main = async (
                     slotPromises.push(
                         (async () => {
                             const { default: groupPage } = await importModule(group.$component);
+                            const groupLoaderData = loaderDataManifest[group.path] || {};
                             slots[groupName] = () => groupPage({
                                 routeParams,
                                 searchParams,
+                                loaderData: groupLoaderData,
                             });
                         })()
                     );
@@ -74,6 +84,7 @@ export const main = async (
                 routeParams,
                 searchParams,
                 slots: slots,
+                loaderData,
             });
         },
         async () => {
@@ -81,6 +92,7 @@ export const main = async (
             return () => page({
                 routeParams,
                 searchParams,
+                loaderData: pageLoaderData || {},
             });
         }
     );
