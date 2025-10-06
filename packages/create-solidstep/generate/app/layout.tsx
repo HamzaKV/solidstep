@@ -1,7 +1,7 @@
 import type { Component, JSX } from 'solid-js';
 import './globals.css';
 
-export const generateMeta = () => ({
+export const generateMeta = ({ cspNonce }) => ({
     'title': {
         type: 'title',
         attributes: {},

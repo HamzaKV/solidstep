@@ -33,10 +33,10 @@ export const main = async (
     const layoutLoaderData: any[] = [];
     const groups: Record<string, any> = {};
     for (let i = 0; i < segments.length; i++) {
-        const path = '/' + segments.slice(1, segments.length - i).join('/');
+        const path = `/${segments.slice(1, segments.length - i).join('/')}`;
         const loaderData = loaderDataManifest[`/layout${path}`];
         const layoutModule = fileRoutes.find((route) => {
-            const routePath = '/' + route.path.split('/').slice(2).join('/');
+            const routePath = `/${route.path.split('/').slice(2).join('/')}`;
             return routePath === path && (route as any).type === 'layout';
         });
         if (layoutModule) {

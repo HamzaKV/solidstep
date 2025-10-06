@@ -1,7 +1,8 @@
 import { defineMiddleware } from 'vinxi/http';
-import { csp } from '../utils/csp';
+import { cspNonce as csp } from '../utils/csp';
 import { cors } from '../utils/cors';
 import { csrf } from '../utils/csrf';
+import { randomBytes } from 'node:crypto';
 
 const trustedOrigins = ['https://example.com', 'https://another-example.com'];
 
@@ -10,11 +11,18 @@ const csrfMiddleware = csrf(trustedOrigins);
 
 const middleware = defineMiddleware({
     onRequest: async (event) => {
-        event.node.res.setHeader('Content-Security-Policy', csp);
+        const nonce = randomBytes(16).toString('base64');
+
+        (event as any).locals = {
+            cspNonce: nonce,
+        };
+
+        event.node.res.setHeader('Content-Security-Policy', csp(nonce));
         event.node.res.setHeader('Vary', 'Origin, Access-Control-Request-Method');
         
         const origin = event.node.req.headers.origin || '';
-        const requestUrl = new URL(event.node.req.url, `http://${event.node.req.headers.host || 'localhost'}`);
+        const protocol = origin.startsWith('https') ? 'https' : 'http';
+        const requestUrl = new URL(event.node.req.url, `${protocol}://${event.node.req.headers.host || 'localhost'}`);
 
         const csrfResult = csrfMiddleware(
             event.node.req.method,

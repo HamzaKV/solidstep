@@ -19,7 +19,7 @@ export class ServerRouter extends BaseFileSystemRouter {
     toRoute(filePath: string) {
         const path = this.toPath(filePath);
 
-        if ((/route\.(js|ts)$/).test(filePath)) {
+        if ((/\/route\.(js|ts)$/).test(filePath)) {
             return {
                 type: 'route',
                 path: '/route' + path,
@@ -58,7 +58,7 @@ export class ServerRouter extends BaseFileSystemRouter {
             };
         }
 
-        if ((/page\.(jsx|js|tsx|ts)$/).test(filePath)) {
+        if ((/\/page\.(jsx|js|tsx|ts)$/).test(filePath)) {
             return {
                 type: 'route',
                 path: '/route' + path,
@@ -85,7 +85,7 @@ export class ServerRouter extends BaseFileSystemRouter {
             };
         }
 
-        if ((/layout\.(jsx|js|tsx|ts)$/).test(filePath)) {
+        if ((/\/layout\.(jsx|js|tsx|ts)$/).test(filePath)) {
             return {
                 type: 'layout',
                 path: '/layout' + path,
@@ -112,7 +112,7 @@ export class ServerRouter extends BaseFileSystemRouter {
             };
         }
 
-        if ((/error\.(jsx|js|tsx|ts)$/).test(filePath)) {
+        if ((/\/error\.(jsx|js|tsx|ts)$/).test(filePath)) {
             return {
                 type: 'error',
                 path: '/error' + path,
@@ -135,7 +135,7 @@ export class ServerRouter extends BaseFileSystemRouter {
             };
         }
 
-        if ((/loading\.(jsx|js|tsx|ts)$/).test(filePath)) {
+        if ((/\/loading\.(jsx|js|tsx|ts)$/).test(filePath)) {
             return {
                 type: 'loading',
                 path: '/loading' + path,
@@ -158,7 +158,7 @@ export class ServerRouter extends BaseFileSystemRouter {
             };
         }
 
-        if ((/not-found\.(jsx|js|tsx|ts)$/).test(filePath) && path === '/') {
+        if ((/\/not-found\.(jsx|js|tsx|ts)$/).test(filePath) && path === '/') {
             return {
                 type: 'not-found',
                 path: '/not-found' + path,
@@ -214,7 +214,7 @@ export class ClientRouter extends BaseFileSystemRouter {
             };
         }
 
-        if ((/page\.(jsx|js|tsx|ts)$/).test(filePath)) {
+        if ((/\/page\.(jsx|js|tsx|ts)$/).test(filePath)) {
             return {
                 type: 'route',
                 path: '/route' + path,
@@ -225,7 +225,7 @@ export class ClientRouter extends BaseFileSystemRouter {
             };
         }
 
-        if ((/layout\.(jsx|js|tsx|ts)$/).test(filePath)) {
+        if ((/\/layout\.(jsx|js|tsx|ts)$/).test(filePath)) {
             return {
                 type: 'layout',
                 path: '/layout' + path,
@@ -236,7 +236,7 @@ export class ClientRouter extends BaseFileSystemRouter {
             };
         }
 
-        if ((/error\.(jsx|js|tsx|ts)$/).test(filePath)) {
+        if ((/\/error\.(jsx|js|tsx|ts)$/).test(filePath)) {
             return {
                 type: 'error',
                 path: '/error' + path,
@@ -247,7 +247,7 @@ export class ClientRouter extends BaseFileSystemRouter {
             };
         }
 
-        if ((/loading\.(jsx|js|tsx|ts)$/).test(filePath)) {
+        if ((/\/loading\.(jsx|js|tsx|ts)$/).test(filePath)) {
             return {
                 type: 'loading',
                 path: '/loading' + path,
@@ -258,7 +258,7 @@ export class ClientRouter extends BaseFileSystemRouter {
             };
         }
 
-        if ((/not-found\.(jsx|js|tsx|ts)$/).test(filePath) && path === '/') {
+        if ((/\/not-found\.(jsx|js|tsx|ts)$/).test(filePath) && path === '/') {
             return {
                 type: 'not-found',
                 path: '/not-found' + path,

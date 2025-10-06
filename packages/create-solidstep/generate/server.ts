@@ -6,7 +6,7 @@ import type { ServerResponse, IncomingMessage } from 'node:http';
 import fileRoutes, { type RouteModule } from 'vinxi/routes';
 import { RedirectError } from './utils/redirect';
 import { setCache, getCache } from './utils/cache';
-import { handleServerAction } from '@vinxi/server-functions/server-handler';
+import { handleServerFunction } from './utils/server-action.server';
 
 type Import = {
     src: string;
@@ -125,7 +125,7 @@ const createRouteManifest = async () => {
         const routePath = '/' + segments.filter(s => !(s.startsWith('('))).join('/');
         const regex = /\?(?:pick=.*)*/g;
         const src = fileRoute.$handler.src.replace(regex, '');
-
+        
         if (isPageFile(src)) {
             const loadingPage = allLoadingPages.find(route => {
                 const path = '/' + route.path.split('/').slice(2).map(parseSegment).join('/');
@@ -304,13 +304,21 @@ const sendNodeResponse = async (
     }
 };
 
-const render = async (
+const render = async ({
+    toRender,
+    entry,
+    routeParams,
+    searchParams,
+    req,
+    cspNonce,
+}: {
     toRender: 'main' | 'loading' | 'error' | 'not-found',
     entry: RoutePageEntry,
     routeParams: Record<string, string>,
     searchParams: Record<string, string>,
     req: Request,
-) => {
+    cspNonce?: string,
+}) => {
     const url = req.url || '/';
     const cachedEntry = getCache<{
         rendered: string;
@@ -347,7 +355,10 @@ const render = async (
             const { generateMeta: generateMetaPage } = layout.generateMeta ? await layout.generateMeta.import() : { generateMeta: null };
             let data = {};
             if (generateMetaPage) {
-                const metaData = await generateMetaPage(req);
+                const metaData = await generateMetaPage({
+                    req,
+                    cspNonce,
+                });
                 if (metaData) {
                     meta = {
                         ...meta,
@@ -396,7 +407,10 @@ const render = async (
                 routeParams,
                 searchParams,
                 loaderData: data,
-                slots: slots
+                slots: slots,
+                locals: {
+                    cspNonce: cspNonce,
+                }
             });
         },
         async () => {
@@ -426,7 +440,10 @@ const render = async (
                 loaderData[pageToRender.manifestPath] = data;
             }
             if (generateMeta) {
-                const metaData = await generateMeta(req);
+                const metaData = await generateMeta({
+                    req,
+                    cspNonce,
+                });
                 if (metaData) {
                     meta = {
                         ...meta,
@@ -437,7 +454,10 @@ const render = async (
             return () => page({
                 routeParams,
                 searchParams,
-                loaderData: data
+                loaderData: data,
+                locals: {
+                    cspNonce: cspNonce,
+                }
             });
         }
     );
@@ -464,13 +484,32 @@ const render = async (
 
 let routeManifest: RouteManifest = {};
 
+const hydrationScript = ({
+    nonce,
+}: {
+    nonce?: string;
+}) => {
+    const script = generateHydrationScript();
+    return nonce ? script.replace('<script', `<script nonce="${nonce}"`) : script;
+};
+
+const onStart = async () => {
+    try {
+        routeManifest = await createRouteManifest();
+    } catch (e) {
+        console.error('Error creating route manifest:', e);
+    }
+};
+
+onStart();
+
 const handler = eventHandler(async (event) => {
     const req = event.node.req;
     const res = event.node.res;
 
     try {
         if (req.url.includes('_server')) {
-            return handleServerAction(event);
+            return handleServerFunction(event);
         }
 
         const clientManifest = getManifest('client');
@@ -478,6 +517,8 @@ const handler = eventHandler(async (event) => {
         if (!routeManifest || Object.keys(routeManifest).length === 0) {
             routeManifest = await createRouteManifest();
         }
+
+        const cspNonce = (event as any).locals?.cspNonce as string | undefined;
 
         const url = req.url || '/';
         // extract route params and search params
@@ -518,7 +559,7 @@ const handler = eventHandler(async (event) => {
             if (reqMethod) {
                 const handler = routeModule[reqMethod];
                 if (typeof handler === 'function') {
-                    const result = await handler(req, {
+                    const result = await handler(toWebRequest(event), {
                         params: params,
                         searchParams: searchParams,
                     });
@@ -554,7 +595,8 @@ const handler = eventHandler(async (event) => {
                 }
             };
             const assets = await clientManifest.inputs[clientManifest.handler].assets();
-            const manifestHtml = `<script>window.manifest=${JSON.stringify(await clientManifest.json())}</script>`;
+            const manifestHtml = `<script ${cspNonce ? `nonce="${cspNonce}"` : ''}>window.manifest=${JSON.stringify(await clientManifest.json())}</script>`;
+
             let clientHydrationScript;
 
             res.setHeader('Content-Type', 'text/html');
@@ -568,18 +610,19 @@ const handler = eventHandler(async (event) => {
                             documentMeta, 
                             documentAssets,
                             loaderData,
-                        } = await render(
-                            'not-found',
-                            notFoundPage,
-                            {},
-                            {},
-                            toWebRequest(event)
-                        );
+                        } = await render({
+                            toRender: 'not-found',
+                            entry: notFoundPage,
+                            routeParams: {},
+                            searchParams: {},
+                            req: toWebRequest(event),
+                            cspNonce,
+                        });
                         for (const asset of documentAssets) {
                             assets.push(asset);
                         }
                         clientHydrationScript = `
-                            <script type="module">
+                            <script type="module" ${cspNonce ? `nonce="${cspNonce}"` : ''}>
                             import main from '${clientManifest.inputs[clientManifest.handler].output.path}';
                             main('/not-found/',${JSON.stringify(params)},${JSON.stringify(searchParams)}, ${JSON.stringify(loaderData)});
                             </script>
@@ -602,13 +645,14 @@ const handler = eventHandler(async (event) => {
                             documentMeta, 
                             documentAssets,
                             loaderData,
-                        } = await render(
-                            'loading',
-                            matched as RoutePageEntry,
-                            params,
+                        } = await render({
+                            toRender: 'loading',
+                            entry: matched as RoutePageEntry,
+                            routeParams: params,
                             searchParams,
-                            toWebRequest(event)
-                        );
+                            req: toWebRequest(event),
+                            cspNonce,
+                        });
                         const assetsHtml = assets.concat(documentAssets).map((asset) => {
                             const attributeString = Object.entries(asset.attrs)
                                 .map(([key, value]) => `${key}="${value}"`)
@@ -632,7 +676,7 @@ const handler = eventHandler(async (event) => {
                             ...documentMeta,
                         })}
                                     ${assetsHtml}
-                                    ${generateHydrationScript()}
+                                    ${hydrationScript({ nonce: cspNonce })}
                                 </head>
                                 <noscript>
                                     Please enable JavaScript to view the content.<br/>
@@ -642,7 +686,7 @@ const handler = eventHandler(async (event) => {
                             `;
                         res.write(html);
                         res.write(`
-                        <script type="module" data-hydration="loading">
+                        <script type="module" data-hydration="loading" ${cspNonce ? `nonce="${cspNonce}"` : ''}>
                             import main from '${clientManifest.inputs[clientManifest.handler].output.path}';
                             main('${(matched as RoutePageEntry).loadingPage.manifestPath}',${JSON.stringify(params)},${JSON.stringify(searchParams)}, ${JSON.stringify(loaderData)});
                         </script>
@@ -657,18 +701,19 @@ const handler = eventHandler(async (event) => {
                         documentMeta, 
                         documentAssets,
                         loaderData,
-                    } = await render(
-                        'main',
-                        matched as RoutePageEntry,
-                        params,
+                    } = await render({
+                        toRender: 'main',
+                        entry: matched as RoutePageEntry,
+                        routeParams: params,
                         searchParams,
-                        toWebRequest(event)
-                    );
+                        req: toWebRequest(event),
+                        cspNonce,
+                    });
                     for (const asset of documentAssets) {
                         assets.push(asset);
                     }
                     clientHydrationScript = `
-                        <script type="module">
+                        <script type="module" ${cspNonce ? `nonce="${cspNonce}"` : ''}>
                         import main from '${clientManifest.inputs[clientManifest.handler].output.path}';
                         main('${(matched as RoutePageEntry).mainPage.manifestPath}',${JSON.stringify(params)},${JSON.stringify(searchParams)}, ${JSON.stringify(loaderData)});
                         </script>
@@ -693,18 +738,19 @@ const handler = eventHandler(async (event) => {
                         documentMeta, 
                         documentAssets,
                         loaderData,
-                    } = await render(
-                        'error',
-                        matched as RoutePageEntry,
-                        params,
+                    } = await render({
+                        toRender: 'error',
+                        entry: matched as RoutePageEntry,
+                        routeParams: params,
                         searchParams,
-                        toWebRequest(event)
-                    );
+                        req: toWebRequest(event),
+                        cspNonce,
+                    });
                     for (const asset of documentAssets) {
                         assets.push(asset);
                     }
                     clientHydrationScript = `
-                        <script type="module">
+                        <script type="module" ${cspNonce ? `nonce="${cspNonce}"` : ''}>
                         import main from '${clientManifest.inputs[clientManifest.handler].output.path}';
                         main('${errorPage.manifestPath}',${JSON.stringify(params)},${JSON.stringify(searchParams)}, ${JSON.stringify(loaderData)});
                         </script>
@@ -734,7 +780,7 @@ const handler = eventHandler(async (event) => {
                     return '';
                 }).join('\n');
                 res.write(`
-                    <script>
+                    <script ${cspNonce ? `nonce="${cspNonce}"` : ''}>
                     const head = document.querySelector('head');
                     const scripts = Array.from(head.querySelectorAll('script'));
                     head.innerHTML = \`${generateHtmlHead(meta) + assetsHtml}\`;
@@ -754,7 +800,7 @@ const handler = eventHandler(async (event) => {
                         .map(([key, value]) => `${key}="${value}"`)
                         .join(' ');
                     if (asset.tag === 'script') {
-                        return `<script ${attributeString}></script>`;
+                        return `<script ${attributeString} ${cspNonce ? `nonce="${cspNonce}"` : ''}></script>`;
                     }
                     if (asset.tag === 'link') {
                         return `<link ${attributeString}>`;
@@ -764,7 +810,7 @@ const handler = eventHandler(async (event) => {
                     }
                 }).join('\n');
                 const transformHtml = template
-                    .replace(`<!--app-head-->`, generateHtmlHead(meta) + '\n' + assetsHtml + '\n' + generateHydrationScript())
+                    .replace(`<!--app-head-->`, generateHtmlHead(meta) + '\n' + assetsHtml + '\n' + hydrationScript({ nonce: cspNonce}))
                     .replace(`<!--app-body-->`, (html ?? '') + manifestHtml + clientHydrationScript);
                 return res.end(transformHtml);
             }
