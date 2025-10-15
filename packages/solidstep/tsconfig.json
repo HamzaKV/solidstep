@@ -1,0 +1,49 @@
+{
+  "compilerOptions": {
+    // Enable latest features
+    "lib": ["ESNext", "DOM"],
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleDetection": "force",
+    "allowJs": true,
+
+    // Bundler mode
+    "moduleResolution": "bundler",
+    "verbatimModuleSyntax": true,
+    "outDir": "./dist",
+    "baseUrl": ".",
+    "resolveJsonModule": true,
+
+    // Best practices
+    "strict": true,
+    "skipLibCheck": true,
+    "noFallthroughCasesInSwitch": true,
+
+    // Some stricter flags (disabled by default)
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "noPropertyAccessFromIndexSignature": false,
+
+    // Emit declarations
+    "declaration": true,
+    "declarationMap": true,
+    "emitDeclarationOnly": false,
+  },
+  "include": [
+    "utils/**/*",
+    "index.ts",
+    "client.ts",
+    "server.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "build",
+    "coverage",
+    "test",
+    "tests",
+    "**/*.spec.ts",
+    "**/*.test.ts",
+    "generate"
+  ]
+}

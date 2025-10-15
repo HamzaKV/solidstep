@@ -1,0 +1,58 @@
+{
+    "name": "solidstep",
+    "version": "0.1.0",
+    "description": "Next Step SolidJS Framework for building web applications.",
+    "type": "module",
+    "author": "HamzaKV <hamzakv333@gmail.com>",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/HamzaKV/solidstep.git"
+    },
+    "license": "MIT",
+    "exports": {
+        ".": "./index.js",
+        "./utils/hooks/action-state": "./utils/hooks/action-state.js",
+        "./utils/cache": "./utils/cache.js",
+        "./utils/cookies": "./utils/cookies.js",
+        "./utils/cors": "./utils/cors.js",
+        "./utils/csp": "./utils/csp.js",
+        "./utils/csrf": "./utils/csrf.js",
+        "./utils/error-handler": "./utils/error-handler.js",
+        "./utils/fetch.client": "./utils/fetch.client.js",
+        "./utils/fetch.server": "./utils/fetch.server.js",
+        "./utils/loader": "./utils/loader.js",
+        "./utils/redirect": "./utils/redirect.js",
+        "./utils/server-only": "./utils/server-only.js",
+        "./utils/types": "./utils/types.js"
+    },
+    "scripts": {
+        "clean": "rimraf ./dist",
+        "copy-files:root": "copyfiles -u 0 README.md package.json generate/**/* LICENSE ./dist",
+        "build": "pnpm clean && tsc && pnpm copy-files:root",
+        "test:local": "pnpm build && cd ./dist && pnpm link --global",
+        "test:local:clean": "pnpm unlink && pnpm clean",
+        "roll": "pnpm build && cd dist && npm publish"
+    },
+    "keywords": [
+        "solidjs",
+        "web-development",
+        "typescript",
+        "npm",
+        "solidstep",
+        "framework"
+    ],
+    "dependencies": {
+        "@vinxi/server-functions": "0.5.1",
+        "seroval": "^1.3.2",
+        "seroval-plugins": "^1.3.2",
+        "solid-js": "^1.9.7",
+        "undici": "^7.15.0",
+        "vinxi": "^0.5.8"
+    },
+    "devDependencies": {
+        "copyfiles": "^2.4.1",
+        "rimraf": "^6.0.1",
+        "typescript": "^5.8.3",
+        "vite-plugin-solid": "^2.11.7"
+    }
+}
