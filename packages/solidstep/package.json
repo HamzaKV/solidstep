@@ -1,6 +1,6 @@
 {
     "name": "solidstep",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "description": "Next Step SolidJS Framework for building web applications.",
     "type": "module",
     "author": "HamzaKV <hamzakv333@gmail.com>",
@@ -54,5 +54,11 @@
         "rimraf": "^6.0.1",
         "typescript": "^5.8.3",
         "vite-plugin-solid": "^2.11.7"
+    },
+    "engines": {
+        "node": ">=20"
+    },
+    "publishConfig": {
+        "access": "public"
     }
 }
