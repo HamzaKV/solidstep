@@ -1,13 +1,14 @@
 import { defineMiddleware } from 'vinxi/http';
-import { cspNonce as csp } from '../utils/csp';
-import { cors } from '../utils/cors';
-import { csrf } from '../utils/csrf';
+import { createBasePolicy, serializePolicy, withNonce } from 'solidstep/utils/csp';
+import { cors } from 'solidstep/utils/cors';
+import { csrf } from 'solidstep/utils/csrf';
 import { randomBytes } from 'node:crypto';
 
 const trustedOrigins = ['https://example.com', 'https://another-example.com'];
 
 const corsMiddleware = cors(trustedOrigins);
 const csrfMiddleware = csrf(trustedOrigins);
+let cspPolicy = createBasePolicy();
 
 const middleware = defineMiddleware({
     onRequest: async (event) => {
@@ -17,7 +18,9 @@ const middleware = defineMiddleware({
             cspNonce: nonce,
         };
 
-        event.node.res.setHeader('Content-Security-Policy', csp(nonce));
+        cspPolicy = withNonce(cspPolicy, nonce);
+
+        event.node.res.setHeader('Content-Security-Policy', serializePolicy(cspPolicy));
         event.node.res.setHeader('Vary', 'Origin, Access-Control-Request-Method');
         
         const origin = event.node.req.headers.origin || '';

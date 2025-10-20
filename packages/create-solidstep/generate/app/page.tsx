@@ -1,4 +1,4 @@
-import { defineLoader, type LoaderDataFromFunction } from '../utils/loader';
+import { defineLoader, type LoaderDataFromFunction } from 'solidstep/utils/loader';
 import { NoHydration } from 'solid-js/web';
 
 export const loader = defineLoader(async () => {

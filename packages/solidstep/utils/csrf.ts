@@ -1,6 +1,9 @@
 const SAFE_METHODS = ['GET', 'OPTIONS', 'HEAD', 'TRACE'];
 
-export const csrf = (trustedOrigins: string[]) => 
+export const csrf = (
+    trustedOrigins: string[],
+    safeMethods: string[] = SAFE_METHODS
+) => 
     (
         requestMethod: string,
         requestUrl: URL, 
@@ -8,7 +11,7 @@ export const csrf = (trustedOrigins: string[]) =>
         referer?: string
     ) => {
         // Check if the request method is safe
-        if (!SAFE_METHODS.includes(requestMethod)) {
+        if (!safeMethods.includes(requestMethod)) {
             // If we have an Origin header, check it against our allowlist.
             if (origin) {
                 const parsedOrigin = new URL(origin);

@@ -11,15 +11,11 @@
     "keywords": [],
     "author": "",
     "dependencies": {
-        "@vinxi/server-functions": "0.5.1",
-        "seroval": "^1.3.2",
-        "seroval-plugins": "^1.3.2",
-        "solid-js": "^1.9.7",
-        "undici": "^7.15.0",
+        "solid-js": "^1.9.9",
+        "solidstep": "^0.1.1",
         "vinxi": "^0.5.8"
     },
     "devDependencies": {
-        "typescript": "^5.8.3",
-        "vite-plugin-solid": "^2.11.7"
+        "typescript": "^5.8.3"
     }
 }
