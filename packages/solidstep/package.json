@@ -1,6 +1,6 @@
 {
     "name": "solidstep",
-    "version": "0.1.2",
+    "version": "0.1.3",
     "description": "Next Step SolidJS Framework for building web applications.",
     "type": "module",
     "author": "HamzaKV <hamzakv333@gmail.com>",
@@ -11,7 +11,7 @@
     "license": "MIT",
     "exports": {
         ".": "./index.js",
-        "./utils/hooks/action-state": "./utils/hooks/action-state.js",
+        "./hooks/action-state": "./utils/hooks/action-state.js",
         "./utils/cache": "./utils/cache.js",
         "./utils/cookies": "./utils/cookies.js",
         "./utils/cors": "./utils/cors.js",
@@ -21,9 +21,10 @@
         "./utils/fetch.client": "./utils/fetch.client.js",
         "./utils/fetch.server": "./utils/fetch.server.js",
         "./utils/loader": "./utils/loader.js",
+        "./utils/logger": "./utils/logger.js",
+        "./utils/meta": "./utils/meta.js",
         "./utils/redirect": "./utils/redirect.js",
-        "./utils/server-only": "./utils/server-only.js",
-        "./utils/types": "./utils/types.js"
+        "./utils/server-only": "./utils/server-only.js"
     },
     "scripts": {
         "clean": "rimraf ./dist",
@@ -43,6 +44,7 @@
     ],
     "dependencies": {
         "@vinxi/server-functions": "0.5.1",
+        "pino": "^10.1.0",
         "seroval": "^1.3.2",
         "seroval-plugins": "^1.3.2",
         "undici": "^7.15.0",

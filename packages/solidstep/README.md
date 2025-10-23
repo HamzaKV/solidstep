@@ -4,6 +4,7 @@ Next Solid Step towards a more performant web - A full-stack SolidJS framework f
 
 ## Features
 
+- 🌟 **Built on SolidJS and Vite** - Leverage the power of SolidJS for reactive and efficient UIs
 - 🚀 **File-based Routing** - Automatic routing based on your file structure
 - ⚡ **Server-Side Rendering (SSR)** - Fast initial page loads with full SSR support
 - 🔄 **Data Loading** - Built-in loaders for efficient data fetching
@@ -12,8 +13,9 @@ Next Solid Step towards a more performant web - A full-stack SolidJS framework f
 - 🎯 **Server Actions** - Type-safe server functions with automatic serialization
 - ⚙️ **Middleware Support** - Request/response interceptors
 - 📦 **Caching** - Built-in page-level caching
-- 🔥 **Hot Module Replacement** - Fast development experience
 - 📝 **TypeScript** - Full TypeScript support out of the box
+- 📊 **Built-in Logging** - Configurable Pino logger for logging
+- 🌐 **Fetch Utilities** - Type-safe fetch wrappers with timeout and error handling for both client and server
 
 ## Getting Started
 
@@ -37,6 +39,8 @@ cd my-app
 - `middleware.ts` - Request middleware
 
 **A route is defined by either the presence of a `page.tsx` or `route.ts` file in a directory.**
+
+**Similar to NextJS, routes are not indexed if they have a '_' placed at the beginning of the name**
 
 ### Configuration
 
@@ -236,9 +240,10 @@ function CreatePostForm() {
 Define metadata for SEO:
 
 ```tsx
-import type { Meta } from 'solidstep/utils/types';
+import { meta } from 'solidstep/utils/types';
 
-export const generateMeta = async () => {
+// can also be async
+export const generateMeta = meta(() => {
   return {
     title: {
       type: 'title',
@@ -291,8 +296,8 @@ export const generateMeta = async () => {
             defer: true,
         }
     }
-  } satisfies Meta;
-};
+  };
+});
 ```
 
 ### Middleware
@@ -300,13 +305,14 @@ export const generateMeta = async () => {
 Intercept and modify requests:
 
 ```tsx
-import { eventHandler } from 'vinxi/http';
+import { defineMiddleware } from 'vinxi/http';
 
-export default eventHandler((event) => {
-  event.locals = { user: getCurrentUser() };
-
-  // you can also modify request/response here
-  // also include cors, csrf, csp logic if needed
+export default defineMiddleware({
+  onRequest: async (request) => {
+    console.log('Incoming request:', request.url);
+    // Modify request if needed
+    return request;
+  },
 });
 ```
 
@@ -325,6 +331,11 @@ export const options = {
 ## API Routes
 
 Create REST endpoints:
+- GET
+- POST
+- PUT
+- DELETE
+- PATCH
 
 ```tsx
 export async function GET(request: Request, { params }: any) {
@@ -514,12 +525,144 @@ export const loader = defineLoader(async () => {
 });
 ```
 
+### Logging
+
+SolidStep includes a built-in Pino logger that can be configured globally:
+
+```tsx
+import { defineConfig } from 'solidstep';
+
+export default defineConfig({
+  server: {
+    preset: 'node',
+  },
+  logger: {
+    level: 'info',
+    transport: {
+      target: 'pino-pretty',
+      options: {
+        colorize: true
+      }
+    }
+  }
+});
+```
+
+Use the logger in your code:
+
+```tsx
+import { logger } from 'solidstep/utils/logger';
+
+export const loader = defineLoader(async () => {
+  logger.info('Fetching posts');
+  
+  try {
+    const posts = await fetchPosts();
+    logger.info(`Fetched ${posts.length} posts`);
+    return { posts };
+  } catch (error) {
+    logger.error('Failed to fetch posts', error);
+    throw error;
+  }
+});
+```
+
+**Logger Configuration Options:**
+- `false` or `undefined` - Disables logging (silent mode)
+- `true` - Enables default Pino logger
+- `object` - Custom Pino configuration object [Pino Docs](https://getpino.io/#/docs/api?id=options)
+
+### Fetch Utilities
+
+SolidStep provides type-safe fetch wrappers for both client and server with built-in timeout and error handling:
+
+**Client-side Fetch:**
+```tsx
+import fetch from 'solidstep/utils/fetch.client';
+
+async function fetchPosts() {
+  const posts = await fetch<Post[]>('/api/posts', {
+    method: 'GET',
+    MAX_FETCH_TIME: 5000,
+  });
+  
+  return posts;
+}
+
+...
+
+// To get full response including status, headers, etc.
+const response = await fetch<Post[], false>(
+  '/api/posts',
+  { method: 'GET' },
+  false
+);
+
+console.log(response.status); // HTTP status code
+```
+
+**Server-side Fetch:**
+```tsx
+import fetch from 'solidstep/utils/fetch.server';
+
+export const loader = defineLoader(async () => {
+  const data = await fetch<ApiResponse>('https://api.example.com/data', {
+    method: 'POST',
+    body: JSON.stringify({ query: 'test' }),
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    MAX_FETCH_TIME: 10000,
+  });
+  
+  return data;
+});
+```
+
+**Features:**
+- Automatic timeout handling with AbortController (default: 4000ms)
+- Automatic JSON parsing (optional)
+- Error handling for HTTP 4xx/5xx responses
+- Type-safe responses with TypeScript generics
+- Server-side uses undici for better performance
+
+### Server-Only Code
+
+Ensure code only runs on the server and throws an error if accessed on the client:
+
+```tsx
+import 'solidstep/utils/server-only';
+
+export const SECRET_KEY = process.env.SECRET_KEY;
+export const DATABASE_URL = process.env.DATABASE_URL;
+
+export async function queryDatabase(query: string) {
+}
+```
+
+**Use case:** Import this at the top of any file that should never be used for the client (e.g., database utilities, API keys, server secrets).
+
+```tsx
+import 'solidstep/utils/server-only';
+
+export const db = createDatabaseConnection(process.env.DATABASE_URL);
+```
+
+If accidentally imported on the client, it will throw:
+```
+Error: This module is only available on the server side.
+```
+
 ## Future Plans
+- Revalidate on demand
+- Preloading/prefetching strategies
 - Support for dynamic site.webmanifest, robots.txt, sitemap.xml, manifest.json, and llms.txt
 - Support loading and error pages for parallel routes
 - Support deferring loaders
 - Image/font optimizations
 - Possible CSR/SPA, SSG, ISR, and PPR
+- Advanced caching strategies
+- WebSocket support
 
 ## License
 
@@ -532,4 +675,4 @@ MIT
 
 ## Special Mentions
 - Inspired by [Remix](https://remix.run/), [Next.js](https://nextjs.org/), and [TanStack](https://tanstack.com/)
-- Built with [Vite](https://vitejs.dev/), [SolidJS](https://www.solidjs.com/), [Vinxi](https://github.com/nksaraf/vinxi) and [Seroval](https://github.com/lxsmnsyc/seroval)
+- Built with [Vite](https://vitejs.dev/), [SolidJS](https://www.solidjs.com/), [Vinxi](https://github.com/nksaraf/vinxi), [Undici](https://undici.nodejs.org/#/), [Pino](https://getpino.io/#/) and [Seroval](https://github.com/lxsmnsyc/seroval)

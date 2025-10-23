@@ -1,25 +1,21 @@
 import { BaseFileSystemRouter, cleanPath } from 'vinxi/fs-router';
-import { dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export class ServerRouter extends BaseFileSystemRouter {
     toPath(src: string) {
         const routePath = cleanPath(src, this.config)
             .replace(new RegExp(`\.(${(this.config.extensions ?? []).join('|')})$`), '')
             .replace(/\/(page|route|layout|error|not-found|loading)$/, '');
-        // src = src
-        //     .slice((`${__dirname}/app`).length);
-
-        // const routePath = src
-        //     .replace(new RegExp(`\.(${(this.config.extensions ?? []).join('|')})$`), '')
-        //     .replace(/\/(page|route|layout|error|not-found|loading)$/, '');
 
         return routePath?.length > 0 ? routePath : '/';
     }
 
     toRoute(filePath: string) {
+        const normalizePath = cleanPath(filePath, this.config);
+        const splitPath = normalizePath.split('/');
+        const shouldIgnore = splitPath.some(part => part.startsWith('_'));
+        if (shouldIgnore) {
+            return;
+        }
         const path = this.toPath(filePath);
 
         if ((/\/route\.(js|ts)$/).test(filePath)) {
@@ -189,22 +185,20 @@ export class ServerRouter extends BaseFileSystemRouter {
 
 export class ClientRouter extends BaseFileSystemRouter {
     toPath(src: string) {
-
         const routePath = cleanPath(src, this.config)
             .replace(new RegExp(`\.(${(this.config.extensions ?? []).join('|')})$`), '')
             .replace(/\/(page|route|layout|error|not-found|loading)$/, '');
-
-        // src = src
-        //     .slice((`${__dirname}/app`).length);
-
-        // const routePath = src
-        //     .replace(new RegExp(`\.(${(this.config.extensions ?? []).join('|')})$`), '')
-        //     .replace(/\/(page|layout|error|not-found|loading)$/, '');
 
         return routePath?.length > 0 ? routePath : '/';
     }
 
     toRoute(filePath: string) {
+        const normalizePath = cleanPath(filePath, this.config);
+        const splitPath = normalizePath.split('/');
+        const shouldIgnore = splitPath.some(part => part.startsWith('_'));
+        if (shouldIgnore) {
+            return;
+        }
         const path = this.toPath(filePath);
 
         // biome-ignore lint/correctness/noEmptyCharacterClassInRegex: <explanation>

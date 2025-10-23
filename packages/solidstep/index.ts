@@ -6,8 +6,9 @@ import { serverFunctions } from '@vinxi/server-functions/plugin';
 import { ServerRouter, ClientRouter } from './utils/router.js';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { cpSync, mkdirSync, existsSync } from 'node:fs';
+import { cpSync, mkdirSync, existsSync, writeFileSync } from 'node:fs';
 import { normalize } from 'vinxi/lib/path';
+import type { LoggerOptions } from 'pino';
 
 type Config = {
     server?: Omit<AppOptions['server'], 'experimental'>;
@@ -15,6 +16,7 @@ type Config = {
         type: 'client' | 'server' | 'both';
         plugin: any;
     }[];
+    logger?: true | LoggerOptions;
 };
 
 export const defineConfig = (config: Config = {
@@ -25,6 +27,13 @@ export const defineConfig = (config: Config = {
     if (!existsSync(middlewarePath)) {
         middlewarePath = join(process.cwd(), 'app', 'middleware.js');
     }
+
+    const sharedConfig = {
+        logger: config.logger || false,
+    };
+
+    // @ts-ignore
+    globalThis.__SOLIDSTEP_CONFIG__ = sharedConfig;
 
     const app = createApp({
         server: {
@@ -104,6 +113,7 @@ export const defineConfig = (config: Config = {
         if (event.name === 'app:build:nitro:end') {
             const [{ nitro }] = event.args;
             const serverDir = nitro.options.output.serverDir;
+            writeFileSync(`${serverDir}/.config.json`, JSON.stringify(sharedConfig), 'utf-8');
             const fromDir = join(process.cwd(), 'server-assets');
             if (existsSync(fromDir)) {
                 const toDir = join(serverDir, 'server-assets');

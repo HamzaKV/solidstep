@@ -1,13 +1,15 @@
 import { eventHandler, toWebRequest } from 'vinxi/http';
 import { getManifest } from 'vinxi/manifest';
 import { generateHydrationScript, renderToString } from 'solid-js/web';
-import type { Meta } from './utils/types';
+import type { Meta } from './utils/meta';
 import type { ServerResponse, IncomingMessage } from 'node:http';
 import fileRoutes, { type RouteModule } from 'vinxi/routes';
 import { RedirectError } from './utils/redirect';
 import { setCache, getCache } from './utils/cache';
 import { handleServerFunction } from './utils/server-action.server';
-import util from 'node:util';
+import { readFile } from 'node:fs/promises';
+import { dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 type Import = {
     src: string;
@@ -503,6 +505,13 @@ const hydrationScript = ({
 const onStart = async () => {
     try {
         routeManifest = await createRouteManifest();
+        const sharedConfig = (globalThis as any).__SOLIDSTEP_CONFIG__;
+        if (!sharedConfig) {
+            const __dirname = dirname(fileURLToPath(import.meta.url));
+            const configContent = await readFile(`${__dirname}/.config.json`, 'utf-8');
+            // @ts-ignore
+            globalThis.__SOLIDSTEP_CONFIG__ = JSON.parse(configContent);
+        }
     } catch (e) {
         console.error('Error creating route manifest:', e);
     }
