@@ -739,8 +739,11 @@ const handler = eventHandler(async (event) => {
                     ...documentMeta
                 };
             }
-        } catch (e1) {
-            if (e1 instanceof RedirectError) {
+        } catch (e1: any) {
+            if (
+                e1 instanceof RedirectError ||
+                e1.name === 'RedirectError'
+            ) {
                 throw e1;
             }
             try {
@@ -828,8 +831,11 @@ const handler = eventHandler(async (event) => {
             .replace('<!--app-head-->', `${generateHtmlHead(meta)}\n${assetsHtml}\n${hydrationScript({ nonce: cspNonce})}`)
             .replace('<!--app-body-->', (html ?? '') + manifestHtml + clientHydrationScript);
         return res.end(transformHtml);
-    } catch (e) {
-        if (e instanceof RedirectError) {
+    } catch (e: any) {
+        if (
+            e instanceof RedirectError ||
+            e.name === 'RedirectError'
+        ) {
             res.statusCode = 302;
             res.setHeader('Location', e.message);
             return res.end('Redirecting...');
