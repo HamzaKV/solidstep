@@ -9,6 +9,19 @@ import { fileURLToPath } from 'node:url';
 import { cpSync, mkdirSync, existsSync, writeFileSync } from 'node:fs';
 import { normalize } from 'vinxi/lib/path';
 import type { LoggerOptions } from 'pino';
+import type { CustomizableConfig } from 'vinxi/dist/types/lib/vite-dev';
+// @ts-ignore
+import type { InlineConfig } from 'vite';
+import { config as viteConfigPlugin } from 'vinxi/plugins/config';
+
+type VinxiViteServerOptions = Omit<
+    InlineConfig["server"],
+    "port" | "strictPort" | "host" | "middlewareMode" | "open"
+>;
+
+type ViteCustomizableConfig = CustomizableConfig & {
+    server?: VinxiViteServerOptions;
+};
 
 type Config = {
     server?: Omit<AppOptions['server'], 'experimental'>;
@@ -17,11 +30,17 @@ type Config = {
         plugin: any;
     }[];
     logger?: true | LoggerOptions;
+    vite?: 
+        | ViteCustomizableConfig
+        | ((options: {
+            router: 'server' | 'client';
+        }) => ViteCustomizableConfig);
 };
 
 export const defineConfig = (config: Config = {
     server: {},
     plugins: [],
+    vite: {},
 }) => {
     let middlewarePath = join(process.cwd(), 'app', 'middleware.ts');
     if (!existsSync(middlewarePath)) {
@@ -34,6 +53,10 @@ export const defineConfig = (config: Config = {
 
     // @ts-ignore
     globalThis.__SOLIDSTEP_CONFIG__ = sharedConfig;
+
+    const viteConfig = typeof config.vite === 'function'
+        ? config.vite
+        : () => config.vite || {};
 
     const app = createApp({
         server: {
@@ -66,6 +89,9 @@ export const defineConfig = (config: Config = {
                         ),
                     }),
                     solid({ ssr: true }),
+                    viteConfigPlugin('app-client', {
+                        ...(viteConfig({ router: 'client' }) || {}),
+                    }),
                 ],
                 base: '/_build',
                 routes: (router, app) => {
@@ -93,6 +119,9 @@ export const defineConfig = (config: Config = {
                         .map(p => p.plugin) || []),
                     serverFunctions.server(),
                     solid({ ssr: true }),
+                    viteConfigPlugin('app-server', {
+                        ...(viteConfig({ router: 'server' }) || {}),
+                    }),
                 ],
                 middleware: './app/middleware.ts',
                 routes: (router, app) => {

@@ -48,6 +48,7 @@ Configure your app in `app.config.ts`:
 
 ```tsx
 import { defineConfig } from 'solidstep';
+import tailwindcss from '@tailwindcss/vite';
 
 export default defineConfig({
   server: {
@@ -55,10 +56,50 @@ export default defineConfig({
   },
   plugins: [
     {
-      type: 'both',
-      plugin: myVitePlugin(),
-    },
+      type: 'client', // or 'server' or 'both' - depends on where you want to use the plugin
+      plugin: tailwindcss()
+    }
   ],
+});
+```
+
+#### Vite Configuration
+
+You can customize Vite settings for both client and server builds. 
+
+__When trying to configure absolute path imports__
+1. Add the path alias in tsconfig.json (for TypeScript support):
+```json
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./*"]
+    }
+  }
+}
+```
+
+2. Then add the same alias in the Vite config inside `app.config.ts` to ensure it works during build and runtime:
+```tsx
+import { defineConfig } from 'solidstep';
+import { resolve } from 'node:path';
+import { dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+export default defineConfig({
+  server: {
+    preset: 'node',
+  },
+  vite: {
+    resolve: {
+      alias: {
+        '@': resolve(__dirname, '.'),
+      },
+    },
+  },
 });
 ```
 
@@ -169,15 +210,13 @@ export default function RootLayout(props: {
   slots: { graph1: any; graph2: any; };
 }) {
   return (
-    <div>
-      <main>
-        {props.children()}
-        <aside>
-          <div>{props.slots.graph1()}</div>
-          <div>{props.slots.graph2()}</div>
-        </aside>
-      </main>
-    </div>
+    <main>
+      {props.children()}
+      <aside>
+        <div>{props.slots.graph1()}</div>
+        <div>{props.slots.graph2()}</div>
+      </aside>
+    </main>
   );
 }
 ```
@@ -323,7 +362,7 @@ Configure page-level caching:
 ```tsx
 export const options = {
   cache: {
-    ttl: 60000,
+    ttl: 60000, // Cache for 60 seconds
   },
 };
 ```
@@ -348,6 +387,21 @@ export async function GET(request: Request, { params }: any) {
 export async function POST(request: Request) {
   const data = await request.json();
 }
+```
+
+## Server Assets
+Serve static files from the `server-assets/` directory:
+
+```my-app/
+├── server-assets/
+│   └── secret.txt
+```
+
+Access via `my-app/server-assets/secret.txt` URL:
+
+```ts
+const TEMPLATE_PATH = join(process.cwd(), 'server-assets', 'templates', 'template.ejs');
+const template = await fs.promises.readFile(TEMPLATE_PATH, 'utf-8');
 ```
 
 ## Utilities
@@ -400,7 +454,7 @@ const corsHeaders = corsMiddleware(origin, event.node.req.method === 'OPTIONS');
 
 ### CSP
 ```tsx
-import { createBasePolicy, serializePolicy, withNonce } from '@varlabs/solidstep/utils/csp';
+import { createBasePolicy, serializePolicy, withNonce } from 'solidstep/utils/csp';
 
 let cspPolicy = createBasePolicy();
 
@@ -417,7 +471,7 @@ event.response.headers.set('Content-Security-Policy', serializePolicy(cspPolicy)
 
 ### CSRF Protection
 ```tsx
-import { csrf } from '@varlabs/solidstep/utils/csrf';
+import { csrf } from 'solidstep/utils/csrf';
 
 const trustedOrigins = ['https://example.com', 'https://another-example.com'];
 
@@ -539,7 +593,7 @@ export default defineConfig({
   logger: {
     level: 'info',
     transport: {
-      target: 'pino-pretty',
+      target: 'pino-pretty', // Use pino-pretty for human-readable logs
       options: {
         colorize: true
       }
