@@ -707,14 +707,52 @@ If accidentally imported on the client, it will throw:
 Error: This module is only available on the server side.
 ```
 
+## Preloading/prefetching strategies
+SolidStep supports various preloading and prefetching strategies to enhance user experience by loading data and resources ahead of time. This can significantly reduce perceived latency and improve navigation speed within your application. Solidstep does not include any preloading/prefetching by default, but you can implement your own strategies using the built-in fetch utilities and SolidJS features.
+
+Some common strategies include:
+- **Link Prefetching**: Use the `<link rel="prefetch">` tag to hint the browser to prefetch resources for links that users are likely to click on next.
+- **Using Intersection Observer**: Implement lazy loading and prefetching of data when certain elements come into the viewport.
+- **Using [instant.page](https://instant.page/)**: A small library that preloads pages on hover or touchstart events.
+```tsx
+export const RootLayout = (props) => {
+  return (
+    <body>
+      ...
+      <NoHydration>
+      <script src="//instant.page/5.2.0" type="module" integrity="sha384-jnZyxPjiipYXnSU0ygqeac2q7CVYMbh84q0uHVRRxEtvFPiQYbXWUorga2aqZJ0z"></script>
+      </NoHydration>
+    </body>
+  );
+};
+```
+- **Using [Foresight.js](https://foresightjs.com/)**: A library that preloads pages based on user behavior and patterns.
+```tsx
+import { ForesightManager } from "js.foresight";
+import { onMount } from "solid-js";
+
+export const RootLayout = (props) => {
+  onMount(() => {
+    ForesightManager.initialize({
+      // Configuration options
+    });
+  });
+  return (
+    <body>
+      ...
+    </body>
+  );
+};
+```
+- **Custom Preloading Logic**: Write custom logic to preload data for specific routes or components based on user behavior or application state.
+
 ## Future Plans
 - Revalidate on demand
-- Preloading/prefetching strategies
 - Support for dynamic site.webmanifest, robots.txt, sitemap.xml, manifest.json, and llms.txt
 - Support loading and error pages for parallel routes
 - Support deferring loaders
 - Image/font optimizations
-- Possible CSR/SPA, SSG, ISR, and PPR
+- Possible SSG, ISR, and PPR
 - Advanced caching strategies
 - WebSocket support
 
