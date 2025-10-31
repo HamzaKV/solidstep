@@ -746,6 +746,9 @@ export const RootLayout = (props) => {
 ```
 - **Custom Preloading Logic**: Write custom logic to preload data for specific routes or components based on user behavior or application state.
 
+## Environment Variables
+As SolidStep is built using Vite, it follows the same guide as stated in [Vite docs](https://vite.dev/guide/env-and-mode) regarding environment variables.
+
 ## Future Plans
 - Revalidate on demand
 - Support for dynamic site.webmanifest, robots.txt, sitemap.xml, manifest.json, and llms.txt
