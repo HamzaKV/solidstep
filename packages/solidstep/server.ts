@@ -491,12 +491,13 @@ const render = async ({
     const rendered = await renderToString(() => composed());
 
     if (toRender === 'main') {
+        const options = cachingOptions as CacheOptions | undefined;
         setCache(path, {
             rendered: rendered,
             documentMeta: meta,
             documentAssets: assets,
             loaderData: loaderData,
-        }, cachingOptions ? ((cachingOptions as CacheOptions)).ttl : 0);
+        }, options?.ttl ? options.ttl : 0);
     }
 
     return {

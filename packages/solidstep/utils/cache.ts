@@ -47,7 +47,7 @@ const removeTail = <T>() => {
 
 export const getCache = <T>(key: string): T | null => {
     const entry = cacheMap.get(key);
-    if (!entry) return null;
+    if (!entry || !entry.expiresAt) return null;
 
     if (entry.expiresAt && entry.expiresAt < Date.now()) {
         cacheMap.delete(key);

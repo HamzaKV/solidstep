@@ -370,6 +370,10 @@ export const options = {
   },
 };
 ```
+- Regarding caching, setting `ttl` to `0` or omitting it will disable caching for that page.
+  - Setting a positive integer value will cache the page for that duration in milliseconds.
+  - Invalidation of cached pages can be done using the `invalidateCache` and `revalidatePath` utilities.
+- The `responseHeaders` option allows you to set custom HTTP headers for the page response.
 
 ## API Routes
 
