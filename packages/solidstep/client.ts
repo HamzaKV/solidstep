@@ -2,6 +2,34 @@ import { hydrate } from 'solid-js/web';
 import 'vinxi/client';
 import fileRoutes from 'vinxi/routes';
 import { getManifest } from 'vinxi/manifest';
+import { createDiffDOM } from './utils/diff-dom';
+
+window.onpageshow = () => {
+    const state = window.history.state;
+    const key = `${window.location.pathname}:build-time`;
+    const buildTimeMeta = document.querySelector('meta[name="x-build-time"]');
+    const buildTime = buildTimeMeta ? Number.parseInt(buildTimeMeta.getAttribute('content') || '0', 10) : 0;
+    const lastBuildTime = Number.parseInt(sessionStorage.getItem(key) || '0', 10);
+    const diffString = sessionStorage.getItem(window.location.pathname);
+
+    if (state?.revalidated && buildTime === lastBuildTime && diffString) {
+        // we need to re-apply the diff from session storage
+        const diff = JSON.parse(diffString);
+        const dd = createDiffDOM();
+        const didApply = dd.apply(document.body, diff);
+        if (didApply) {
+            const key = window.location.pathname;
+            sessionStorage.setItem(key, JSON.stringify(diff));
+            window.history.pushState({ revalidated: true }, '', window.location.href);
+        }
+        if (import.meta.env.DEV && !didApply) {
+            console.error('The mutation was not applied, this seems to be an edge case.');
+            console.error('Please raise an issue on GitHub describing your case.');
+            console.error('The diff calculated:', diff);
+        }
+    }
+    sessionStorage.setItem(key, buildTime.toString());
+};
 
 const importModule = async (routeModule: any) => {
     const manifest = getManifest('client');

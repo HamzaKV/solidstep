@@ -1,4 +1,4 @@
-import { eventHandler, toWebRequest } from 'vinxi/http';
+import { eventHandler, toWebRequest, setResponseHeader, getEvent } from 'vinxi/http';
 import { getManifest } from 'vinxi/manifest';
 import { generateHydrationScript, renderToString } from 'solid-js/web';
 import type { Meta } from './utils/meta';
@@ -327,15 +327,24 @@ const render = async ({
     req: Request,
     cspNonce?: string,
 }) => {
-    const url = req.url || '/';
+    const url = new URL(req.url);
+    const path = url.pathname;
     const cachedEntry = getCache<{
         rendered: string;
         documentMeta: Meta;
         documentAssets: any[];
         loaderData: Record<string, any>;
-    }>(url);
+    }>(path);
 
     if (cachedEntry && toRender === 'main') {
+        const { options } = entry.mainPage.options ? await entry.mainPage.options.import() : { options: {} };
+        if (options?.responseHeaders) {
+            const headers = options.responseHeaders as Record<string, string>;
+            const event = getEvent();
+            for (const [key, value] of Object.entries(headers)) {
+                setResponseHeader(event, key, value);
+            }
+        }
         return {
             rendered: cachedEntry.rendered,
             documentMeta: cachedEntry.documentMeta,
@@ -442,6 +451,13 @@ const render = async ({
             if (options?.cache) {
                 cachingOptions = options.cache as CacheOptions;
             }
+            if (options?.responseHeaders) {
+                const headers = options.responseHeaders as Record<string, string>;
+                const event = getEvent();
+                for (const [key, value] of Object.entries(headers)) {
+                    setResponseHeader(event, key, value);
+                }
+            }
             let data = {};
             if (pageLoader) {
                 const result = await pageLoader.loader(req);
@@ -474,13 +490,13 @@ const render = async ({
     const composed = await compose();
     const rendered = await renderToString(() => composed());
 
-    if (cachingOptions && toRender === 'main') {
-        setCache(url, {
+    if (toRender === 'main') {
+        setCache(path, {
             rendered: rendered,
             documentMeta: meta,
             documentAssets: assets,
             loaderData: loaderData,
-        }, ((cachingOptions as CacheOptions)).ttl);
+        }, cachingOptions ? ((cachingOptions as CacheOptions)).ttl : 0);
     }
 
     return {
@@ -607,6 +623,14 @@ const handler = eventHandler(async (event) => {
                 type: 'title',
                 attributes: {},
                 content: 'SolidStep'
+            },
+            build_time: {
+                type: 'meta',
+                attributes: {
+                    name: 'x-build-time',
+                    content: Date.now().toString(),
+                    description: 'IMPORTANT: This tag indicates the build time of the application and should not be removed.'
+                },
             }
         };
         const assets = await clientManifest.inputs[clientManifest.handler].assets();
@@ -655,6 +679,9 @@ const handler = eventHandler(async (event) => {
                 }
             } else {
                 try {
+                    if (!(matched as RoutePageEntry).loadingPage) {
+                        throw new Error('No loading page');
+                    }
                     const { 
                         rendered, 
                         documentMeta, 

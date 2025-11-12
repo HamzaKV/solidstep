@@ -33,6 +33,9 @@ import {
 import invariant from 'vinxi/lib/invariant';
 import { getManifest } from 'vinxi/manifest';
 import { RedirectError } from './redirect';
+import { createDiffDOM } from './diff-dom';
+import { getCache, invalidateCache } from './cache';
+import fetch from './fetch.server';
 
 function createChunk(data: string) {
 	const encodeData = new TextEncoder().encode(data);
@@ -280,6 +283,43 @@ export async function handleServerFunction(event: HTTPEvent) {
 					result = await (result as any).customBody();
 				} else if (result.body === undefined) result = null;
 			}
+		}
+
+		const revalidatePath = getResponseHeader(event, 'X-Revalidate') as string | undefined;
+
+		// Step 1: check if revalidation is needed
+		if (revalidatePath) {
+			// Step 2: get generated html page from cache
+			const cacheValue = getCache<any | null>(revalidatePath);
+			const oldHtml = cacheValue?.rendered;
+
+			// Step 3: invalidate cache for path
+			invalidateCache(revalidatePath);
+
+			let diff: any;
+
+			if (oldHtml) {
+				// Step 4: diff the cache with new html from server
+				const reqUrl = new URL(request.url);
+				const serverUrl = reqUrl.origin;
+				await fetch(serverUrl + revalidatePath, {
+					method: 'GET'
+				}, false);
+				const newCacheValue = getCache<any | null>(revalidatePath);
+				const newHtml = newCacheValue?.rendered;
+				const dd = createDiffDOM({
+					skipSelector: 'SCRIPT, STYLE, NOSCRIPT',
+					skipMode: 'full'
+				});
+				const ddDiff = dd.diff(oldHtml, newHtml);
+				diff = structuredClone(ddDiff);
+			}
+
+			// Step 5: add the changed html as json to the result
+			result = {
+				result,
+				diff,
+			};
 		}
 
 		setHeader(event, 'content-type', 'text/javascript');

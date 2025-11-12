@@ -364,6 +364,10 @@ export const options = {
   cache: {
     ttl: 60000, // Cache for 60 seconds
   },
+  responseHeaders: { // Custom headers for pages
+    'X-Custom-Header': 'MyValue',
+    'Cache-Control': 'public, max-age=60', // Client-side caching
+  },
 };
 ```
 
@@ -405,6 +409,45 @@ const template = await fs.promises.readFile(TEMPLATE_PATH, 'utf-8');
 ```
 
 ## Utilities
+
+### Cache (Server-Side)
+- Every page can be cached by setting the `options.cache` property in the page.
+- You can also manually invalidate the cache for specific routes.
+- Invalidation can be done in two ways:
+1. Using the `invalidateCache` utility to only invalidate paths.
+```tsx
+import { invalidateCache } from 'solidstep/utils/cache';
+
+const action = async () => {
+    'use server';
+
+    ...
+
+    // Invalidate cache after data mutation
+    await invalidateCache('/some-route');
+
+    ...
+
+    return { success: true };
+};
+```
+2. Using the `revalidatePath` utility to revalidate specific paths and revalidate the frontend DOM - signaling the server action as a Single Flight Mutation query.
+```tsx
+import { revalidatePath } from 'solidstep/utils/cache';
+
+const action = async () => {
+    'use server';
+
+    ...
+
+    // Revalidate path after data mutation
+    await revalidatePath('/some-route');
+
+    ...
+
+    return { success: true };
+};
+```
 
 ### Cookies
 ```tsx
@@ -750,7 +793,6 @@ export const RootLayout = (props) => {
 As SolidStep is built using Vite, it follows the same guide as stated in [Vite docs](https://vite.dev/guide/env-and-mode) regarding environment variables.
 
 ## Future Plans
-- Revalidate on demand
 - Support for dynamic site.webmanifest, robots.txt, sitemap.xml, manifest.json, and llms.txt
 - Support loading and error pages for parallel routes
 - Support deferring loaders

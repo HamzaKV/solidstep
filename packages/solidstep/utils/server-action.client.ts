@@ -12,6 +12,7 @@ import {
 	URLPlugin,
 	URLSearchParamsPlugin
 } from 'seroval-plugins/web';
+import { createDiffDOM } from './diff-dom';
 
 class SerovalChunkReader {
 	reader: ReadableStreamDefaultReader<Uint8Array>;
@@ -29,7 +30,7 @@ class SerovalChunkReader {
 		const chunk = await this.reader.read();
 		if (!chunk.done) {
 			// repopulate the buffer
-			let newBuffer = new Uint8Array(this.buffer.length + chunk.value.length);
+			const newBuffer = new Uint8Array(this.buffer.length + chunk.value.length);
 			newBuffer.set(this.buffer);
 			newBuffer.set(chunk.value, this.buffer.length);
 			this.buffer = newBuffer;
@@ -169,38 +170,63 @@ async function fetchServerFunction(
 					headers: { ...options.headers, 'Content-Type': 'application/json' }
 				}));
 
-	if (
+	/*if (
 		response.headers.has('Location') ||
 		response.headers.has('X-Revalidate') ||
 		response.headers.has('X-Single-Flight')
 	) {
 		if (response.body) {
-			/* @ts-ignore-next-line */
+			/* @ts-ignore-next-line 
 			response.customBody = () => {
 				return deserializeStream(instance, response);
 			};
 		}
 		return response;
-	}
+	}*/
 
 	const contentType = response.headers.get('Content-Type');
-	let result;
-	if (contentType && contentType.startsWith('text/plain')) {
+	let result: any;
+	if (contentType?.startsWith('text/plain')) {
 		result = await response.text();
-	} else if (contentType && contentType.startsWith('application/json')) {
+	} else if (contentType?.startsWith('application/json')) {
 		result = await response.json();
 	} else {
 		result = await deserializeStream(instance, response);
 	}
+
 	if (response.headers.has('X-Error')) {
 		if (result.name === 'RedirectError') {
 			window.location.href = result.message;
 		}
 		throw result;
 	}
+
+	if (response.headers.has('X-Revalidate')) {
+		const revalidatePath = response.headers.get('X-Revalidate');
+		const { result: actualResult, diff } = result;
+		// run algo to update UI using diff (maybe use a worker?) if the revalidate page is current page
+		if (diff && revalidatePath === window.location.pathname) {
+			const dd = createDiffDOM();
+			const didApply = dd.apply(document.body, diff);
+			if (didApply) {
+				const key = window.location.pathname;
+				sessionStorage.setItem(key, JSON.stringify(diff));
+				window.history.pushState({ revalidated: true }, '', window.location.href);
+			}
+			if (import.meta.env.DEV && !didApply) {
+				console.error('The mutation was not applied, this seems to be an edge case.');
+				console.error('Please raise an issue on GitHub describing your case.');
+				console.error('The diff calculated:', diff);
+			}
+		}
+
+		return actualResult;
+	}
+
 	return result;
 }
 
+// biome-ignore lint/complexity/noBannedTypes: <explanation>
 export function createServerReference(fn: Function, id: string, name: string) {
 	const baseURL = import.meta.env.SERVER_BASE_URL;
 	return new Proxy(fn, {
@@ -239,7 +265,10 @@ export function createServerReference(fn: Function, id: string, name: string) {
 			return (target as any)[prop];
 		},
 		apply(target, thisArg, args) {
-			return fetchServerFunction(`${baseURL}/_server`, `${id}#${name}`, {}, args);
+			const maxClientFetchTime = +(import.meta.env.VITE_SERVER_ACTION_MAX_CLIENT_FETCH_TIME);
+			return fetchServerFunction(`${baseURL}/_server`, `${id}#${name}`, {
+				MAX_FETCH_TIME: maxClientFetchTime || undefined
+			} as any, args);
 		}
 	});
 }

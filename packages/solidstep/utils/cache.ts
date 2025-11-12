@@ -1,3 +1,5 @@
+import { getEvent, setResponseHeader } from 'vinxi/http';
+
 type CacheValue<T = any> = {
     key: string
     value: T
@@ -103,4 +105,15 @@ export const invalidateCache = (key: string) => {
 export const clearAllCache = () => {
     cacheMap.clear();
     head = tail = undefined;
+};
+
+export const revalidatePath = (path: string) => {
+    // get and verify the event
+    const event = getEvent();
+    if (!event.path.includes('_server')) {
+        throw new Error('This function can only be used in server functions.');
+    }
+
+    // add the revalidate header as a flag for the server action to do diffing 
+    setResponseHeader(event, 'X-Revalidate', path);
 };
