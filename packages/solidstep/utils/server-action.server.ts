@@ -302,9 +302,10 @@ export async function handleServerFunction(event: HTTPEvent) {
 				// Step 4: diff the cache with new html from server
 				const reqUrl = new URL(request.url);
 				const serverUrl = reqUrl.origin;
-				await fetch(serverUrl + revalidatePath, {
+				const response = await fetch(serverUrl + revalidatePath, {
 					method: 'GET'
 				}, false);
+				await response.text(); // ensure the fetch is completed and cache is populated
 				const newCacheValue = getCache<any | null>(revalidatePath);
 				const newHtml = newCacheValue?.rendered;
 				const dd = createDiffDOM({

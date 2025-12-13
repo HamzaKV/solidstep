@@ -805,6 +805,16 @@ As SolidStep is built using Vite, it follows the same guide as stated in [Vite d
 - Advanced caching strategies
 - WebSocket support
 
+## Testing
+
+SolidStep does not include a built-in testing framework. However, we recommend setting up testing using Vitest ecosystem. You can use [Vitest](https://vitest.dev/) for unit and integration tests, and [Playwright](https://playwright.dev/) for end-to-end testing.
+
+### Testing Server Actions
+
+When testing server actions, you can use Vitest to accomplish this. Just test as you would with any other async function.
+
+When testing pages (e2e tests), you can trigger server actions by simulating user interactions that would call those actions. If needed, you can also intercept network requests to directly test the action endpoints. Use the testing framework's capabilities to intercept the requests and ensure the responses have the expected results. If the server action returns json data, stringify it and add it to the response body as well as setting the content-type header to 'application/json'. If the action has a more complex return type, use seroval to serialize the response before sending it back.
+
 ## License
 
 MIT
