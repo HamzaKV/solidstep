@@ -462,6 +462,8 @@ const render = async ({
 };
 
 let routeManifest: RouteNode | null = null;
+type Manifest = ReturnType<typeof getManifest>;
+let clientManifest: Manifest | null = null;
 
 const hydrationScript = ({
     nonce,
@@ -494,8 +496,6 @@ const onStart = async () => {
 
 onStart();
 
-const clientManifest = getManifest('client');
-
 const handler = eventHandler(async (event) => {
     const req = toWebRequest(event);
 
@@ -506,6 +506,10 @@ const handler = eventHandler(async (event) => {
 
         if (!routeManifest) {
             routeManifest = await createRouteManifest();
+        }
+
+        if (!clientManifest) {
+            clientManifest = getManifest('client');
         }
 
         const cspNonce = (event as any).locals?.cspNonce as string | undefined;
@@ -613,7 +617,7 @@ const handler = eventHandler(async (event) => {
                             assets.push(...documentAssets);
                             clientHydrationScript = `
                                 <script type="module" ${cspNonce ? `nonce="${cspNonce}"` : ''}>
-                                import main from '${clientManifest.inputs[clientManifest.handler].output.path}';
+                                import main from '${clientManifest!.inputs[clientManifest!.handler].output.path}';
                                 main('/not-found/',${JSON.stringify(params)},${JSON.stringify(searchParams)}, ${JSON.stringify(loaderData)});
                                 </script>
                             `;
@@ -709,7 +713,7 @@ const handler = eventHandler(async (event) => {
                             push(html);
                             push(`
                             <script type="module" data-hydration="loading" ${cspNonce ? `nonce="${cspNonce}"` : ''}>
-                                import main from '${clientManifest.inputs[clientManifest.handler].output.path}';
+                                import main from '${clientManifest!.inputs[clientManifest!.handler].output.path}';
                                 main('${(matched as RoutePageHandler).loadingPage?.manifestPath}',${JSON.stringify(params)},${JSON.stringify(searchParams)}, ${JSON.stringify(loaderData)});
                             </script>
                             `);
@@ -735,7 +739,7 @@ const handler = eventHandler(async (event) => {
                         assets.push(...documentAssets);
                         clientHydrationScript = `
                             <script type="module" ${cspNonce ? `nonce="${cspNonce}"` : ''}>
-                            import main from '${clientManifest.inputs[clientManifest.handler].output.path}';
+                            import main from '${clientManifest!.inputs[clientManifest!.handler].output.path}';
                             main('${(matched as RoutePageHandler).mainPage.manifestPath}',${JSON.stringify(params)},${JSON.stringify(searchParams)}, ${JSON.stringify(loaderData)});
                             </script>
                         `;
@@ -783,7 +787,7 @@ const handler = eventHandler(async (event) => {
                         assets.push(...documentAssets);
                         clientHydrationScript = `
                             <script type="module" ${cspNonce ? `nonce="${cspNonce}"` : ''}>
-                            import main from '${clientManifest.inputs[clientManifest.handler].output.path}';
+                            import main from '${clientManifest!.inputs[clientManifest!.handler].output.path}';
                             main('${errorPage.manifestPath}',${JSON.stringify(params)},${JSON.stringify(searchParams)}, ${JSON.stringify(loaderData)});
                             </script>
                         `;
