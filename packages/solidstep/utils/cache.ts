@@ -49,7 +49,7 @@ export const getCache = <T>(key: string): T | null => {
     const entry = cacheMap.get(key);
     if (!entry || !entry.expiresAt) return null;
 
-    if (entry.expiresAt && entry.expiresAt < Date.now()) {
+    if (entry.expiresAt && entry.expiresAt < performance.now()) {
         cacheMap.delete(key);
         if (entry.prev) entry.prev.next = entry.next;
         if (entry.next) entry.next.prev = entry.prev;
@@ -66,7 +66,7 @@ export const setCache = <T>(key: string, value: T, ttlMs?: number) => {
     if (cacheMap.has(key)) {
         const node = cacheMap.get(key)!;
         node.value = value;
-        node.expiresAt = ttlMs ? Date.now() + ttlMs : null;
+        node.expiresAt = ttlMs ? performance.now() + ttlMs : null;
         moveToFront(node);
         return;
     }
@@ -74,7 +74,7 @@ export const setCache = <T>(key: string, value: T, ttlMs?: number) => {
     const newNode: CacheValue<T> = {
         key,
         value,
-        expiresAt: ttlMs ? Date.now() + ttlMs : null
+        expiresAt: ttlMs ? performance.now() + ttlMs : null
     };
 
     newNode.next = head;

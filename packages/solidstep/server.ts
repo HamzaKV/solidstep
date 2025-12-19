@@ -1,4 +1,9 @@
-import { eventHandler, toWebRequest, setHeader, setResponseStatus } from 'vinxi/http';
+import {
+    eventHandler,
+    toWebRequest,
+    setHeader,
+    setResponseStatus,
+} from 'vinxi/http';
 import { getManifest } from 'vinxi/manifest';
 import { generateHydrationScript, renderToString } from 'solid-js/web';
 import type { Meta } from './utils/meta';
@@ -9,65 +14,26 @@ import { handleServerFunction } from './utils/server-action.server';
 import { readFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+    createNode,
+    insertRoute,
+    matchRoute,
+    type Import,
+    type RoutePageHandler,
+    type RouteNode,
+} from './utils/path-router';
 
-type Import = {
-    src: string;
-    import: any;
-};
+// Module cache for dynamically imported modules
+const moduleCache = new Map<string, any>();
 
-type RoutePageEntry = {
-    type: 'page';
-    mainPage: {
-        manifestPath: string;
-        page: Import;
-        loader?: Import;
-        generateMeta?: Import;
-        options?: Import;
-    };
-    loadingPage?: {
-        manifestPath: string;
-        page: Import;
-        generateMeta?: Import;
-    };
-    errorPage?: {
-        manifestPath: string;
-        page: Import;
-        generateMeta?: Import;
-    };
-    notFoundPage?: {
-        manifestPath: string;
-        page: Import;
-        generateMeta?: Import;
-    };
-    layouts: {
-        manifestPath: string;
-        layout: Import;
-        loader?: Import;
-        generateMeta?: Import;
-    }[];
-    groups?: {
-        [key: string]: {
-            manifestPath: string;
-            page: Import;
-            loader?: Import;
-        };
-    };
-};
-
-type RouteEntry = (
-    | {
-        type: 'route';
-        handler: Import;
-        manifestPath: string;
+const getCachedModule = async <T>(importFn: Import): Promise<T> => {
+    const key = importFn.src;
+    if (moduleCache.has(key)) {
+        return moduleCache.get(key);
     }
-    | RoutePageEntry
-) & {
-    regex: RegExp;
-    paramKeys: string[];
-};
-
-type RouteManifest = {
-    [key: string]: RouteEntry;
+    const module = await importFn.import();
+    moduleCache.set(key, module);
+    return module;
 };
 
 type FileRoute = RouteModule & {
@@ -89,44 +55,8 @@ const isPageFile = (file: string) =>
 const isRouteFile = (file: string) =>
     file.endsWith('route.ts') || file.endsWith('route.js');
 
-const parseSegment = (part: string) => {
-    if (part.startsWith('[[') && part.endsWith(']]')) {
-        return `:^*${part.slice(5, -2)}`;
-    }
-    return part.startsWith('[')
-        ? `:${part.slice(1, -1).replace(/\.\.\./, '*')}`
-        : part;
-};
-
-const createMatcher = (routePath: string) => {
-    const keys: string[] = [];
-    const segments = routePath.split('/').map((part) => {
-        if (part.startsWith(':')) {
-            if (part.startsWith(':^*')) {
-                // Catch-all inclusive
-                keys.push(part.slice(3));
-                return '?(.*)?';
-            }
-            if (part.startsWith(':*')) {
-                // Catch-all
-                keys.push(part.slice(2));
-                return '.*';
-            }
-            // Standard param
-            keys.push(part.slice(1));
-            return '([^/]+)';
-        }
-        return part;
-    });
-
-    return {
-        regex: new RegExp(`^${segments.join('/')}$`),
-        keys,
-    };
-};
-
 const getNormalizedPath = (path: string, clean?: boolean) => {
-    const segments = path.split('/').slice(2).map(parseSegment);
+    const segments = path.split('/').slice(2);
     if (clean)
         return `/${segments.filter((s) => !s.startsWith('(')).join('/')}`;
 
@@ -134,7 +64,7 @@ const getNormalizedPath = (path: string, clean?: boolean) => {
 };
 
 const createRouteManifest = async () => {
-    const entries: RouteManifest = {};
+    const rootNode = createNode();
 
     const allRoutes: FileRoute[] = [];
     const layoutsMap = new Map<string, FileRoute>();
@@ -188,13 +118,12 @@ const createRouteManifest = async () => {
             const loadingPage = loadingPagesMap.get(routeMatcherPath);
             const matchedGroups = groupsMap.get(routePath);
 
-            const groups: RoutePageEntry['groups'] = {};
+            const groups: RoutePageHandler['groups'] = {};
             if (matchedGroups && matchedGroups.length > 0) {
                 for (const group of matchedGroups) {
                     const groupName = group.path
                         .split('/')
                         .filter((s) => !s.startsWith('('))
-                        .map(parseSegment)
                         .at(-1);
                     if (!groupName) continue;
                     groups[groupName] = {
@@ -207,7 +136,7 @@ const createRouteManifest = async () => {
 
             const segments = routeMatcherPath.split('/').filter(Boolean);
             let errorPage: FileRoute | undefined;
-            const layouts: RoutePageEntry['layouts'] = [];
+            const layouts: RoutePageHandler['layouts'] = [];
 
             // We need to traverse from root to leaf to build layouts order correctly?
             // Original code: i = segments.length down to 0. unshift matches.
@@ -231,12 +160,8 @@ const createRouteManifest = async () => {
                 }
             }
 
-            const { regex: matcherRegex, keys } = createMatcher(routePath);
-
-            entries[routePath] = {
+            const entry: RoutePageHandler = {
                 type: 'page',
-                regex: matcherRegex,
-                paramKeys: keys,
                 mainPage: {
                     manifestPath: fileRoute.path,
                     page: fileRoute.$component,
@@ -249,69 +174,41 @@ const createRouteManifest = async () => {
                           page: loadingPage.$component,
                           generateMeta: loadingPage.$generateMeta,
                           manifestPath: loadingPage.path,
-                    }
-                : undefined,
+                      }
+                    : undefined,
                 errorPage: errorPage
                     ? {
-                        page: errorPage.$component,
-                        generateMeta: errorPage.$generateMeta,
-                        manifestPath: errorPage.path,
-                    }
-                : undefined,
+                          page: errorPage.$component,
+                          generateMeta: errorPage.$generateMeta,
+                          manifestPath: errorPage.path,
+                      }
+                    : undefined,
                 notFoundPage:
                     routePath === '/' && notFoundPage
                         ? {
-                            page: notFoundPage.$component,
-                            generateMeta: notFoundPage.$generateMeta,
-                            manifestPath: notFoundPage.path,
-                        }
-                    : undefined,
+                              page: notFoundPage.$component,
+                              generateMeta: notFoundPage.$generateMeta,
+                              manifestPath: notFoundPage.path,
+                          }
+                        : undefined,
                 layouts: layouts,
                 groups: groups,
             };
+
+            insertRoute(rootNode, routePath, entry);
         } else if (src && isRouteFile(src)) {
-            const { regex: matcherRegex, keys } = createMatcher(routePath);
-            entries[routePath] = {
-                type: 'route',
-                regex: matcherRegex,
-                paramKeys: keys,
+            const entry = {
+                type: 'route' as const,
+                routePath,
                 handler: fileRoute.$handler as Import,
                 manifestPath: fileRoute.path,
             };
+
+            insertRoute(rootNode, routePath, entry);
         }
     }
 
-    return entries;
-};
-
-const extractRouteParams = (route: string, url: string) => {
-    const routeSegments = route.split('/').filter(s => !(s.startsWith('('))).filter(Boolean);
-    const urlSegments = url.split('/').filter(Boolean);
-
-    const params: Record<string, string | string[]> = {};
-    let matched = true;
-
-    for (let i = 0; i < routeSegments.length; i++) {
-        const routeSeg = routeSegments[i];
-        const urlSeg = urlSegments[i];
-        const isDynamic = routeSeg.startsWith('[') && routeSeg.endsWith(']');
-        if (isDynamic) {
-            if (routeSeg.includes('...')) {
-                // Catch-all parameter
-                const isCatchAll = routeSeg.startsWith('[[') && routeSeg.endsWith(']]');
-                const paramName = routeSeg.slice(isCatchAll ? 5 : 4, isCatchAll ? -2 : -1);
-                params[paramName] = urlSegments.slice(i);
-                break; // No more segments to match
-            }
-            const paramName = routeSeg.slice(1, -1);
-            params[paramName] = urlSeg;
-        } else if (routeSeg !== urlSeg) {
-            matched = false;
-            break;
-        }
-    }
-
-    if (matched) return { route, params };
+    return rootNode;
 };
 
 const template = `
@@ -360,10 +257,10 @@ const render = async ({
     req,
     pageOptions,
     cspNonce,
-    error
+    error,
 }: {
     toRender: 'main' | 'loading' | 'error' | 'not-found';
-    entry: RoutePageEntry;
+    entry: RoutePageHandler;
     routeParams: Record<string, string | string[]>;
     searchParams: Record<string, string>;
     req: Request;
@@ -402,12 +299,16 @@ const render = async ({
             const moduleAssets =
                 await clientManifest.inputs[moduleSrc].assets();
             assets.push(...moduleAssets);
-            const { default: layoutModule } = await layout.layout.import();
+            const { default: layoutModule } = await getCachedModule<{
+                default: any;
+            }>(layout.layout);
             const { loader: layoutLoader } = layout.loader
-                ? await layout.loader.import()
+                ? await getCachedModule<{ loader: any }>(layout.loader)
                 : { loader: null };
             const { generateMeta: generateMetaPage } = layout.generateMeta
-                ? await layout.generateMeta.import()
+                ? await getCachedModule<{ generateMeta: any }>(
+                      layout.generateMeta,
+                  )
                 : { generateMeta: null };
             let data = {};
             if (generateMetaPage) {
@@ -440,9 +341,13 @@ const render = async ({
                                 await clientManifest.inputs[moduleSrc].assets();
                             assets.push(...moduleAssets);
                             const { default: groupPage } =
-                                await group.page.import();
+                                await getCachedModule<{ default: any }>(
+                                    group.page,
+                                );
                             const { loader: groupLoader } = group.loader
-                                ? await group.loader.import()
+                                ? await getCachedModule<{ loader: any }>(
+                                      group.loader,
+                                  )
                                 : { loader: null };
                             let data = {};
                             if (groupLoader) {
@@ -478,20 +383,24 @@ const render = async ({
                 toRender === 'loading'
                     ? entry.loadingPage
                     : toRender === 'error'
-                        ? entry.errorPage
-                        : toRender === 'not-found'
-                            ? entry.notFoundPage
-                            : entry.mainPage;
+                      ? entry.errorPage
+                      : toRender === 'not-found'
+                        ? entry.notFoundPage
+                        : entry.mainPage;
             const moduleSrc = `${pageToRender.page.src}&pick=$css`;
             const moduleAssets =
                 await clientManifest.inputs[moduleSrc].assets();
             assets.push(...moduleAssets);
-            const { default: page } = await pageToRender.page.import();
+            const { default: page } = await getCachedModule<{ default: any }>(
+                pageToRender.page,
+            );
             const { loader: pageLoader } = pageToRender.loader
-                ? await pageToRender.loader.import()
+                ? await getCachedModule<{ loader: any }>(pageToRender.loader)
                 : { loader: null };
             const { generateMeta } = pageToRender.generateMeta
-                ? await pageToRender.generateMeta.import()
+                ? await getCachedModule<{ generateMeta: any }>(
+                      pageToRender.generateMeta,
+                  )
                 : { generateMeta: null };
 
             let data = {};
@@ -523,8 +432,7 @@ const render = async ({
             if (toRender === 'error') {
                 props.error = error;
             }
-            return () =>
-                page(props);
+            return () => page(props);
         },
     );
 
@@ -553,7 +461,7 @@ const render = async ({
     };
 };
 
-let routeManifest: RouteManifest = {};
+let routeManifest: RouteNode | null = null;
 
 const hydrationScript = ({
     nonce,
@@ -586,6 +494,8 @@ const onStart = async () => {
 
 onStart();
 
+const clientManifest = getManifest('client');
+
 const handler = eventHandler(async (event) => {
     const req = toWebRequest(event);
 
@@ -594,46 +504,24 @@ const handler = eventHandler(async (event) => {
             return handleServerFunction(event);
         }
 
-        const clientManifest = getManifest('client');
-
-        if (!routeManifest || Object.keys(routeManifest).length === 0) {
+        if (!routeManifest) {
             routeManifest = await createRouteManifest();
         }
 
         const cspNonce = (event as any).locals?.cspNonce as string | undefined;
 
-        const url = new URL(req.url).pathname;
-        // extract route params and search params
-        let params: Record<string, string | string[]> = {};
-        const searchParams: Record<string, string> = {};
-        const [pathnamePart, searchParamPart] = url.split('?');
-        if (searchParamPart) {
-            for (const param of searchParamPart.split('&')) {
-                const [key, value] = param.split('=');
-                searchParams[key] = decodeURIComponent(value || '');
-            }
-        }
+        const urlObj = new URL(req.url);
+        const pathnamePart = urlObj.pathname;
+        const searchParams = Object.fromEntries(urlObj.searchParams);
 
-        let matched: RouteEntry | undefined;
-
-        for (const entry of Object.values(routeManifest)) {
-            const match = entry.regex.exec(pathnamePart);
-            if (match) {
-                matched = entry;
-                if (entry.paramKeys) {
-                    const routePath = matched && matched.type === 'route'
-                        ? matched.manifestPath.split('/').slice(2).join('/')
-                        : matched && matched.type === 'page'
-                            ? (matched as RoutePageEntry).mainPage.manifestPath.split('/').slice(2).join('/')
-                            : '/';
-                    params = extractRouteParams(routePath, pathnamePart)?.params || {};
-                }
-                break;
-            }
-        }
+        const match = matchRoute(routeManifest, pathnamePart);
+        const matched = match?.handler;
+        const params = match?.params || {};
 
         if (matched && matched.type === 'route') {
-            const routeModule = await matched.handler.import();
+            const routeModule = await getCachedModule<Record<string, any>>(
+                matched.handler,
+            );
             const reqMethod = req.method?.toUpperCase();
             if (reqMethod) {
                 const handler = routeModule[reqMethod];
@@ -700,9 +588,14 @@ const handler = eventHandler(async (event) => {
                 try {
                     if (!matched) {
                         try {
-                            const notFoundPage = routeManifest[
-                                '/'
-                            ] as RoutePageEntry;
+                            const match = matchRoute(
+                                routeManifest as any,
+                                '/',
+                            ) as any;
+                            const notFoundEntry = match.handler;
+                            if (!notFoundEntry) {
+                                throw new Error('No not-found page configured');
+                            }
                             const {
                                 rendered,
                                 documentMeta,
@@ -710,7 +603,7 @@ const handler = eventHandler(async (event) => {
                                 loaderData,
                             } = await render({
                                 toRender: 'not-found',
-                                entry: notFoundPage,
+                                entry: notFoundEntry as RoutePageHandler,
                                 routeParams: {},
                                 searchParams: {},
                                 req: req,
@@ -738,17 +631,26 @@ const handler = eventHandler(async (event) => {
                             return;
                         }
                     } else {
-                        const { options } = (matched as RoutePageEntry).mainPage.options
-                            ? await ((matched as RoutePageEntry).mainPage.options as any).import()
+                        const { options } = (matched as RoutePageHandler)
+                            .mainPage.options
+                            ? await getCachedModule<{ options: any }>(
+                                  (matched as RoutePageHandler).mainPage
+                                      .options as Import,
+                              )
                             : { options: {} };
                         if (options?.responseHeaders) {
-                            const headers = options.responseHeaders as Record<string, string>;
-                            for (const [key, value] of Object.entries(headers)) {
+                            const headers = options.responseHeaders as Record<
+                                string,
+                                string
+                            >;
+                            for (const [key, value] of Object.entries(
+                                headers,
+                            )) {
                                 setHeader(key, value);
                             }
                         }
                         try {
-                            if (!(matched as RoutePageEntry).loadingPage) {
+                            if (!(matched as RoutePageHandler).loadingPage) {
                                 throw new Error('No loading page');
                             }
                             const {
@@ -758,7 +660,7 @@ const handler = eventHandler(async (event) => {
                                 loaderData,
                             } = await render({
                                 toRender: 'loading',
-                                entry: matched as RoutePageEntry,
+                                entry: matched as RoutePageHandler,
                                 routeParams: params,
                                 searchParams,
                                 req: req,
@@ -808,7 +710,7 @@ const handler = eventHandler(async (event) => {
                             push(`
                             <script type="module" data-hydration="loading" ${cspNonce ? `nonce="${cspNonce}"` : ''}>
                                 import main from '${clientManifest.inputs[clientManifest.handler].output.path}';
-                                main('${(matched as RoutePageEntry).loadingPage?.manifestPath}',${JSON.stringify(params)},${JSON.stringify(searchParams)}, ${JSON.stringify(loaderData)});
+                                main('${(matched as RoutePageHandler).loadingPage?.manifestPath}',${JSON.stringify(params)},${JSON.stringify(searchParams)}, ${JSON.stringify(loaderData)});
                             </script>
                             `);
                             loading = true;
@@ -823,7 +725,7 @@ const handler = eventHandler(async (event) => {
                             loaderData,
                         } = await render({
                             toRender: 'main',
-                            entry: matched as RoutePageEntry,
+                            entry: matched as RoutePageHandler,
                             routeParams: params,
                             searchParams,
                             req: req,
@@ -834,7 +736,7 @@ const handler = eventHandler(async (event) => {
                         clientHydrationScript = `
                             <script type="module" ${cspNonce ? `nonce="${cspNonce}"` : ''}>
                             import main from '${clientManifest.inputs[clientManifest.handler].output.path}';
-                            main('${(matched as RoutePageEntry).mainPage.manifestPath}',${JSON.stringify(params)},${JSON.stringify(searchParams)}, ${JSON.stringify(loaderData)});
+                            main('${(matched as RoutePageHandler).mainPage.manifestPath}',${JSON.stringify(params)},${JSON.stringify(searchParams)}, ${JSON.stringify(loaderData)});
                             </script>
                         `;
                         html = rendered;
@@ -858,7 +760,8 @@ const handler = eventHandler(async (event) => {
                         console.error(e1);
                     }
                     try {
-                        const errorPage = (matched as RoutePageEntry).errorPage;
+                        const errorPage = (matched as RoutePageHandler)
+                            .errorPage;
                         if (!errorPage) {
                             throw e1;
                         }
@@ -869,13 +772,13 @@ const handler = eventHandler(async (event) => {
                             loaderData,
                         } = await render({
                             toRender: 'error',
-                            entry: matched as RoutePageEntry,
+                            entry: matched as RoutePageHandler,
                             routeParams: params,
                             searchParams,
                             req: req,
                             pageOptions: {},
                             cspNonce,
-                            error: e1
+                            error: e1,
                         });
                         assets.push(...documentAssets);
                         clientHydrationScript = `
