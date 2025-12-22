@@ -818,6 +818,7 @@ const handler = eventHandler(async (event) => {
                             return '';
                         })
                         .join('\n');
+                    push(`<template id="__page_html__">${html}</template>`);
                     push(`
                         <script ${cspNonce ? `nonce="${cspNonce}"` : ''}>
                         const head = document.querySelector('head');
@@ -828,7 +829,9 @@ const handler = eventHandler(async (event) => {
                         });
                         document.querySelector('script[data-hydration="loading"]')?.remove();
                         const loading = document.querySelector('body');
-                        loading.innerHTML = \`${html}\`;
+                        const template = document.getElementById('__page_html__');
+                        loading.innerHTML = template.innerHTML;
+                        template.remove();
                         </script> 
                     `);
                     push(manifestHtml);
