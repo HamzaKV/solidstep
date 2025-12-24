@@ -1,6 +1,6 @@
 {
     "name": "solidstep",
-    "version": "0.3.3",
+    "version": "0.3.4",
     "description": "Next Step SolidJS Framework for building web applications.",
     "type": "module",
     "author": "HamzaKV <hamzakv333@gmail.com>",
@@ -13,6 +13,7 @@
         ".": "./index.js",
         "./hooks/action-state": "./utils/hooks/action-state.js",
         "./utils/cache": "./utils/cache.js",
+        "./utils/client-only": "./utils/client-only.js",
         "./utils/cookies": "./utils/cookies.js",
         "./utils/cors": "./utils/cors.js",
         "./utils/csp": "./utils/csp.js",
@@ -23,6 +24,7 @@
         "./utils/loader": "./utils/loader.js",
         "./utils/logger": "./utils/logger.js",
         "./utils/meta": "./utils/meta.js",
+        "./utils/options": "./utils/options.js",
         "./utils/redirect": "./utils/redirect.js",
         "./utils/server-only": "./utils/server-only.js"
     },

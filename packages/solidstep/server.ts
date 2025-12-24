@@ -500,6 +500,11 @@ const handler = eventHandler(async (event) => {
     const req = toWebRequest(event);
 
     try {
+        if (req.url.includes('/.well-known/appspecific/com.chrome.devtools.json')) {
+            setResponseStatus(204);
+            return;
+        }
+
         if (req.url?.includes('_server')) {
             return handleServerFunction(event);
         }
