@@ -876,6 +876,12 @@ const handler = eventHandler(async (event) => {
         });
         return stream;
     } catch (e: any) {
+        if (
+            e instanceof RedirectError ||
+            e.name === 'RedirectError'
+        ) {
+            return new Response('', { status: 302, headers: { Location: e.message } } );
+        }
         console.error(e);
         return new Response('Internal Server Error', { status: 500 });
     }

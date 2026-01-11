@@ -793,6 +793,42 @@ export const RootLayout = (props) => {
 ```
 - **Custom Preloading Logic**: Write custom logic to preload data for specific routes or components based on user behavior or application state.
 
+## Fonts
+Install fonts (for example, from [Fontsource](https://github.com/fontsource/fontsource)) and import into `globals.css` example:
+```css
+@import '@fontsource-variable/dm-sans';
+@import '@fontsource-variable/jetbrains-mono';
+
+@theme inline {
+  --font-sans: 'DM Sans Variable', sans-serif; 
+  --font-mono: 'JetBrains Mono Variable', monospace; 
+  /* ... */
+}
+```
+
+## Images
+Use the package called [Unpic](https://unpic.pics/img/solid/) for images. An open source and powerful tool for images on the web.
+```bash
+[npm | yarn | pnpm | bun] install @unpic/solid
+```
+
+```tsx
+import type { Component } from "solid-js";
+import { Image } from "@unpic/solid";
+
+const MyComponent: Component = () => {
+  return (
+    <Image
+      src="https://cdn.shopify.com/static/sample-images/bath_grande_crop_center.jpeg"
+      layout="constrained"
+      width={800}
+      height={600}
+      alt="A lovely bath"
+    />
+  );
+};
+```
+
 ## Environment Variables
 As SolidStep is built using Vite, it follows the same guide as stated in [Vite docs](https://vite.dev/guide/env-and-mode) regarding environment variables.
 
@@ -800,7 +836,6 @@ As SolidStep is built using Vite, it follows the same guide as stated in [Vite d
 - Support for dynamic site.webmanifest, robots.txt, sitemap.xml, manifest.json, and llms.txt
 - Support loading and error pages for parallel routes
 - Support deferring loaders
-- Image/font optimizations
 - Possible SSG, ISR, and PPR
 - Advanced caching strategies
 - WebSocket support
