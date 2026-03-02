@@ -54,9 +54,9 @@ export const defineConfig = (config: Config = {
     // @ts-ignore
     globalThis.__SOLIDSTEP_CONFIG__ = sharedConfig;
 
-    const viteConfig = typeof config.vite === 'function'
+    const viteConfig = (typeof config.vite === 'function'
         ? config.vite
-        : () => config.vite || {};
+        : () => config.vite || {}) as (options: { router: 'server' | 'client' }) => ViteCustomizableConfig;
 
     const app = createApp({
         server: {
@@ -120,7 +120,22 @@ export const defineConfig = (config: Config = {
                     serverFunctions.server(),
                     solid({ ssr: true }),
                     viteConfigPlugin('app-server', {
-                        ...(viteConfig({ router: 'server' }) || {}),
+                        resolve: {
+                            alias: {
+                                instrumentation: (() => {
+                                    const userInstrumentationTs = join(process.cwd(), 'app', 'instrumentation.ts');
+                                    const userInstrumentationJs = join(process.cwd(), 'app', 'instrumentation.js');
+                                    if (existsSync(userInstrumentationTs)) {
+                                        return userInstrumentationTs;
+                                    } else if (existsSync(userInstrumentationJs)) {
+                                        return userInstrumentationJs;
+                                    } else {
+                                        return normalize(fileURLToPath(new URL('./utils/instrumentation-noop.js', import.meta.url)));
+                                    }
+                                })(),
+                                ...(viteConfig({ router: 'server' })?.resolve?.alias || {}),
+                            },
+                        },
                     }),
                 ],
                 middleware: './app/middleware.ts',

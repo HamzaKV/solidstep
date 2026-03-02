@@ -1,5 +1,6 @@
 import {
     eventHandler,
+    getResponseStatus,
     toWebRequest,
     setHeader,
     setResponseStatus,
@@ -22,6 +23,15 @@ import {
     type RoutePageHandler,
     type RouteNode,
 } from './utils/path-router';
+import {
+    loadInstrumentation,
+    getInstrumentation,
+    safeExecuteHook,
+    createRequestContext,
+    createResponseContext,
+} from './utils/instrumentation';
+
+let instrumentationReady: Promise<void> | null = null;
 
 // Module cache for dynamically imported modules
 const moduleCache = new Map<string, any>();
@@ -492,15 +502,27 @@ const onStart = async () => {
     } catch (e) {
         console.error('Error creating route manifest:', e);
     }
+
+    // Load instrumentation
+    const instrumentation = await loadInstrumentation();
+    if (instrumentation?.register) {
+        await safeExecuteHook('register', instrumentation.register);
+    }
 };
 
-onStart();
+instrumentationReady = onStart();
 
 const handler = eventHandler(async (event) => {
+    if (instrumentationReady) await instrumentationReady;
+
     const req = toWebRequest(event);
 
     try {
-        if (req.url.includes('/.well-known/appspecific/com.chrome.devtools.json')) {
+        if (
+            req.url.includes(
+                '/.well-known/appspecific/com.chrome.devtools.json',
+            )
+        ) {
             setResponseStatus(204);
             return;
         }
@@ -528,26 +550,66 @@ const handler = eventHandler(async (event) => {
         const params = match?.params || {};
 
         if (matched && matched.type === 'route') {
-            const routeModule = await getCachedModule<Record<string, any>>(
-                matched.handler,
-            );
-            const reqMethod = req.method?.toUpperCase();
-            if (reqMethod) {
-                const handler = routeModule[reqMethod];
-                if (typeof handler === 'function') {
-                    const result = await handler(req, {
-                        params: params,
-                        searchParams: searchParams,
-                    });
-                    return result;
-                }
+            const inst = getInstrumentation();
+            const reqCtx = createRequestContext(req, {
+                routePath: (matched as any).routePath || 'unknown',
+                routeType: 'api',
+                params,
+                searchParams,
+            });
+            await safeExecuteHook('onRequest', inst?.onRequest, req, reqCtx);
 
-                throw new Error(
-                    `Method ${reqMethod} not implemented in ${matched.handler.src}`,
+            try {
+                const routeModule = await getCachedModule<Record<string, any>>(
+                    matched.handler,
                 );
+                const reqMethod = req.method?.toUpperCase();
+                if (reqMethod) {
+                    const handler = routeModule[reqMethod];
+                    if (typeof handler === 'function') {
+                        const result = await handler(req, {
+                            params: params,
+                            searchParams: searchParams,
+                        });
+                        const respCtx = createResponseContext(
+                            reqCtx,
+                            getResponseStatus(event) || 200,
+                        );
+                        await safeExecuteHook(
+                            'onResponseEnd',
+                            inst?.onResponseEnd,
+                            req,
+                            respCtx,
+                        );
+                        return result;
+                    }
+
+                    throw new Error(
+                        `Method ${reqMethod} not implemented in ${matched.handler.src}`,
+                    );
+                }
+                throw new Error(`Unsupported request method: ${reqMethod}`);
+            } catch (error) {
+                await safeExecuteHook(
+                    'onRequestError',
+                    inst?.onRequestError as any,
+                    error,
+                    req,
+                    reqCtx,
+                );
+                throw error;
             }
-            throw new Error(`Unsupported request method: ${reqMethod}`);
         }
+
+        const inst = getInstrumentation();
+        const reqCtx = createRequestContext(req, {
+            routePath: matched ? pathnamePart : '/not-found',
+            routeType: matched ? 'page' : 'not-found',
+            params,
+            searchParams,
+        });
+        await safeExecuteHook('onRequest', inst?.onRequest, req, reqCtx);
+
         let loading = false;
         let html: string | undefined = undefined;
         let meta: Meta = {
@@ -593,112 +655,119 @@ const handler = eventHandler(async (event) => {
                 const encoder = new TextEncoder();
                 const push = (text: string) =>
                     controller.enqueue(encoder.encode(text));
+                let streamError: unknown = null;
 
                 try {
-                    if (!matched) {
-                        try {
-                            const match = matchRoute(
-                                routeManifest as any,
-                                '/',
-                            ) as any;
-                            const notFoundEntry = match.handler;
-                            if (!notFoundEntry) {
-                                throw new Error('No not-found page configured');
-                            }
-                            const {
-                                rendered,
-                                documentMeta,
-                                documentAssets,
-                                loaderData,
-                            } = await render({
-                                toRender: 'not-found',
-                                entry: notFoundEntry as RoutePageHandler,
-                                routeParams: {},
-                                searchParams: {},
-                                req: req,
-                                pageOptions: {},
-                                cspNonce,
-                            });
-                            assets.push(...documentAssets);
-                            clientHydrationScript = `
+                    try {
+                        if (!matched) {
+                            try {
+                                const match = matchRoute(
+                                    routeManifest as any,
+                                    '/',
+                                ) as any;
+                                const notFoundEntry = match.handler;
+                                if (!notFoundEntry) {
+                                    throw new Error(
+                                        'No not-found page configured',
+                                    );
+                                }
+                                const {
+                                    rendered,
+                                    documentMeta,
+                                    documentAssets,
+                                    loaderData,
+                                } = await render({
+                                    toRender: 'not-found',
+                                    entry: notFoundEntry as RoutePageHandler,
+                                    routeParams: {},
+                                    searchParams: {},
+                                    req: req,
+                                    pageOptions: {},
+                                    cspNonce,
+                                });
+                                assets.push(...documentAssets);
+                                clientHydrationScript = `
                                 <script type="module" ${cspNonce ? `nonce="${cspNonce}"` : ''}>
                                 import main from '${clientManifest!.inputs[clientManifest!.handler].output.path}';
                                 main('/not-found/',${JSON.stringify(params)},${JSON.stringify(searchParams)}, ${JSON.stringify(loaderData)});
                                 </script>
                             `;
-                            html = rendered;
-                            meta = {
-                                ...meta,
-                                ...documentMeta,
-                            };
-                            setResponseStatus(404);
-                        } catch (e) {
-                            console.error('404 module not found:', e);
-                            setResponseStatus(404);
-                            push('Not Found');
-                            controller.close();
-                            return;
-                        }
-                    } else {
-                        const { options } = (matched as RoutePageHandler)
-                            .mainPage.options
-                            ? await getCachedModule<{ options: any }>(
-                                  (matched as RoutePageHandler).mainPage
-                                      .options as Import,
-                              )
-                            : { options: {} };
-                        if (options?.responseHeaders) {
-                            const headers = options.responseHeaders as Record<
-                                string,
-                                string
-                            >;
-                            for (const [key, value] of Object.entries(
-                                headers,
-                            )) {
-                                setHeader(key, value);
+                                html = rendered;
+                                meta = {
+                                    ...meta,
+                                    ...documentMeta,
+                                };
+                                setResponseStatus(404);
+                            } catch (e) {
+                                console.error('404 module not found:', e);
+                                setResponseStatus(404);
+                                push('Not Found');
+                                controller.close();
+                                return;
                             }
-                        }
-                        try {
-                            if (!(matched as RoutePageHandler).loadingPage) {
-                                throw new Error('No loading page');
+                        } else {
+                            const { options } = (matched as RoutePageHandler)
+                                .mainPage.options
+                                ? await getCachedModule<{ options: any }>(
+                                      (matched as RoutePageHandler).mainPage
+                                          .options as Import,
+                                  )
+                                : { options: {} };
+                            if (options?.responseHeaders) {
+                                const headers =
+                                    options.responseHeaders as Record<
+                                        string,
+                                        string
+                                    >;
+                                for (const [key, value] of Object.entries(
+                                    headers,
+                                )) {
+                                    setHeader(key, value);
+                                }
                             }
-                            const {
-                                rendered,
-                                documentMeta,
-                                documentAssets,
-                                loaderData,
-                            } = await render({
-                                toRender: 'loading',
-                                entry: matched as RoutePageHandler,
-                                routeParams: params,
-                                searchParams,
-                                req: req,
-                                pageOptions: options,
-                                cspNonce,
-                            });
-                            const assetsHtml = assets
-                                .concat(documentAssets)
-                                .map((asset) => {
-                                    const attributeString = Object.entries(
-                                        asset.attrs,
-                                    )
-                                        .map(
-                                            ([key, value]) =>
-                                                `${key}="${value}"`,
+                            try {
+                                if (
+                                    !(matched as RoutePageHandler).loadingPage
+                                ) {
+                                    throw new Error('No loading page');
+                                }
+                                const {
+                                    rendered,
+                                    documentMeta,
+                                    documentAssets,
+                                    loaderData,
+                                } = await render({
+                                    toRender: 'loading',
+                                    entry: matched as RoutePageHandler,
+                                    routeParams: params,
+                                    searchParams,
+                                    req: req,
+                                    pageOptions: options,
+                                    cspNonce,
+                                });
+                                const assetsHtml = assets
+                                    .concat(documentAssets)
+                                    .map((asset) => {
+                                        const attributeString = Object.entries(
+                                            asset.attrs,
                                         )
-                                        .join(' ');
-                                    if (asset.tag === 'script') {
-                                        return `<script ${attributeString}></script>`;
-                                    }
-                                    if (asset.tag === 'link') {
-                                        return `<link ${attributeString}>`;
-                                    }
-                                    if (asset.tag === 'style') {
-                                        return `<style ${attributeString}>${asset.children || ''}</style>`;
-                                    }
-                                })
-                                .join('\n');
-                            const html = `
+                                            .map(
+                                                ([key, value]) =>
+                                                    `${key}="${value}"`,
+                                            )
+                                            .join(' ');
+                                        if (asset.tag === 'script') {
+                                            return `<script ${attributeString}></script>`;
+                                        }
+                                        if (asset.tag === 'link') {
+                                            return `<link ${attributeString}>`;
+                                        }
+                                        if (asset.tag === 'style') {
+                                            return `<style ${attributeString}>${asset.children || ''}</style>`;
+                                        }
+                                    })
+                                    .join('\n');
+                                const html = `
                                 <!doctype html>
                                 <html lang="en">
                                     <head>
@@ -715,116 +784,119 @@ const handler = eventHandler(async (event) => {
                                     ${rendered}
                                 </html>
                                 `;
-                            push(html);
-                            push(`
+                                push(html);
+                                push(`
                             <script type="module" data-hydration="loading" ${cspNonce ? `nonce="${cspNonce}"` : ''}>
                                 import main from '${clientManifest!.inputs[clientManifest!.handler].output.path}';
                                 main('${(matched as RoutePageHandler).loadingPage?.manifestPath}',${JSON.stringify(params)},${JSON.stringify(searchParams)}, ${JSON.stringify(loaderData)});
                             </script>
                             `);
-                            loading = true;
-                        } catch (e) {
-                            // skip
-                        }
+                                loading = true;
+                            } catch (e) {
+                                // skip
+                            }
 
-                        const {
-                            rendered,
-                            documentMeta,
-                            documentAssets,
-                            loaderData,
-                        } = await render({
-                            toRender: 'main',
-                            entry: matched as RoutePageHandler,
-                            routeParams: params,
-                            searchParams,
-                            req: req,
-                            pageOptions: options,
-                            cspNonce,
-                        });
-                        assets.push(...documentAssets);
-                        clientHydrationScript = `
+                            const {
+                                rendered,
+                                documentMeta,
+                                documentAssets,
+                                loaderData,
+                            } = await render({
+                                toRender: 'main',
+                                entry: matched as RoutePageHandler,
+                                routeParams: params,
+                                searchParams,
+                                req: req,
+                                pageOptions: options,
+                                cspNonce,
+                            });
+                            assets.push(...documentAssets);
+                            clientHydrationScript = `
                             <script type="module" ${cspNonce ? `nonce="${cspNonce}"` : ''}>
                             import main from '${clientManifest!.inputs[clientManifest!.handler].output.path}';
                             main('${(matched as RoutePageHandler).mainPage.manifestPath}',${JSON.stringify(params)},${JSON.stringify(searchParams)}, ${JSON.stringify(loaderData)});
                             </script>
                         `;
-                        html = rendered;
-                        meta = {
-                            ...meta,
-                            ...documentMeta,
-                        };
-                        setResponseStatus(200);
-                    }
-                } catch (e1: any) {
-                    if (
-                        e1 instanceof RedirectError ||
-                        e1.name === 'RedirectError'
-                    ) {
-                        setHeader('Location', e1.message);
-                        setResponseStatus(302);
-                        controller.close();
-                        return;
-                    }
-                    if (import.meta.env.DEV) {
-                        console.error(e1);
-                    }
-                    try {
-                        const errorPage = (matched as RoutePageHandler)
-                            .errorPage;
-                        if (!errorPage) {
-                            throw e1;
+                            html = rendered;
+                            meta = {
+                                ...meta,
+                                ...documentMeta,
+                            };
+                            setResponseStatus(200);
                         }
-                        const {
-                            rendered,
-                            documentMeta,
-                            documentAssets,
-                            loaderData,
-                        } = await render({
-                            toRender: 'error',
-                            entry: matched as RoutePageHandler,
-                            routeParams: params,
-                            searchParams,
-                            req: req,
-                            pageOptions: {},
-                            cspNonce,
-                            error: e1,
-                        });
-                        assets.push(...documentAssets);
-                        clientHydrationScript = `
+                    } catch (e1: any) {
+                        streamError = e1;
+                        if (
+                            e1 instanceof RedirectError ||
+                            e1.name === 'RedirectError'
+                        ) {
+                            setHeader('Location', e1.message);
+                            setResponseStatus(302);
+                            controller.close();
+                            return;
+                        }
+                        if (import.meta.env.DEV) {
+                            console.error(e1);
+                        }
+                        try {
+                            const errorPage = (matched as RoutePageHandler)
+                                .errorPage;
+                            if (!errorPage) {
+                                throw e1;
+                            }
+                            const {
+                                rendered,
+                                documentMeta,
+                                documentAssets,
+                                loaderData,
+                            } = await render({
+                                toRender: 'error',
+                                entry: matched as RoutePageHandler,
+                                routeParams: params,
+                                searchParams,
+                                req: req,
+                                pageOptions: {},
+                                cspNonce,
+                                error: e1,
+                            });
+                            assets.push(...documentAssets);
+                            clientHydrationScript = `
                             <script type="module" ${cspNonce ? `nonce="${cspNonce}"` : ''}>
                             import main from '${clientManifest!.inputs[clientManifest!.handler].output.path}';
                             main('${errorPage.manifestPath}',${JSON.stringify(params)},${JSON.stringify(searchParams)}, ${JSON.stringify(loaderData)});
                             </script>
                         `;
-                        html = rendered;
-                        meta = {
-                            ...meta,
-                            ...documentMeta,
-                        };
-                        // statusCode = 500;
-                        setResponseStatus(500);
-                    } catch (e2) {
-                        throw e1;
+                            html = rendered;
+                            meta = {
+                                ...meta,
+                                ...documentMeta,
+                            };
+                            // statusCode = 500;
+                            setResponseStatus(500);
+                        } catch (e2) {
+                            throw e1;
+                        }
                     }
-                }
 
-                if (loading) {
-                    const assetsHtml = assets
-                        .map((asset) => {
-                            const attributeString = Object.entries(asset.attrs)
-                                .map(([key, value]) => `${key}="${value}"`)
-                                .join(' ');
-                            if (asset.tag === 'link') {
-                                return `<link ${attributeString}>`;
-                            }
-                            if (asset.tag === 'style') {
-                                return `<style ${attributeString}>${asset.children || ''}</style>`;
-                            }
-                            return '';
-                        })
-                        .join('\n');
-                    push(`<template id="__page_html__">${html}</template>`);
-                    push(`
+                    if (loading) {
+                        const assetsHtml = assets
+                            .map((asset) => {
+                                const attributeString = Object.entries(
+                                    asset.attrs,
+                                )
+                                    .map(([key, value]) => `${key}="${value}"`)
+                                    .join(' ');
+                                if (asset.tag === 'link') {
+                                    return `<link ${attributeString}>`;
+                                }
+                                if (asset.tag === 'style') {
+                                    return `<style ${attributeString}>${asset.children || ''}</style>`;
+                                }
+                                return '';
+                            })
+                            .join('\n');
+                        push(`<template id="__page_html__">${html}</template>`);
+                        push(`
                         <script ${cspNonce ? `nonce="${cspNonce}"` : ''}>
                         const head = document.querySelector('head');
                         const scripts = Array.from(head.querySelectorAll('script'));
@@ -839,48 +911,70 @@ const handler = eventHandler(async (event) => {
                         template.remove();
                         </script> 
                     `);
-                    push(manifestHtml);
-                    push(clientHydrationScript);
+                        push(manifestHtml);
+                        push(clientHydrationScript);
+                        controller.close();
+                        return;
+                    }
+                    const assetsHtml = assets
+                        .map((asset) => {
+                            const attributeString = Object.entries(asset.attrs)
+                                .map(([key, value]) => `${key}="${value}"`)
+                                .join(' ');
+                            if (asset.tag === 'script') {
+                                return `<script ${attributeString} ${cspNonce ? `nonce="${cspNonce}"` : ''}></script>`;
+                            }
+                            if (asset.tag === 'link') {
+                                return `<link ${attributeString}>`;
+                            }
+                            if (asset.tag === 'style') {
+                                return `<style ${attributeString}>${asset.children || ''}</style>`;
+                            }
+                        })
+                        .join('\n');
+                    const transformHtml = template
+                        .replace(
+                            '<!--app-head-->',
+                            `${generateHtmlHead(meta)}\n${assetsHtml}\n${hydrationScript({ nonce: cspNonce })}`,
+                        )
+                        .replace(
+                            '<!--app-body-->',
+                            (html ?? '') + manifestHtml + clientHydrationScript,
+                        );
+                    push(transformHtml);
                     controller.close();
                     return;
-                }
-                const assetsHtml = assets
-                    .map((asset) => {
-                        const attributeString = Object.entries(asset.attrs)
-                            .map(([key, value]) => `${key}="${value}"`)
-                            .join(' ');
-                        if (asset.tag === 'script') {
-                            return `<script ${attributeString} ${cspNonce ? `nonce="${cspNonce}"` : ''}></script>`;
-                        }
-                        if (asset.tag === 'link') {
-                            return `<link ${attributeString}>`;
-                        }
-                        if (asset.tag === 'style') {
-                            return `<style ${attributeString}>${asset.children || ''}</style>`;
-                        }
-                    })
-                    .join('\n');
-                const transformHtml = template
-                    .replace(
-                        '<!--app-head-->',
-                        `${generateHtmlHead(meta)}\n${assetsHtml}\n${hydrationScript({ nonce: cspNonce })}`,
-                    )
-                    .replace(
-                        '<!--app-body-->',
-                        (html ?? '') + manifestHtml + clientHydrationScript,
+                } catch (error) {
+                    streamError = streamError ?? error;
+                    throw error;
+                } finally {
+                    const statusCode = getResponseStatus(event) || 200;
+                    const respCtx = createResponseContext(reqCtx, statusCode);
+                    await safeExecuteHook(
+                        'onResponseEnd',
+                        inst?.onResponseEnd,
+                        req,
+                        respCtx,
                     );
-                push(transformHtml);
-                controller.close();
-                return;
+                    if (streamError) {
+                        await safeExecuteHook(
+                            'onRequestError',
+                            inst?.onRequestError as any,
+                            streamError,
+                            req,
+                            reqCtx,
+                        );
+                    }
+                }
             },
         });
         return stream;
     } catch (e: any) {
-        if (
-            e instanceof RedirectError ||
-            e.name === 'RedirectError'
-        ) {
-            return new Response('', { status: 302, headers: { Location: e.message } } );
+        if (e instanceof RedirectError || e.name === 'RedirectError') {
+            return new Response('', {
+                status: 302,
+                headers: { Location: e.message },
+            });
         }
         console.error(e);
         return new Response('Internal Server Error', { status: 500 });

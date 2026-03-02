@@ -21,6 +21,7 @@
         "./utils/error-handler": "./utils/error-handler.js",
         "./utils/fetch.client": "./utils/fetch.client.js",
         "./utils/fetch.server": "./utils/fetch.server.js",
+        "./utils/instrumentation": "./utils/instrumentation.js",
         "./utils/loader": "./utils/loader.js",
         "./utils/logger": "./utils/logger.js",
         "./utils/meta": "./utils/meta.js",
