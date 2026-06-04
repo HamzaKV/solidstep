@@ -143,17 +143,17 @@ export const insertRoute = (
             continue;
         }
 
-        if (parsed.type === 'catchAll') {
-            if (!node.catchAllChild) {
-                node.catchAllChild = {
-                    name: parsed.name,
-                    optional: parsed.optional,
-                    node: createNode()
-                };
-            }
-            node = node.catchAllChild.node;
-            break; // catch-all always consumes the rest
+        // Only catchAll segments reach here — static and param both continue above
+        const catchAll = parsed as Extract<ParseSegment, { type: 'catchAll' }>;
+        if (!node.catchAllChild) {
+            node.catchAllChild = {
+                name: catchAll.name,
+                optional: catchAll.optional,
+                node: createNode()
+            };
         }
+        node = node.catchAllChild.node;
+        break; // catch-all always consumes the rest
     }
 
     node.handler = handler;

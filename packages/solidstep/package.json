@@ -95,6 +95,8 @@
         "clean": "rimraf ./dist",
         "copy-files:root": "copyfiles -u 0 README.md package.json generate/**/* LICENSE ./dist",
         "build": "pnpm clean && tsc && pnpm copy-files:root",
+        "test": "vitest run",
+        "test:watch": "vitest",
         "test:local": "pnpm build && cd ./dist && pnpm link --global",
         "test:local:clean": "pnpm unlink && pnpm clean",
         "roll": "pnpm build && cd dist && npm publish"
@@ -116,11 +118,13 @@
         "vite-plugin-solid": "^2.11.7"
     },
     "devDependencies": {
+        "@vitest/coverage-v8": "^4.1.8",
         "copyfiles": "^2.4.1",
         "rimraf": "^6.0.1",
         "solid-js": "^1.9.7",
         "typescript": "^5.8.3",
-        "vinxi": "^0.5.8"
+        "vinxi": "^0.5.8",
+        "vitest": "^4.1.8"
     },
     "peerDependencies": {
         "solid-js": "^1.9.7",

@@ -17,32 +17,23 @@ let tail: CacheValue | undefined;
 const moveToFront = <T>(node: CacheValue<T>) => {
     if (node === head) return;
 
-    // Detach
-    if (node.prev) node.prev.next = node.next;
+    // node.prev is always defined here: node !== head guarantees a predecessor
+    node.prev!.next = node.next;
     if (node.next) node.next.prev = node.prev;
-
     if (node === tail) tail = node.prev;
 
-    // Insert at head
+    // head is always defined here: there are ≥2 nodes when moveToFront is reached
     node.prev = undefined;
     node.next = head;
-    if (head) head.prev = node;
+    head!.prev = node;
     head = node;
-
-    if (!tail) tail = node;
 };
 
-const removeTail = <T>() => {
-    if (!tail) return;
-    cacheMap.delete(tail.key);
-
-    if (tail.prev) {
-        tail.prev.next = undefined;
-        tail = tail.prev;
-    } else {
-        // Only one node
-        head = tail = undefined;
-    }
+// Only called when cacheMap.size > MAX_CACHE_ENTRIES, so tail and tail.prev are always defined.
+const removeTail = () => {
+    cacheMap.delete(tail!.key);
+    tail!.prev!.next = undefined;
+    tail = tail!.prev!;
 };
 
 export const getCache = <T>(key: string): T | null => {

@@ -132,7 +132,6 @@ const serializePolicy = (policy: CSPPolicy): string =>
 
 const parseDirective = (directiveStr: string): CSPDirective | null => {
     const parts = directiveStr.trim().split(/\s+/);
-    if (parts.length < 1) return null;
 
     const [name, ...sources] = parts;
     return createDirective(name as DirectiveName, sources);
