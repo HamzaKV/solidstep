@@ -314,6 +314,16 @@ export async function handleServerFunction(event: HTTPEvent) {
             },
         );
 
+        // No-JS fallback: native form submission without client-side JS
+        // When there's no X-Server-Instance header, this is a plain form POST.
+        // Execute the action and redirect back to the referring page.
+        if (!instance) {
+            const referer = request.headers.get('Referer') || '/';
+            setResponseStatus(event, 303);
+            setHeader(event, 'Location', referer);
+            return '';
+        }
+
         // handle responses
         if (result instanceof Response) {
             if (result.headers?.has('X-Content-Raw')) return result;

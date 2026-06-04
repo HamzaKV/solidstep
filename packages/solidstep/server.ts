@@ -33,10 +33,13 @@ import {
 
 let instrumentationReady: Promise<void> | null = null;
 
-// Module cache for dynamically imported modules
+// Module cache for dynamically imported modules — skipped in dev so HMR invalidations are respected
 const moduleCache = new Map<string, any>();
 
 const getCachedModule = async <T>(importFn: Import): Promise<T> => {
+    if (import.meta.env.DEV) {
+        return importFn.import() as Promise<T>;
+    }
     const key = importFn.src;
     if (moduleCache.has(key)) {
         return moduleCache.get(key);
@@ -900,7 +903,7 @@ const handler = eventHandler(async (event) => {
                         <script ${cspNonce ? `nonce="${cspNonce}"` : ''}>
                         const head = document.querySelector('head');
                         const scripts = Array.from(head.querySelectorAll('script'));
-                        head.innerHTML = \`${generateHtmlHead(meta) + assetsHtml}\`;
+                        head.innerHTML = ${JSON.stringify(generateHtmlHead(meta) + assetsHtml)};
                         scripts.forEach(script => {
                             head.appendChild(script);
                         });
@@ -909,7 +912,7 @@ const handler = eventHandler(async (event) => {
                         const template = document.getElementById('__page_html__');
                         loading.innerHTML = template.innerHTML;
                         template.remove();
-                        </script> 
+                        </script>
                     `);
                         push(manifestHtml);
                         push(clientHydrationScript);

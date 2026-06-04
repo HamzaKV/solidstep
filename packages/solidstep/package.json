@@ -10,24 +10,86 @@
     },
     "license": "MIT",
     "exports": {
-        ".": "./index.js",
-        "./hooks/action-state": "./utils/hooks/action-state.js",
-        "./utils/cache": "./utils/cache.js",
-        "./utils/client-only": "./utils/client-only.js",
-        "./utils/cookies": "./utils/cookies.js",
-        "./utils/cors": "./utils/cors.js",
-        "./utils/csp": "./utils/csp.js",
-        "./utils/csrf": "./utils/csrf.js",
-        "./utils/error-handler": "./utils/error-handler.js",
-        "./utils/fetch.client": "./utils/fetch.client.js",
-        "./utils/fetch.server": "./utils/fetch.server.js",
-        "./utils/instrumentation": "./utils/instrumentation.js",
-        "./utils/loader": "./utils/loader.js",
-        "./utils/logger": "./utils/logger.js",
-        "./utils/meta": "./utils/meta.js",
-        "./utils/options": "./utils/options.js",
-        "./utils/redirect": "./utils/redirect.js",
-        "./utils/server-only": "./utils/server-only.js"
+        ".": {
+            "types": "./index.d.ts",
+            "default": "./index.js"
+        },
+        "./hooks/action-state": {
+            "types": "./utils/hooks/action-state.d.ts",
+            "default": "./utils/hooks/action-state.js"
+        },
+        "./form": {
+            "types": "./utils/components/form.d.ts",
+            "default": "./utils/components/form.js"
+        },
+        "./hooks/form-status": {
+            "types": "./utils/hooks/form-status.d.ts",
+            "default": "./utils/hooks/form-status.js"
+        },
+        "./utils/cache": {
+            "types": "./utils/cache.d.ts",
+            "default": "./utils/cache.js"
+        },
+        "./utils/client-only": {
+            "types": "./utils/client-only.d.ts",
+            "default": "./utils/client-only.js"
+        },
+        "./utils/cookies": {
+            "types": "./utils/cookies.d.ts",
+            "default": "./utils/cookies.js"
+        },
+        "./utils/cors": {
+            "types": "./utils/cors.d.ts",
+            "default": "./utils/cors.js"
+        },
+        "./utils/csp": {
+            "types": "./utils/csp.d.ts",
+            "default": "./utils/csp.js"
+        },
+        "./utils/csrf": {
+            "types": "./utils/csrf.d.ts",
+            "default": "./utils/csrf.js"
+        },
+        "./utils/error-handler": {
+            "types": "./utils/error-handler.d.ts",
+            "default": "./utils/error-handler.js"
+        },
+        "./utils/fetch.client": {
+            "types": "./utils/fetch.client.d.ts",
+            "default": "./utils/fetch.client.js"
+        },
+        "./utils/fetch.server": {
+            "types": "./utils/fetch.server.d.ts",
+            "default": "./utils/fetch.server.js"
+        },
+        "./utils/instrumentation": {
+            "types": "./utils/instrumentation.d.ts",
+            "default": "./utils/instrumentation.js"
+        },
+        "./utils/loader": {
+            "types": "./utils/loader.d.ts",
+            "default": "./utils/loader.js"
+        },
+        "./utils/logger": {
+            "types": "./utils/logger.d.ts",
+            "default": "./utils/logger.js"
+        },
+        "./utils/meta": {
+            "types": "./utils/meta.d.ts",
+            "default": "./utils/meta.js"
+        },
+        "./utils/options": {
+            "types": "./utils/options.d.ts",
+            "default": "./utils/options.js"
+        },
+        "./utils/redirect": {
+            "types": "./utils/redirect.d.ts",
+            "default": "./utils/redirect.js"
+        },
+        "./utils/server-only": {
+            "types": "./utils/server-only.d.ts",
+            "default": "./utils/server-only.js"
+        }
     },
     "scripts": {
         "clean": "rimraf ./dist",
