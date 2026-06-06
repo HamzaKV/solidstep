@@ -111,9 +111,15 @@ const createRouteManifest = async () => {
         }
 
         if (fileRoute.type === 'group') {
-            const parentPath = fileRoute.parent
-                ? getNormalizedPath(fileRoute.parent)
-                : '';
+            // `fileRoute.parent` is already a clean route path (e.g. '/dashboard'
+            // or '' for the root), so it must NOT go through getNormalizedPath,
+            // which strips a leading prefix. Normalize it the same way page
+            // routePaths are (drop '(group)' segments, ensure a leading slash) so
+            // nested parallel routes attach to their parent route.
+            const parentPath = `/${(fileRoute.parent || '')
+                .split('/')
+                .filter((s) => s && !s.startsWith('('))
+                .join('/')}`;
             const existing = groupsMap.get(parentPath) || [];
             existing.push(fileRoute);
             groupsMap.set(parentPath, existing);
@@ -337,12 +343,18 @@ const render = async ({
             loader: pageToRender.loader,
         });
     }
+    // A `$loader` import is created for every layout/page node, even when the
+    // file exports no loader — in that case the picked module is empty and has
+    // no `loader` export, so we skip it. Only nodes whose loader actually ran
+    // get an entry here, which is how the closures below decide whether to
+    // populate loaderData (matching the previous in-closure behavior).
     const resolvedLoaderData = new Map<string, any>();
     await Promise.all(
         loaderTargets.map(async ({ manifestPath, loader }) => {
             const { loader: loaderFn } = await getCachedModule<{ loader: any }>(
                 loader,
             );
+            if (!loaderFn) return;
             const result = await loaderFn.loader(req);
             resolvedLoaderData.set(manifestPath, result.data || {});
         }),
@@ -375,8 +387,8 @@ const render = async ({
                     };
                 }
             }
-            if (layout.loader) {
-                data = resolvedLoaderData.get(layout.manifestPath) ?? {};
+            if (resolvedLoaderData.has(layout.manifestPath)) {
+                data = resolvedLoaderData.get(layout.manifestPath);
                 loaderData[layout.manifestPath] = data;
             }
             const slots: Record<string, any> = {};
@@ -444,8 +456,8 @@ const render = async ({
                 : { generateMeta: null };
 
             let data = {};
-            if (pageToRender.loader) {
-                data = resolvedLoaderData.get(pageToRender.manifestPath) ?? {};
+            if (resolvedLoaderData.has(pageToRender.manifestPath)) {
+                data = resolvedLoaderData.get(pageToRender.manifestPath);
                 loaderData[pageToRender.manifestPath] = data;
             }
             if (generateMeta) {

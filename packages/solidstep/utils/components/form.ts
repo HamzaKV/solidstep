@@ -1,15 +1,9 @@
-import { createSignal, createComponent, splitProps } from 'solid-js';
-import { insert, template, delegateEvents, spread } from 'solid-js/web';
+import { createComponent, createSignal, splitProps, mergeProps } from 'solid-js';
+import { Dynamic } from 'solid-js/web';
 import {
     FormStatusContext,
     type FormStatusContextValue,
 } from '../hooks/form-status';
-
-// Template for the form element (created once, cloned per instance)
-const _tmpl$ = /* @__PURE__ */ template(`<form method="POST">`);
-
-// Register submit event for Solid's event delegation system
-delegateEvents(['submit']);
 
 /**
  * A server action function created by the `'use server'` directive.
@@ -37,6 +31,9 @@ export type FormProps = {
  * - Supports progressive enhancement: when JS is disabled, the form
  *   submits natively to the server action URL (if the action has one)
  * - Supports `formAction` overrides on submitter elements (buttons)
+ *
+ * Rendered with Solid's isomorphic `Dynamic`, so it server-renders and hydrates
+ * correctly (no client-only primitives are evaluated on the server).
  *
  * @example
  * ```tsx
@@ -100,29 +97,34 @@ const Form = (props: FormProps) => {
         }
     };
 
+    // `Dynamic` renders a real <form> on both server and client. The `onSubmit`
+    // handler is attached only on the client (ignored during SSR); `method` and
+    // `action` are emitted as attributes for the no-JS progressive-enhancement
+    // fallback. Remaining props (class, id, data-*, ...) are spread through.
+    const formProps: any = mergeProps(
+        {
+            component: 'form',
+            method: 'POST',
+            onSubmit: handleSubmit,
+            get action() {
+                return actionUrl() ?? undefined;
+            },
+        },
+        others,
+        {
+            get children() {
+                return local.children;
+            },
+        },
+    );
+
     return createComponent(FormStatusContext.Provider, {
         value: contextValue,
         get children() {
-            const el = _tmpl$() as HTMLFormElement;
-
-            // Set action URL for progressive enhancement (no-JS fallback)
-            const url = actionUrl();
-            if (url) {
-                el.setAttribute('action', url);
-            }
-
-            // Attach submit handler via Solid's event delegation
-            (el as any).$$submit = handleSubmit;
-
-            // Spread additional props (class, id, style, data-*, etc.)
-            spread(el, others, false, false);
-
-            // Insert children into the form element
-            insert(el, () => local.children);
-
-            return el;
+            return createComponent(Dynamic, formProps);
         },
     });
 };
 
+export { Form };
 export default Form;

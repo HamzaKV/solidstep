@@ -268,7 +268,9 @@ export class ClientRouter extends BaseFileSystemRouter {
                 path: `/not-found${path}`,
                 $component: {
                     src: filePath,
-                    pick: ['default'],
+                    // Include `$css` so the client manifest has the same variant
+                    // the server looks up when rendering the not-found page.
+                    pick: ['default', '$css'],
                 },
             };
         }

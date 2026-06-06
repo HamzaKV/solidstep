@@ -22,4 +22,5 @@ const useFormStatus = (): FormStatusContextValue => {
     return ctx;
 };
 
+export { useFormStatus };
 export default useFormStatus;

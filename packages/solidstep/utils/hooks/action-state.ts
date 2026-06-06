@@ -43,4 +43,5 @@ const useActionState = <T>(
     return [state, formAction, isPending, error];
 };
 
+export { useActionState };
 export default useActionState;
