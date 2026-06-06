@@ -78,6 +78,10 @@
             "types": "./utils/meta.d.ts",
             "default": "./utils/meta.js"
         },
+        "./utils/middleware": {
+            "types": "./utils/middleware.d.ts",
+            "default": "./utils/middleware.js"
+        },
         "./utils/options": {
             "types": "./utils/options.d.ts",
             "default": "./utils/options.js"

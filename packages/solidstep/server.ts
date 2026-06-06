@@ -306,6 +306,48 @@ const render = async ({
     const loaderData: Record<string, any> = {};
     const clientManifest = getManifest('client');
     const assets: any[] = [];
+
+    // Select the page variant being rendered up front so its loader can be
+    // pre-resolved alongside the layout loaders.
+    const pageToRender: any =
+        toRender === 'loading'
+            ? entry.loadingPage
+            : toRender === 'error'
+              ? entry.errorPage
+              : toRender === 'not-found'
+                ? entry.notFoundPage
+                : entry.mainPage;
+
+    // Run every layout loader and the page loader concurrently instead of
+    // sequentially down the layout chain. Results are keyed by manifestPath and
+    // applied in tree order below, so loaderData ordering and per-node data are
+    // unchanged — only the awaits now overlap.
+    const loaderTargets: { manifestPath: string; loader: any }[] = [];
+    for (const layout of entry.layouts) {
+        if (layout.loader) {
+            loaderTargets.push({
+                manifestPath: layout.manifestPath,
+                loader: layout.loader,
+            });
+        }
+    }
+    if (pageToRender?.loader) {
+        loaderTargets.push({
+            manifestPath: pageToRender.manifestPath,
+            loader: pageToRender.loader,
+        });
+    }
+    const resolvedLoaderData = new Map<string, any>();
+    await Promise.all(
+        loaderTargets.map(async ({ manifestPath, loader }) => {
+            const { loader: loaderFn } = await getCachedModule<{ loader: any }>(
+                loader,
+            );
+            const result = await loaderFn.loader(req);
+            resolvedLoaderData.set(manifestPath, result.data || {});
+        }),
+    );
+
     const compose = entry.layouts.reduceRight(
         (children, layout, index) => async () => {
             const moduleSrc = `${layout.layout.src}&pick=$css`;
@@ -315,9 +357,6 @@ const render = async ({
             const { default: layoutModule } = await getCachedModule<{
                 default: any;
             }>(layout.layout);
-            const { loader: layoutLoader } = layout.loader
-                ? await getCachedModule<{ loader: any }>(layout.loader)
-                : { loader: null };
             const { generateMeta: generateMetaPage } = layout.generateMeta
                 ? await getCachedModule<{ generateMeta: any }>(
                       layout.generateMeta,
@@ -336,9 +375,8 @@ const render = async ({
                     };
                 }
             }
-            if (layoutLoader) {
-                const result = await layoutLoader.loader(req);
-                data = result.data || {};
+            if (layout.loader) {
+                data = resolvedLoaderData.get(layout.manifestPath) ?? {};
                 loaderData[layout.manifestPath] = data;
             }
             const slots: Record<string, any> = {};
@@ -392,14 +430,6 @@ const render = async ({
                 });
         },
         async () => {
-            const pageToRender: any =
-                toRender === 'loading'
-                    ? entry.loadingPage
-                    : toRender === 'error'
-                      ? entry.errorPage
-                      : toRender === 'not-found'
-                        ? entry.notFoundPage
-                        : entry.mainPage;
             const moduleSrc = `${pageToRender.page.src}&pick=$css`;
             const moduleAssets =
                 await clientManifest.inputs[moduleSrc].assets();
@@ -407,9 +437,6 @@ const render = async ({
             const { default: page } = await getCachedModule<{ default: any }>(
                 pageToRender.page,
             );
-            const { loader: pageLoader } = pageToRender.loader
-                ? await getCachedModule<{ loader: any }>(pageToRender.loader)
-                : { loader: null };
             const { generateMeta } = pageToRender.generateMeta
                 ? await getCachedModule<{ generateMeta: any }>(
                       pageToRender.generateMeta,
@@ -417,9 +444,8 @@ const render = async ({
                 : { generateMeta: null };
 
             let data = {};
-            if (pageLoader) {
-                const result = await pageLoader.loader(req);
-                data = result.data || {};
+            if (pageToRender.loader) {
+                data = resolvedLoaderData.get(pageToRender.manifestPath) ?? {};
                 loaderData[pageToRender.manifestPath] = data;
             }
             if (generateMeta) {
