@@ -297,22 +297,24 @@ export async function handleServerFunction(event: HTTPEvent) {
         }
     }
     try {
-        let result = await provideRequestEvent(
-            {
-                request: getWebRequest(event),
-                response: createResponseStub(event),
-                clientAddress: getRequestIP(event),
-                locals: {},
-                nativeEvent: event,
-            },
-            async () => {
-                sharedConfig.context = { event } as any;
-                (event as any).locals.serverFunctionMeta = {
-                    id: `${functionId}#${name}`,
-                };
-                return serverFunction(...parsed);
-            },
-        );
+        // The request event owns its own `locals`, initialized here. Attaching the
+        // metadata to the native h3 event instead would crash when no user middleware
+        // has set `event.locals` (it is optional), and would also place the metadata
+        // off the event that user code reads via `getRequestEvent().locals`.
+        const requestEvent = {
+            request: getWebRequest(event),
+            response: createResponseStub(event),
+            clientAddress: getRequestIP(event),
+            locals: {} as Record<string, any>,
+            nativeEvent: event,
+        };
+        let result = await provideRequestEvent(requestEvent, async () => {
+            sharedConfig.context = { event } as any;
+            requestEvent.locals.serverFunctionMeta = {
+                id: `${functionId}#${name}`,
+            };
+            return serverFunction(...parsed);
+        });
 
         // No-JS fallback: native form submission without client-side JS
         // When there's no X-Server-Instance header, this is a plain form POST.
