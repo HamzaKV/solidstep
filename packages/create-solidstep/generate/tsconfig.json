@@ -8,9 +8,10 @@
 		"jsx": "preserve",
 		"jsxImportSource": "solid-js",
 		"allowJs": true,
-		"checkJs": true,
+		"checkJs": false,
 		"noEmit": true,
 		"types": ["vinxi/client"],
-		"isolatedModules": true
+		"isolatedModules": true,
+		"skipLibCheck": true
 	}
 }

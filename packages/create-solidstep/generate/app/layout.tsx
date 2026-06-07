@@ -1,7 +1,7 @@
 import type { Component, JSX } from 'solid-js';
 import './globals.css';
 
-export const generateMeta = ({ cspNonce }) => ({
+export const generateMeta = () => ({
     'title': {
         type: 'title',
         attributes: {},
@@ -9,9 +9,9 @@ export const generateMeta = ({ cspNonce }) => ({
     },
     'description': {
         type: 'meta',
-        attributes: { 
+        attributes: {
             name: 'description',
-            content: 'This is simple SolidStep application.' 
+            content: 'This is a simple SolidStep application.'
         },
     },
     'favicon': {
@@ -24,16 +24,14 @@ export const generateMeta = ({ cspNonce }) => ({
     },
 });
 
-const Layout: Component<{ 
-    children: JSX.Element;
-}> = ({
-    children,
-}) => {
+const Layout: Component<{
+    children: () => JSX.Element;
+}> = (props) => {
     return (
         <body>
-            {children}
+            {props.children()}
         </body>
     );
-}
+};
 
 export default Layout;
