@@ -104,6 +104,24 @@ export default defineConfig({
 });
 ```
 
+__Exposing the dev server through a tunnel__
+
+If you forward the dev server through a tunnel (ngrok, Cloudflare Tunnel, etc.) and hit:
+
+> Blocked request. This host ("xxx.xxx.xxx.dev") is not allowed.
+
+add the tunnel hostname to `vite.server.allowedHosts`:
+
+```tsx
+export default defineConfig({
+  vite: {
+    server: {
+      allowedHosts: ['my-tunnel.example.dev'], // or `true` to allow any host
+    },
+  },
+});
+```
+
 ### Project Structure
 
 ```

@@ -119,24 +119,30 @@ export const defineConfig = (config: Config = {
                         .map(p => p.plugin) || []),
                     serverFunctions.server(),
                     solid({ ssr: true }),
-                    viteConfigPlugin('app-server', {
-                        resolve: {
-                            alias: {
-                                instrumentation: (() => {
-                                    const userInstrumentationTs = join(process.cwd(), 'app', 'instrumentation.ts');
-                                    const userInstrumentationJs = join(process.cwd(), 'app', 'instrumentation.js');
-                                    if (existsSync(userInstrumentationTs)) {
-                                        return userInstrumentationTs;
-                                    } else if (existsSync(userInstrumentationJs)) {
-                                        return userInstrumentationJs;
-                                    } else {
-                                        return normalize(fileURLToPath(new URL('./utils/instrumentation-noop.js', import.meta.url)));
-                                    }
-                                })(),
-                                ...(viteConfig({ router: 'server' })?.resolve?.alias || {}),
+                    viteConfigPlugin('app-server', (() => {
+                        const userServerVite = viteConfig({ router: 'server' }) || {};
+                        const instrumentationPath = (() => {
+                            const userInstrumentationTs = join(process.cwd(), 'app', 'instrumentation.ts');
+                            const userInstrumentationJs = join(process.cwd(), 'app', 'instrumentation.js');
+                            if (existsSync(userInstrumentationTs)) {
+                                return userInstrumentationTs;
+                            } else if (existsSync(userInstrumentationJs)) {
+                                return userInstrumentationJs;
+                            } else {
+                                return normalize(fileURLToPath(new URL('./utils/instrumentation-noop.js', import.meta.url)));
+                            }
+                        })();
+                        return {
+                            ...userServerVite,
+                            resolve: {
+                                ...userServerVite.resolve,
+                                alias: {
+                                    instrumentation: instrumentationPath,
+                                    ...(userServerVite.resolve?.alias || {}),
+                                },
                             },
-                        },
-                    }),
+                        };
+                    })()),
                 ],
                 middleware: './app/middleware.ts',
                 routes: (router, app) => {

@@ -12,7 +12,7 @@
     "author": "",
     "dependencies": {
         "solid-js": "^1.9.9",
-        "solidstep": "^0.3.5",
+        "solidstep": "^0.4.0",
         "vinxi": "^0.5.8"
     },
     "devDependencies": {
