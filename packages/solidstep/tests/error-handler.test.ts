@@ -61,8 +61,13 @@ describe('default metadata', () => {
     });
 
     it('merges defaultMetadata with override metadata', () => {
-        const err = createError('db-error', { metadata: { query: 'SELECT 1' } });
-        expect(err.metadata).toMatchObject({ retryable: true, query: 'SELECT 1' });
+        const err = createError('db-error', {
+            metadata: { query: 'SELECT 1' },
+        });
+        expect(err.metadata).toMatchObject({
+            retryable: true,
+            query: 'SELECT 1',
+        });
     });
 });
 
@@ -98,7 +103,9 @@ describe('action', () => {
     });
 
     it('uses a default console.error action when neither catalog nor override provides one', () => {
-        const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const consoleSpy = vi
+            .spyOn(console, 'error')
+            .mockImplementation(() => {});
         const err = createError('not-found');
         err.action();
         expect(consoleSpy).toHaveBeenCalled();
@@ -110,14 +117,22 @@ describe('instanceof checks', () => {
     it('can be caught as Error', () => {
         const err = createError('db-error');
         let caught: unknown;
-        try { throw err; } catch (e) { caught = e; }
+        try {
+            throw err;
+        } catch (e) {
+            caught = e;
+        }
         expect(caught instanceof Error).toBe(true);
     });
 
     it('can be caught as FunctionalAppError', () => {
         const err = createError('db-error');
         let caught: unknown;
-        try { throw err; } catch (e) { caught = e; }
+        try {
+            throw err;
+        } catch (e) {
+            caught = e;
+        }
         expect(caught instanceof FunctionalAppError).toBe(true);
     });
 });

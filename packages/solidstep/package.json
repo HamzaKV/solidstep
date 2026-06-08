@@ -97,7 +97,7 @@
     },
     "scripts": {
         "clean": "rimraf ./dist",
-        "copy-files:root": "copyfiles -u 0 README.md package.json generate/**/* LICENSE ./dist",
+        "copy-files:root": "copyfiles -u 0 README.md package.json generate/**/* LICENSE CHANGELOG.md ./dist",
         "build": "pnpm clean && tsc && pnpm copy-files:root",
         "test": "vitest run",
         "test:watch": "vitest",
@@ -138,6 +138,7 @@
         "node": ">=20"
     },
     "publishConfig": {
-        "access": "public"
+        "access": "public",
+        "directory": "dist"
     }
 }

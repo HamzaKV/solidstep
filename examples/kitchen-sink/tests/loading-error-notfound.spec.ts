@@ -12,7 +12,9 @@ test.describe('loading, error, and not-found boundaries', () => {
 
         // The streamed page eventually swaps in the real content.
         await page.goto('/slow');
-        await expect(page.getByTestId('slow-content')).toHaveText('loaded: true');
+        await expect(page.getByTestId('slow-content')).toHaveText(
+            'loaded: true',
+        );
     });
 
     test('error boundary renders error.tsx with the thrown message', async ({

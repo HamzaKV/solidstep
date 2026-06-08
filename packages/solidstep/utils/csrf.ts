@@ -1,14 +1,12 @@
 const SAFE_METHODS = ['GET', 'OPTIONS', 'HEAD', 'TRACE'];
 
-export const csrf = (
-    trustedOrigins: string[],
-    safeMethods: string[] = SAFE_METHODS
-) => 
+export const csrf =
+    (trustedOrigins: string[], safeMethods: string[] = SAFE_METHODS) =>
     (
         requestMethod: string,
-        requestUrl: URL, 
-        origin?: string, 
-        referer?: string
+        requestUrl: URL,
+        origin?: string,
+        referer?: string,
     ) => {
         // Check if the request method is safe
         if (!safeMethods.includes(requestMethod)) {

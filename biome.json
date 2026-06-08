@@ -14,6 +14,12 @@
             "build/",
             "out/",
             ".next/",
+            ".output/",
+            ".vinxi/",
+            "coverage/",
+            ".history/",
+            ".opencode/",
+            ".sisyphus/",
             "*.json",
             "payload-types.ts",
             "*.css"

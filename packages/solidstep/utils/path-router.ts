@@ -1,4 +1,3 @@
-
 export type Import = {
     src: string;
     import: any;
@@ -45,10 +44,10 @@ export type RoutePageHandler = {
 
 export type RouteHandler =
     | {
-        type: 'route';
-        handler: Import;
-        manifestPath: string;
-    }
+          type: 'route';
+          handler: Import;
+          manifestPath: string;
+      }
     | RoutePageHandler;
 
 type Params = Record<string, string | string[]>;
@@ -59,40 +58,40 @@ export type RouteNode = {
     paramChild?: {
         name: string;
         node: RouteNode;
-    }
+    };
 
     catchAllChild?: {
         name: string;
         optional: boolean;
         node: RouteNode;
-    }
+    };
 
     handler?: RouteHandler;
 };
 
 export const createNode = (): RouteNode => ({
-    staticChildren: new Map()
+    staticChildren: new Map(),
 });
 
-type ParseSegment = 
-    {
-        type: 'static';
-        value: string;
-    }
+type ParseSegment =
     | {
-        type: 'param';
-        name: string;
-    }
+          type: 'static';
+          value: string;
+      }
     | {
-        type: 'catchAll';
-        optional: true;
-        name: string;
-    }
+          type: 'param';
+          name: string;
+      }
     | {
-        type: 'catchAll';
-        optional: false;
-        name: string;
-    };
+          type: 'catchAll';
+          optional: true;
+          name: string;
+      }
+    | {
+          type: 'catchAll';
+          optional: false;
+          name: string;
+      };
 
 const parseSegment = (segment: string): ParseSegment => {
     // [[...slug]]
@@ -102,7 +101,11 @@ const parseSegment = (segment: string): ParseSegment => {
 
     // [...slug]
     if (segment.startsWith('[...') && segment.endsWith(']')) {
-        return { type: 'catchAll', name: segment.slice(4, -1), optional: false };
+        return {
+            type: 'catchAll',
+            name: segment.slice(4, -1),
+            optional: false,
+        };
     }
 
     // [id]
@@ -116,7 +119,7 @@ const parseSegment = (segment: string): ParseSegment => {
 export const insertRoute = (
     root: RouteNode,
     path: string,
-    handler: RouteHandler
+    handler: RouteHandler,
 ) => {
     const segments = path.split('/').filter(Boolean);
     let node = root;
@@ -136,7 +139,7 @@ export const insertRoute = (
             if (!node.paramChild) {
                 node.paramChild = {
                     name: parsed.name,
-                    node: createNode()
+                    node: createNode(),
                 };
             }
             node = node.paramChild.node;
@@ -149,7 +152,7 @@ export const insertRoute = (
             node.catchAllChild = {
                 name: catchAll.name,
                 optional: catchAll.optional,
-                node: createNode()
+                node: createNode(),
             };
         }
         node = node.catchAllChild.node;
@@ -160,21 +163,15 @@ export const insertRoute = (
 };
 
 type MatchResult = {
-    handler: RouteHandler
-    params: Params
-} | null
+    handler: RouteHandler;
+    params: Params;
+} | null;
 
-export const matchRoute = (
-    root: RouteNode,
-    path: string
-): MatchResult => {
+export const matchRoute = (root: RouteNode, path: string): MatchResult => {
     const segments = path.split('/').filter(Boolean);
     const params: Params = {};
 
-    const walk = (
-        node: RouteNode,
-        index: number
-    ): RouteHandler | null => {
+    const walk = (node: RouteNode, index: number): RouteHandler | null => {
         // End of path
         if (index === segments.length) {
             if (node.handler) return node.handler;
@@ -208,14 +205,14 @@ export const matchRoute = (
         // 3. Catch-all
         if (node.catchAllChild) {
             params[node.catchAllChild.name] = segments.slice(index);
-            return node.catchAllChild.node.handler?? null;
+            return node.catchAllChild.node.handler ?? null;
         }
 
         return null;
-    }
+    };
 
     const handler = walk(root, 0);
     if (!handler) return null;
 
     return { handler, params };
-}
+};

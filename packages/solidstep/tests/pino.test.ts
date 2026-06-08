@@ -4,7 +4,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 beforeEach(() => {
     vi.resetModules();
     // Remove any previously set config
-    delete (globalThis as any).__SOLIDSTEP_CONFIG__;
+    (globalThis as any).__SOLIDSTEP_CONFIG__ = undefined;
 });
 
 import { vi } from 'vitest';
@@ -39,7 +39,9 @@ describe('getLogger', () => {
     });
 
     it('applies a custom config object', async () => {
-        (globalThis as any).__SOLIDSTEP_CONFIG__ = { logger: { level: 'warn' } };
+        (globalThis as any).__SOLIDSTEP_CONFIG__ = {
+            logger: { level: 'warn' },
+        };
         const { getLogger } = await import('../utils/pino.ts');
         const logger = getLogger();
         expect(logger.level).toBe('warn');

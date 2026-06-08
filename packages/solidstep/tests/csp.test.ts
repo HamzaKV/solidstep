@@ -113,8 +113,12 @@ describe('withHash', () => {
         const policy = createBasePolicy();
         const updated384 = withHash(policy, 'hashval', 'sha384');
         const updated512 = withHash(policy, 'hashval', 'sha512');
-        expect(hasSource(updated384, 'script-src', "'sha384-hashval'")).toBe(true);
-        expect(hasSource(updated512, 'script-src', "'sha512-hashval'")).toBe(true);
+        expect(hasSource(updated384, 'script-src', "'sha384-hashval'")).toBe(
+            true,
+        );
+        expect(hasSource(updated512, 'script-src', "'sha512-hashval'")).toBe(
+            true,
+        );
     });
 });
 
@@ -162,7 +166,12 @@ describe('withDevelopmentSources / withProductionSources', () => {
 describe('mergePolicies', () => {
     it('merges two policies without duplicating sources', () => {
         const p1 = [createDirective('script-src', ["'self'"])];
-        const p2 = [createDirective('script-src', ["'self'", 'https://cdn.example.com'])];
+        const p2 = [
+            createDirective('script-src', [
+                "'self'",
+                'https://cdn.example.com',
+            ]),
+        ];
         const merged = mergePolicies(p1, p2);
         const scriptSrc = getDirective(merged, 'script-src')!;
         expect(scriptSrc.sources.filter((s) => s === "'self'")).toHaveLength(1);
@@ -185,15 +194,25 @@ describe('addDirective / removeDirective / getDirective / updateDirective', () =
             createDirective('default-src', ["'self'"]),
             createDirective('object-src', ["'none'"]),
         ];
-        const updated = addDirective(policy, createDirective('default-src', ['https:']));
-        expect(getDirective(updated, 'default-src')!.sources).toEqual(['https:']);
+        const updated = addDirective(
+            policy,
+            createDirective('default-src', ['https:']),
+        );
+        expect(getDirective(updated, 'default-src')!.sources).toEqual([
+            'https:',
+        ]);
         // object-src must be unchanged (the non-matching `: d` branch)
-        expect(getDirective(updated, 'object-src')!.sources).toEqual(["'none'"]);
+        expect(getDirective(updated, 'object-src')!.sources).toEqual([
+            "'none'",
+        ]);
     });
 
     it('addDirective appends a brand-new directive', () => {
         const policy = [createDirective('default-src', ["'self'"])];
-        const updated = addDirective(policy, createDirective('object-src', ["'none'"]));
+        const updated = addDirective(
+            policy,
+            createDirective('object-src', ["'none'"]),
+        );
         expect(isDirectivePresent(updated, 'object-src')).toBe(true);
         expect(updated).toHaveLength(2);
     });
@@ -215,13 +234,17 @@ describe('withGoogleFonts', () => {
     it('adds fonts.gstatic.com to font-src', () => {
         const policy = createBasePolicy();
         const updated = withGoogleFonts(policy);
-        expect(hasSource(updated, 'font-src', 'https://fonts.gstatic.com')).toBe(true);
+        expect(
+            hasSource(updated, 'font-src', 'https://fonts.gstatic.com'),
+        ).toBe(true);
     });
 
     it('adds fonts.googleapis.com to style-src', () => {
         const policy = createBasePolicy();
         const updated = withGoogleFonts(policy);
-        expect(hasSource(updated, 'style-src', 'https://fonts.googleapis.com')).toBe(true);
+        expect(
+            hasSource(updated, 'style-src', 'https://fonts.googleapis.com'),
+        ).toBe(true);
     });
 });
 
@@ -234,7 +257,10 @@ describe('hasSource with non-existent directive', () => {
 
 describe('setSources', () => {
     it('replaces all sources on a directive', () => {
-        const d = createDirective('script-src', ["'self'", 'https://cdn.example.com']);
+        const d = createDirective('script-src', [
+            "'self'",
+            'https://cdn.example.com',
+        ]);
         const updated = setSources(d, ["'none'"]);
         expect(updated.sources).toEqual(["'none'"]);
         expect(updated.name).toBe('script-src');

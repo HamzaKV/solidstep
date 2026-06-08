@@ -34,7 +34,9 @@ describe('unsafe methods — origin check', () => {
 
     it('applies to PUT, DELETE, PATCH as well', () => {
         for (const method of ['PUT', 'DELETE', 'PATCH']) {
-            expect(check(method, httpsUrl, 'https://evil.com').success).toBe(false);
+            expect(check(method, httpsUrl, 'https://evil.com').success).toBe(
+                false,
+            );
         }
     });
 });
@@ -47,23 +49,43 @@ describe('unsafe methods — referer check (HTTPS, no origin)', () => {
     });
 
     it('fails when referer uses HTTP (not HTTPS)', () => {
-        const result = check('POST', httpsUrl, undefined, 'http://myapp.com/form');
+        const result = check(
+            'POST',
+            httpsUrl,
+            undefined,
+            'http://myapp.com/form',
+        );
         expect(result.success).toBe(false);
         expect(result.message).toBe('Invalid referer');
     });
 
     it('passes when referer host matches request host', () => {
-        const result = check('POST', httpsUrl, undefined, 'https://myapp.com/form');
+        const result = check(
+            'POST',
+            httpsUrl,
+            undefined,
+            'https://myapp.com/form',
+        );
         expect(result.success).toBe(true);
     });
 
     it('passes when referer host is in trusted origins', () => {
-        const result = check('POST', httpsUrl, undefined, 'https://trusted.example.com/form');
+        const result = check(
+            'POST',
+            httpsUrl,
+            undefined,
+            'https://trusted.example.com/form',
+        );
         expect(result.success).toBe(true);
     });
 
     it('fails when referer host does not match and is not trusted', () => {
-        const result = check('POST', httpsUrl, undefined, 'https://attacker.com/form');
+        const result = check(
+            'POST',
+            httpsUrl,
+            undefined,
+            'https://attacker.com/form',
+        );
         expect(result.success).toBe(false);
         expect(result.message).toBe('Invalid referer');
     });
@@ -79,7 +101,9 @@ describe('HTTP requests — no referer check required', () => {
 describe('custom safe methods', () => {
     it('respects a custom safe methods list', () => {
         const strictCheck = csrf([], ['GET']);
-        expect(strictCheck('OPTIONS', httpsUrl, 'https://evil.com').success).toBe(false);
+        expect(
+            strictCheck('OPTIONS', httpsUrl, 'https://evil.com').success,
+        ).toBe(false);
         expect(strictCheck('GET', httpsUrl).success).toBe(true);
     });
 });

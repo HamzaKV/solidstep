@@ -1,7 +1,12 @@
-import { defineLoader, type LoaderDataFromFunction } from 'solidstep/utils/loader';
+import {
+    defineLoader,
+    type LoaderDataFromFunction,
+} from 'solidstep/utils/loader';
 
 export const loader = defineLoader(async () => {
-    const response = await fetch('https://jsonplaceholder.typicode.com/todos/2');
+    const response = await fetch(
+        'https://jsonplaceholder.typicode.com/todos/2',
+    );
     if (!response.ok) {
         throw new Error('Failed to fetch data');
     }
@@ -15,10 +20,10 @@ export const loader = defineLoader(async () => {
 });
 
 export const generateMeta = () => ({
-    'title': {
+    title: {
         type: 'title',
         attributes: {},
-        content: 'SolidStep Main Page'
+        content: 'SolidStep Main Page',
     },
 });
 
@@ -28,8 +33,12 @@ const Page = (props: { loaderData: LoaderData }) => {
     return (
         <main>
             <h1>Welcome to SolidStep</h1>
-            <p>Edit <code>app/page.tsx</code> to get started.</p>
-            <p>Loaded todo #{props.loaderData.id}: {props.loaderData.title}</p>
+            <p>
+                Edit <code>app/page.tsx</code> to get started.
+            </p>
+            <p>
+                Loaded todo #{props.loaderData.id}: {props.loaderData.title}
+            </p>
         </main>
     );
 };

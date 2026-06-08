@@ -10,7 +10,7 @@ export class RedirectError extends Error {
 export const redirect = (url: string) => {
     if (isServer) {
         throw new RedirectError(url);
-    } 
+    }
     window.location.href = url;
     return;
 };

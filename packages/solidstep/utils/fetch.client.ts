@@ -39,10 +39,7 @@ const Fetch = async <T, S extends boolean = true>(
             signal: controller.signal,
         });
 
-        if (
-            response?.status >= 400 
-            && response?.status <= 599
-        ) {
+        if (response?.status >= 400 && response?.status <= 599) {
             if (json) {
                 throw await response.json();
             }

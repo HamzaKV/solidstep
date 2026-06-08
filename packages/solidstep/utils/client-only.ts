@@ -1,6 +1,12 @@
 // @refresh skip
 import type { Component, ComponentProps, JSX, Setter } from 'solid-js';
-import { createMemo, createSignal, onMount, sharedConfig, untrack } from 'solid-js';
+import {
+    createMemo,
+    createSignal,
+    onMount,
+    sharedConfig,
+    untrack,
+} from 'solid-js';
 import { isServer } from 'solid-js/web';
 
 const load = <T>(
@@ -9,14 +15,14 @@ const load = <T>(
     }>,
     setComp: Setter<T>,
 ) => {
-    fn().then(m => setComp(() => m.default));
+    fn().then((m) => setComp(() => m.default));
 };
 
 const clientOnly = <T extends Component<any>>(
     component: T,
-    options?: { fallback?: JSX.Element; }
+    options?: { fallback?: JSX.Element },
 ) => {
-    if (isServer) return () => (options?.fallback) ?? null;
+    if (isServer) return () => options?.fallback ?? null;
 
     const [comp, setComp] = createSignal<T>();
     load(async () => ({ default: component }), setComp);
@@ -26,12 +32,11 @@ const clientOnly = <T extends Component<any>>(
         if ((Comp = comp()) && !sharedConfig.context) return Comp(props);
         const [mounted, setMounted] = createSignal(!sharedConfig.context);
         onMount(() => setMounted(true));
-        return createMemo(
-            () => (
-                // biome-ignore lint/style/noCommaOperator: <explanation>
-                (Comp = comp()), (m = mounted()), untrack(() => (Comp && m ? Comp(props) : options?.fallback))
-            ),
-        ) as unknown as JSX.Element;
+        return createMemo(() => {
+            Comp = comp();
+            m = mounted();
+            return untrack(() => (Comp && m ? Comp(props) : options?.fallback));
+        }) as unknown as JSX.Element;
     };
 };
 

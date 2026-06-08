@@ -1,8 +1,11 @@
-import { defineLoader, type LoaderDataFromFunction } from 'solidstep/utils/loader';
+import {
+    defineLoader,
+    type LoaderDataFromFunction,
+} from 'solidstep/utils/loader';
 
 export const loader = defineLoader(async () => {
     throw new Error('kaboom from the loader');
-    // eslint-disable-next-line no-unreachable
+    // biome-ignore lint/correctness/noUnreachable: intentional fixture — the loader throws to exercise the error boundary; this return only shapes LoaderData for the type below.
     return { never: true };
 });
 

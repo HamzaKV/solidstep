@@ -8,8 +8,13 @@ window.onpageshow = () => {
     const state = window.history.state;
     const key = `${window.location.pathname}:build-time`;
     const buildTimeMeta = document.querySelector('meta[name="x-build-time"]');
-    const buildTime = buildTimeMeta ? Number.parseInt(buildTimeMeta.getAttribute('content') || '0', 10) : 0;
-    const lastBuildTime = Number.parseInt(sessionStorage.getItem(key) || '0', 10);
+    const buildTime = buildTimeMeta
+        ? Number.parseInt(buildTimeMeta.getAttribute('content') || '0', 10)
+        : 0;
+    const lastBuildTime = Number.parseInt(
+        sessionStorage.getItem(key) || '0',
+        10,
+    );
     const diffString = sessionStorage.getItem(window.location.pathname);
 
     if (state?.revalidated && buildTime === lastBuildTime && diffString) {
@@ -20,11 +25,19 @@ window.onpageshow = () => {
         if (didApply) {
             const key = window.location.pathname;
             sessionStorage.setItem(key, JSON.stringify(diff));
-            window.history.pushState({ revalidated: true }, '', window.location.href);
+            window.history.pushState(
+                { revalidated: true },
+                '',
+                window.location.href,
+            );
         }
         if (import.meta.env.DEV && !didApply) {
-            console.error('The mutation was not applied, this seems to be an edge case.');
-            console.error('Please raise an issue on GitHub describing your case.');
+            console.error(
+                'The mutation was not applied, this seems to be an edge case.',
+            );
+            console.error(
+                'Please raise an issue on GitHub describing your case.',
+            );
             console.error('The diff calculated:', diff);
         }
     }
@@ -43,7 +56,7 @@ export const main = async (
     modulePath: string,
     routeParams: Record<string, string> = {},
     searchParams: Record<string, string> = {},
-    loaderDataManifest: Record<string, any> = {}
+    loaderDataManifest: Record<string, any> = {},
 ) => {
     // find the route that matches the path
     const pageModule = fileRoutes.find((route) => route.path === modulePath);
@@ -76,18 +89,25 @@ export const main = async (
     }
     const groupModules = fileRoutes.filter((route) => {
         const parentPath = (route as any).parent || '';
-        return parentPath === segments.join('/') && (route as any).type === 'group';
+        return (
+            parentPath === segments.join('/') && (route as any).type === 'group'
+        );
     });
     if (groupModules && groupModules.length > 0) {
         for (const groupModule of groupModules) {
-            const groupName = groupModule.path.split('/').at(-1)?.replace('@', '');
+            const groupName = groupModule.path
+                .split('/')
+                .at(-1)
+                ?.replace('@', '');
             if (!groupName) continue;
             groups[groupName] = groupModule;
         }
     }
     const compose = layouts.reduceRight(
         (children, layout, index) => async () => {
-            const { default: layoutModule } = await importModule(layout.$component);
+            const { default: layoutModule } = await importModule(
+                layout.$component,
+            );
             const loaderData = layoutLoaderData[index] || {};
             const slots: Record<string, any> = {};
             const slotPromises: Promise<any>[] = [children()];
@@ -96,34 +116,40 @@ export const main = async (
                 for (const [groupName, group] of Object.entries(groups)) {
                     slotPromises.push(
                         (async () => {
-                            const { default: groupPage } = await importModule(group.$component);
-                            const groupLoaderData = loaderDataManifest[group.path] || {};
-                            slots[groupName] = () => groupPage({
-                                routeParams,
-                                searchParams,
-                                loaderData: groupLoaderData,
-                            });
-                        })()
+                            const { default: groupPage } = await importModule(
+                                group.$component,
+                            );
+                            const groupLoaderData =
+                                loaderDataManifest[group.path] || {};
+                            slots[groupName] = () =>
+                                groupPage({
+                                    routeParams,
+                                    searchParams,
+                                    loaderData: groupLoaderData,
+                                });
+                        })(),
                     );
                 }
             }
             const [childrenRendered] = await Promise.all(slotPromises);
-            return () => layoutModule({
-                children: childrenRendered,
-                routeParams,
-                searchParams,
-                slots: slots,
-                loaderData,
-            });
+            return () =>
+                layoutModule({
+                    children: childrenRendered,
+                    routeParams,
+                    searchParams,
+                    slots: slots,
+                    loaderData,
+                });
         },
         async () => {
             const { default: page } = await importModule(pageModule.$component);
-            return () => page({
-                routeParams,
-                searchParams,
-                loaderData: pageLoaderData || {},
-            });
-        }
+            return () =>
+                page({
+                    routeParams,
+                    searchParams,
+                    loaderData: pageLoaderData || {},
+                });
+        },
     );
 
     const composed = await compose();

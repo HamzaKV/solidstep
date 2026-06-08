@@ -5,7 +5,10 @@
 // you split request/response concerns (auth, CORS, CSRF, logging, ...) into
 // independent units and compose them into one Vinxi-compatible middleware.
 
-import { defineMiddleware as defineVinxiMiddleware, type H3Event } from 'vinxi/http';
+import {
+    defineMiddleware as defineVinxiMiddleware,
+    type H3Event,
+} from 'vinxi/http';
 
 /**
  * Runs before the matched route handler. Return a `Response` (or call
@@ -14,6 +17,7 @@ import { defineMiddleware as defineVinxiMiddleware, type H3Event } from 'vinxi/h
  */
 export type MiddlewareRequestHandler = (
     event: H3Event,
+    // biome-ignore lint/suspicious/noConfusingVoidType: a handler that returns nothing is intentional — `void` is the correct "no short-circuit" return here.
 ) => void | Response | Promise<void | Response>;
 
 /**

@@ -1,8 +1,8 @@
-import { 
-    setCookie as baseSetCookie, 
+import {
+    setCookie as baseSetCookie,
     getCookie as baseGetCookie,
     deleteCookie as baseDeleteCookie,
-    getEvent 
+    getEvent,
 } from 'vinxi/http';
 
 export const getCookie = (key: string): string | undefined => {
@@ -11,13 +11,13 @@ export const getCookie = (key: string): string | undefined => {
 };
 
 export const setCookie = (
-    key: string, 
+    key: string,
     value: string,
-    options?: Parameters<typeof baseSetCookie>[2]
+    options?: Parameters<typeof baseSetCookie>[2],
 ) => {
     const event = getEvent();
     return baseSetCookie(event, key, value, options);
-}
+};
 
 export const deleteCookie = (key: string) => {
     const event = getEvent();

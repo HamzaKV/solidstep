@@ -1,5 +1,9 @@
 import { defineMiddleware, type Middleware } from 'solidstep/utils/middleware';
-import { createBasePolicy, serializePolicy, withNonce } from 'solidstep/utils/csp';
+import {
+    createBasePolicy,
+    serializePolicy,
+    withNonce,
+} from 'solidstep/utils/csp';
 import { cors } from 'solidstep/utils/cors';
 import { csrf } from 'solidstep/utils/csrf';
 import { randomBytes } from 'node:crypto';
@@ -24,10 +28,16 @@ const security: Middleware = {
 
         let policy = createBasePolicy();
         policy = withNonce(policy, nonce);
-        event.node.res.setHeader('Content-Security-Policy', serializePolicy(policy));
+        event.node.res.setHeader(
+            'Content-Security-Policy',
+            serializePolicy(policy),
+        );
         // Exposed purely so the e2e suite can assert the nonce is applied.
         event.node.res.setHeader('X-CSP-Nonce', nonce);
-        event.node.res.setHeader('Vary', 'Origin, Access-Control-Request-Method');
+        event.node.res.setHeader(
+            'Vary',
+            'Origin, Access-Control-Request-Method',
+        );
 
         const origin = (event.node.req.headers.origin as string) || '';
         const protocol = origin.startsWith('https') ? 'https' : 'http';

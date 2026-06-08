@@ -6,7 +6,10 @@ type LoaderOptions = {
     type?: 'defer' | 'sequential';
 };
 
-export const defineLoader = <T>(loader: LoaderFunction<T>, options?: LoaderOptions) => {
+export const defineLoader = <T>(
+    loader: LoaderFunction<T>,
+    options?: LoaderOptions,
+) => {
     if (isServer) {
         const fn = async (request?: Request) => {
             const loaderData = await loader(request);
@@ -25,6 +28,10 @@ export const defineLoader = <T>(loader: LoaderFunction<T>, options?: LoaderOptio
     return null; // Return null if not on the server
 };
 
-export type LoaderDataFromFunction<T> = T extends { loader: infer L extends (...args: any) => any }
-    ? Awaited<ReturnType<T['loader']>> extends { data: infer D } ? D : never
+export type LoaderDataFromFunction<T> = T extends {
+    loader: infer L extends (...args: any) => any;
+}
+    ? Awaited<ReturnType<T['loader']>> extends { data: infer D }
+        ? D
+        : never
     : never;

@@ -9,8 +9,10 @@ export const generateMeta = () => ({
 const AboutPage = () => {
     return (
         <section>
-            <h1 data-testid="heading">About</h1>
-            <p data-testid="about-body">A static page rendered under the root layout.</p>
+            <h1 data-testid='heading'>About</h1>
+            <p data-testid='about-body'>
+                A static page rendered under the root layout.
+            </p>
         </section>
     );
 };

@@ -35,7 +35,9 @@ test.describe('auth via a server action', () => {
         await page.getByTestId('password').fill('wrong');
         await page.getByTestId('submit').click();
 
-        await expect(page.getByTestId('error')).toHaveText('Invalid credentials');
+        await expect(page.getByTestId('error')).toHaveText(
+            'Invalid credentials',
+        );
         await expect(page.getByTestId('status')).toHaveCount(0);
 
         const cookies = await page.context().cookies();

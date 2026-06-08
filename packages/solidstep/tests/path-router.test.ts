@@ -134,18 +134,28 @@ describe('catch-all routes', () => {
 
     it('returns null when the required catch-all node has no handler', () => {
         // Construct tree manually to exercise the ?? null null-branch
-        root.catchAllChild = { name: 'path', optional: false, node: createNode() };
+        root.catchAllChild = {
+            name: 'path',
+            optional: false,
+            node: createNode(),
+        };
         expect(matchRoute(root, '/a/b')).toBeNull();
     });
 
     it('captures a single segment', () => {
         const h = makePageHandler('/docs/[...path]');
         insertRoute(root, '/docs/[...path]', h);
-        expect(matchRoute(root, '/docs/intro')!.params).toEqual({ path: ['intro'] });
+        expect(matchRoute(root, '/docs/intro')!.params).toEqual({
+            path: ['intro'],
+        });
     });
 
     it('required catch-all does not match zero segments', () => {
-        insertRoute(root, '/docs/[...path]', makePageHandler('/docs/[...path]'));
+        insertRoute(
+            root,
+            '/docs/[...path]',
+            makePageHandler('/docs/[...path]'),
+        );
         expect(matchRoute(root, '/docs')).toBeNull();
     });
 });
@@ -161,20 +171,28 @@ describe('optional catch-all routes', () => {
 
     it('returns null when the optional catch-all node has no handler', () => {
         // Construct tree manually to exercise the ?? null null-branch
-        root.catchAllChild = { name: 'path', optional: true, node: createNode() };
+        root.catchAllChild = {
+            name: 'path',
+            optional: true,
+            node: createNode(),
+        };
         expect(matchRoute(root, '/')).toBeNull();
     });
 
     it('matches one segment', () => {
         const h = makePageHandler('/docs/[[...path]]');
         insertRoute(root, '/docs/[[...path]]', h);
-        expect(matchRoute(root, '/docs/intro')!.params).toEqual({ path: ['intro'] });
+        expect(matchRoute(root, '/docs/intro')!.params).toEqual({
+            path: ['intro'],
+        });
     });
 
     it('matches many segments', () => {
         const h = makePageHandler('/docs/[[...path]]');
         insertRoute(root, '/docs/[[...path]]', h);
-        expect(matchRoute(root, '/docs/a/b/c')!.params).toEqual({ path: ['a', 'b', 'c'] });
+        expect(matchRoute(root, '/docs/a/b/c')!.params).toEqual({
+            path: ['a', 'b', 'c'],
+        });
     });
 });
 

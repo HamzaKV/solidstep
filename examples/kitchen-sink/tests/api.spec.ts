@@ -5,7 +5,10 @@ test.describe('API routes (route.ts)', () => {
         const res = await request.get('/api/health');
         expect(res.status()).toBe(200);
         expect(res.headers()['content-type']).toContain('application/json');
-        expect(await res.json()).toEqual({ status: 'ok', service: 'kitchen-sink' });
+        expect(await res.json()).toEqual({
+            status: 'ok',
+            service: 'kitchen-sink',
+        });
     });
 
     test('POST /api/health echoes the request body', async ({ request }) => {

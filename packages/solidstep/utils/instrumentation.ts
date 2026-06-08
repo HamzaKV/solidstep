@@ -12,7 +12,14 @@ export interface RequestContext {
     /** The actual URL pathname (e.g., "/posts/123") */
     pathname: string;
     /** Type of route being handled */
-    routeType: 'page' | 'api' | 'static' | 'not-found' | 'error' | 'server-action' | 'unknown';
+    routeType:
+        | 'page'
+        | 'api'
+        | 'static'
+        | 'not-found'
+        | 'error'
+        | 'server-action'
+        | 'unknown';
     /** Route parameters extracted from the path */
     params: Record<string, string | string[]>;
     /** URL search parameters */

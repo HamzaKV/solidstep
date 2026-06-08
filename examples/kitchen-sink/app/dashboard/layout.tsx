@@ -5,12 +5,14 @@ const DashboardLayout = (props: {
     slots: { analytics: () => JSX.Element; team: () => JSX.Element };
 }) => {
     return (
-        <section data-testid="dashboard-layout">
-            <h1 data-testid="heading">Dashboard</h1>
+        <section data-testid='dashboard-layout'>
+            <h1 data-testid='heading'>Dashboard</h1>
             <div>{props.children()}</div>
             <aside>
-                <div data-testid="slot-analytics">{props.slots.analytics()}</div>
-                <div data-testid="slot-team">{props.slots.team()}</div>
+                <div data-testid='slot-analytics'>
+                    {props.slots.analytics()}
+                </div>
+                <div data-testid='slot-team'>{props.slots.team()}</div>
             </aside>
         </section>
     );

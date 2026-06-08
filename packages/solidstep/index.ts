@@ -15,8 +15,8 @@ import type { InlineConfig } from 'vite';
 import { config as viteConfigPlugin } from 'vinxi/plugins/config';
 
 type VinxiViteServerOptions = Omit<
-    InlineConfig["server"],
-    "port" | "strictPort" | "host" | "middlewareMode" | "open"
+    InlineConfig['server'],
+    'port' | 'strictPort' | 'host' | 'middlewareMode' | 'open'
 >;
 
 type ViteCustomizableConfig = CustomizableConfig & {
@@ -30,18 +30,20 @@ type Config = {
         plugin: any;
     }[];
     logger?: true | LoggerOptions;
-    vite?: 
+    vite?:
         | ViteCustomizableConfig
         | ((options: {
-            router: 'server' | 'client';
-        }) => ViteCustomizableConfig);
+              router: 'server' | 'client';
+          }) => ViteCustomizableConfig);
 };
 
-export const defineConfig = (config: Config = {
-    server: {},
-    plugins: [],
-    vite: {},
-}) => {
+export const defineConfig = (
+    config: Config = {
+        server: {},
+        plugins: [],
+        vite: {},
+    },
+) => {
     let middlewarePath = join(process.cwd(), 'app', 'middleware.ts');
     if (!existsSync(middlewarePath)) {
         middlewarePath = join(process.cwd(), 'app', 'middleware.js');
@@ -54,9 +56,11 @@ export const defineConfig = (config: Config = {
     // @ts-ignore
     globalThis.__SOLIDSTEP_CONFIG__ = sharedConfig;
 
-    const viteConfig = (typeof config.vite === 'function'
-        ? config.vite
-        : () => config.vite || {}) as (options: { router: 'server' | 'client' }) => ViteCustomizableConfig;
+    const viteConfig = (
+        typeof config.vite === 'function'
+            ? config.vite
+            : () => config.vite || {}
+    ) as (options: { router: 'server' | 'client' }) => ViteCustomizableConfig;
 
     const app = createApp({
         server: {
@@ -81,11 +85,18 @@ export const defineConfig = (config: Config = {
                 ),
                 plugins: () => [
                     ...(config.plugins
-                        ?.filter(p => p.type === 'client' || p.type === 'both')
-                        .map(p => p.plugin) || []),
+                        ?.filter(
+                            (p) => p.type === 'client' || p.type === 'both',
+                        )
+                        .map((p) => p.plugin) || []),
                     serverFunctions.client({
                         runtime: normalize(
-                            fileURLToPath(new URL('./utils/server-action.client.js', import.meta.url)),
+                            fileURLToPath(
+                                new URL(
+                                    './utils/server-action.client.js',
+                                    import.meta.url,
+                                ),
+                            ),
                         ),
                     }),
                     solid({ ssr: true }),
@@ -101,9 +112,9 @@ export const defineConfig = (config: Config = {
                             extensions: ['jsx', 'js', 'tsx', 'ts'],
                         },
                         router,
-                        app
+                        app,
                     );
-                }
+                },
             },
             {
                 name: 'ssr',
@@ -115,34 +126,56 @@ export const defineConfig = (config: Config = {
                 target: 'server',
                 plugins: () => [
                     ...(config.plugins
-                        ?.filter(p => p.type === 'server' || p.type === 'both')
-                        .map(p => p.plugin) || []),
+                        ?.filter(
+                            (p) => p.type === 'server' || p.type === 'both',
+                        )
+                        .map((p) => p.plugin) || []),
                     serverFunctions.server(),
                     solid({ ssr: true }),
-                    viteConfigPlugin('app-server', (() => {
-                        const userServerVite = viteConfig({ router: 'server' }) || {};
-                        const instrumentationPath = (() => {
-                            const userInstrumentationTs = join(process.cwd(), 'app', 'instrumentation.ts');
-                            const userInstrumentationJs = join(process.cwd(), 'app', 'instrumentation.js');
-                            if (existsSync(userInstrumentationTs)) {
-                                return userInstrumentationTs;
-                            } else if (existsSync(userInstrumentationJs)) {
-                                return userInstrumentationJs;
-                            } else {
-                                return normalize(fileURLToPath(new URL('./utils/instrumentation-noop.js', import.meta.url)));
-                            }
-                        })();
-                        return {
-                            ...userServerVite,
-                            resolve: {
-                                ...userServerVite.resolve,
-                                alias: {
-                                    instrumentation: instrumentationPath,
-                                    ...(userServerVite.resolve?.alias || {}),
+                    viteConfigPlugin(
+                        'app-server',
+                        (() => {
+                            const userServerVite =
+                                viteConfig({ router: 'server' }) || {};
+                            const instrumentationPath = (() => {
+                                const userInstrumentationTs = join(
+                                    process.cwd(),
+                                    'app',
+                                    'instrumentation.ts',
+                                );
+                                const userInstrumentationJs = join(
+                                    process.cwd(),
+                                    'app',
+                                    'instrumentation.js',
+                                );
+                                if (existsSync(userInstrumentationTs)) {
+                                    return userInstrumentationTs;
+                                }
+                                if (existsSync(userInstrumentationJs)) {
+                                    return userInstrumentationJs;
+                                }
+                                return normalize(
+                                    fileURLToPath(
+                                        new URL(
+                                            './utils/instrumentation-noop.js',
+                                            import.meta.url,
+                                        ),
+                                    ),
+                                );
+                            })();
+                            return {
+                                ...userServerVite,
+                                resolve: {
+                                    ...userServerVite.resolve,
+                                    alias: {
+                                        instrumentation: instrumentationPath,
+                                        ...(userServerVite.resolve?.alias ||
+                                            {}),
+                                    },
                                 },
-                            },
-                        };
-                    })()),
+                            };
+                        })(),
+                    ),
                 ],
                 middleware: './app/middleware.ts',
                 routes: (router, app) => {
@@ -152,18 +185,22 @@ export const defineConfig = (config: Config = {
                             extensions: ['jsx', 'js', 'tsx', 'ts'],
                         },
                         router,
-                        app
+                        app,
                     );
-                }
+                },
             },
         ],
     });
 
-    app.hooks.afterEach(event => {
+    app.hooks.afterEach((event) => {
         if (event.name === 'app:build:nitro:end') {
             const [{ nitro }] = event.args;
             const serverDir = nitro.options.output.serverDir;
-            writeFileSync(`${serverDir}/.config.json`, JSON.stringify(sharedConfig), 'utf-8');
+            writeFileSync(
+                `${serverDir}/.config.json`,
+                JSON.stringify(sharedConfig),
+                'utf-8',
+            );
             const fromDir = join(process.cwd(), 'server-assets');
             if (existsSync(fromDir)) {
                 const toDir = join(serverDir, 'server-assets');
@@ -172,7 +209,9 @@ export const defineConfig = (config: Config = {
                     recursive: true,
                     force: true,
                 });
-                console.log(`✔ Copied server assets from ${fromDir} to ${toDir}`);
+                console.log(
+                    `✔ Copied server assets from ${fromDir} to ${toDir}`,
+                );
             } else {
                 console.log(`ℹ No server assets to copy from ${fromDir}`);
             }

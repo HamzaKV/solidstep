@@ -46,7 +46,10 @@ type CSPDirective = {
 type CSPPolicy = ReadonlyArray<CSPDirective>;
 
 // Core Builder Functions
-const createDirective = (name: DirectiveName, sources: Source[]): CSPDirective => ({
+const createDirective = (
+    name: DirectiveName,
+    sources: Source[],
+): CSPDirective => ({
     name,
     sources,
 });
@@ -56,23 +59,30 @@ const addSource = (directive: CSPDirective, source: Source): CSPDirective => ({
     sources: [...directive.sources, source],
 });
 
-const removeSource = (directive: CSPDirective, source: Source): CSPDirective => ({
+const removeSource = (
+    directive: CSPDirective,
+    source: Source,
+): CSPDirective => ({
     ...directive,
     sources: directive.sources.filter((s) => s !== source),
 });
 
-const setSources = (directive: CSPDirective, sources: Source[]): CSPDirective => ({
+const setSources = (
+    directive: CSPDirective,
+    sources: Source[],
+): CSPDirective => ({
     ...directive,
     sources,
 });
 
 // Policy Manipulation
-const addDirective = (policy: CSPPolicy, directive: CSPDirective): CSPPolicy => {
+const addDirective = (
+    policy: CSPPolicy,
+    directive: CSPDirective,
+): CSPPolicy => {
     const existing = policy.find((d) => d.name === directive.name);
     if (existing) {
-        return policy.map((d) =>
-            d.name === directive.name ? directive : d
-        );
+        return policy.map((d) => (d.name === directive.name ? directive : d));
     }
     return [...policy, directive];
 };
@@ -80,7 +90,7 @@ const addDirective = (policy: CSPPolicy, directive: CSPDirective): CSPPolicy => 
 const updateDirective = (
     policy: CSPPolicy,
     name: DirectiveName,
-    updater: (directive: CSPDirective) => CSPDirective
+    updater: (directive: CSPDirective) => CSPDirective,
 ): CSPPolicy => {
     const existing = policy.find((d) => d.name === name);
     if (!existing) {
@@ -92,16 +102,18 @@ const updateDirective = (
 const removeDirective = (policy: CSPPolicy, name: DirectiveName): CSPPolicy =>
     policy.filter((d) => d.name !== name);
 
-const getDirective = (policy: CSPPolicy, name: DirectiveName): CSPDirective | undefined =>
-    policy.find((d) => d.name === name);
+const getDirective = (
+    policy: CSPPolicy,
+    name: DirectiveName,
+): CSPDirective | undefined => policy.find((d) => d.name === name);
 
 // Merging Policies
 const mergeDirectives = (
     directive1: CSPDirective,
-    directive2: CSPDirective
+    directive2: CSPDirective,
 ): CSPDirective => {
     const uniqueSources = Array.from(
-        new Set([...directive1.sources, ...directive2.sources])
+        new Set([...directive1.sources, ...directive2.sources]),
     );
     return createDirective(directive1.name, uniqueSources);
 };
@@ -113,7 +125,10 @@ const mergePolicies = (...policies: CSPPolicy[]): CSPPolicy => {
         for (const directive of policy) {
             const existing = directiveMap.get(directive.name);
             if (existing) {
-                directiveMap.set(directive.name, mergeDirectives(existing, directive));
+                directiveMap.set(
+                    directive.name,
+                    mergeDirectives(existing, directive),
+                );
             } else {
                 directiveMap.set(directive.name, directive);
             }
@@ -164,9 +179,21 @@ const createBasePolicy = (): CSPPolicy => [
     createDirective('base-uri', ["'none'"]),
     createDirective('frame-ancestors', ["'none'"]),
     createDirective('form-action', ["'self'"]),
-    createDirective('style-src', ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com']),
-    createDirective('style-src-elem', ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com']),
-    createDirective('script-src', ["'self'", "'unsafe-inline'", "'unsafe-eval'"]),
+    createDirective('style-src', [
+        "'self'",
+        "'unsafe-inline'",
+        'https://fonts.googleapis.com',
+    ]),
+    createDirective('style-src-elem', [
+        "'self'",
+        "'unsafe-inline'",
+        'https://fonts.googleapis.com',
+    ]),
+    createDirective('script-src', [
+        "'self'",
+        "'unsafe-inline'",
+        "'unsafe-eval'",
+    ]),
     createDirective('connect-src', ["'self'", 'ws:']),
     createDirective('img-src', ["'self'", 'data:']),
 ];
@@ -182,7 +209,7 @@ const withDevelopmentSources = (policy: CSPPolicy): CSPPolicy => {
 
 const withProductionSources = (policy: CSPPolicy): CSPPolicy =>
     updateDirective(policy, 'script-src', (d) =>
-        removeSource(removeSource(d, "'unsafe-eval'"), "'unsafe-inline'")
+        removeSource(removeSource(d, "'unsafe-eval'"), "'unsafe-inline'"),
     );
 
 // Common Integrations
@@ -206,23 +233,32 @@ const withGoogleFonts = (policy: CSPPolicy): CSPPolicy => {
 
 const withWebSockets = (policy: CSPPolicy, secure = false): CSPPolicy =>
     updateDirective(policy, 'connect-src', (d) =>
-        addSource(d, secure ? 'wss:' : 'ws:')
+        addSource(d, secure ? 'wss:' : 'ws:'),
     );
 
-const withNonce = (policy: CSPPolicy, nonce: string, directives: DirectiveName[] = ['script-src', 'style-src']): CSPPolicy => {
+const withNonce = (
+    policy: CSPPolicy,
+    nonce: string,
+    directives: DirectiveName[] = ['script-src', 'style-src'],
+): CSPPolicy => {
     const nonceSource = `'nonce-${nonce}'` as Source;
     let updatedPolicy = policy;
 
     for (const directive of directives) {
         updatedPolicy = updateDirective(updatedPolicy, directive, (d) =>
-            addSource(d, nonceSource)
+            addSource(d, nonceSource),
         );
     }
 
     return updatedPolicy;
 };
 
-const withHash = (policy: CSPPolicy, hash: string, algorithm: 'sha256' | 'sha384' | 'sha512' = 'sha256', directive: DirectiveName = 'script-src'): CSPPolicy => {
+const withHash = (
+    policy: CSPPolicy,
+    hash: string,
+    algorithm: 'sha256' | 'sha384' | 'sha512' = 'sha256',
+    directive: DirectiveName = 'script-src',
+): CSPPolicy => {
     const hashSource = `'${algorithm}-${hash}'` as Source;
     return updateDirective(policy, directive, (d) => addSource(d, hashSource));
 };
@@ -231,7 +267,11 @@ const withHash = (policy: CSPPolicy, hash: string, algorithm: 'sha256' | 'sha384
 const isDirectivePresent = (policy: CSPPolicy, name: DirectiveName): boolean =>
     policy.some((d) => d.name === name);
 
-const hasSource = (policy: CSPPolicy, name: DirectiveName, source: Source): boolean => {
+const hasSource = (
+    policy: CSPPolicy,
+    name: DirectiveName,
+    source: Source,
+): boolean => {
     const directive = getDirective(policy, name);
     return directive ? directive.sources.includes(source) : false;
 };

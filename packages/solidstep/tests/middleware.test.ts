@@ -40,9 +40,21 @@ describe('defineMiddleware — onRequest', () => {
     it('runs multiple middleware in array order', async () => {
         const calls: number[] = [];
         const mws: Middleware[] = [
-            { onRequest: () => { calls.push(1); } },
-            { onRequest: () => { calls.push(2); } },
-            { onRequest: () => { calls.push(3); } },
+            {
+                onRequest: () => {
+                    calls.push(1);
+                },
+            },
+            {
+                onRequest: () => {
+                    calls.push(2);
+                },
+            },
+            {
+                onRequest: () => {
+                    calls.push(3);
+                },
+            },
         ];
         await defineMiddleware(mws).onRequest(makeEvent());
         expect(calls).toEqual([1, 2, 3]);
@@ -75,7 +87,11 @@ describe('defineMiddleware — onRequest', () => {
         const after = vi.fn();
         const event = makeEvent();
         const composed = defineMiddleware([
-            { onRequest: (e) => { e.respondWith(new Response('done')); } },
+            {
+                onRequest: (e) => {
+                    e.respondWith(new Response('done'));
+                },
+            },
             { onRequest: after },
         ]);
         await composed.onRequest(event);
@@ -104,8 +120,16 @@ describe('defineMiddleware — onBeforeResponse', () => {
     it('runs all response hooks in array order (no short-circuit)', async () => {
         const calls: number[] = [];
         const composed = defineMiddleware([
-            { onBeforeResponse: () => { calls.push(1); } },
-            { onBeforeResponse: () => { calls.push(2); } },
+            {
+                onBeforeResponse: () => {
+                    calls.push(1);
+                },
+            },
+            {
+                onBeforeResponse: () => {
+                    calls.push(2);
+                },
+            },
         ]);
         await composed.onBeforeResponse(event, { body: 'x' });
         expect(calls).toEqual([1, 2]);

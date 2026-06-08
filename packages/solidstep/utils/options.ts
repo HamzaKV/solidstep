@@ -12,4 +12,4 @@ export type Options = {
     };
 };
 
-export const options = (options: Options) => options; 
+export const options = (options: Options) => options;

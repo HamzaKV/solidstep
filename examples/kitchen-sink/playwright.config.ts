@@ -14,9 +14,7 @@ export default defineConfig({
         baseURL: BASE_URL,
         trace: 'on-first-retry',
     },
-    projects: [
-        { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
-    ],
+    projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
     // The production server must be built first (see the `pretest:e2e` script,
     // which builds the framework and the app). This just starts it.
     webServer: {

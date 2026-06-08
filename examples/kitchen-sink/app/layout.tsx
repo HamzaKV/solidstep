@@ -19,11 +19,11 @@ export const generateMeta = () => ({
 const RootLayout: Component<{ children: () => JSX.Element }> = (props) => {
     return (
         <body>
-            <nav data-testid="nav">
-                <a href="/">Home</a>
-                <a href="/about">About</a>
-                <a href="/counter">Counter</a>
-                <a href="/dashboard">Dashboard</a>
+            <nav data-testid='nav'>
+                <a href='/'>Home</a>
+                <a href='/about'>About</a>
+                <a href='/counter'>Counter</a>
+                <a href='/dashboard'>Dashboard</a>
             </nav>
             <main>{props.children()}</main>
         </body>

@@ -61,16 +61,16 @@ describe('setCache / getCache', () => {
     });
 
     it('removes expired head entry that has a next neighbor', async () => {
-        setCache('a', 'a-val');          // tail; head will be b
-        setCache('b', 'b-val', 1);       // head, with next=a
+        setCache('a', 'a-val'); // tail; head will be b
+        setCache('b', 'b-val', 1); // head, with next=a
         await new Promise((r) => setTimeout(r, 10));
         expect(getCache('b')).toBeNull();
         expect(getCache('a')).toBe('a-val');
     });
 
     it('removes expired tail entry that has a prev neighbor', async () => {
-        setCache('a', 'a-val', 1);       // tail, with prev=b
-        setCache('b', 'b-val');          // head
+        setCache('a', 'a-val', 1); // tail, with prev=b
+        setCache('b', 'b-val'); // head
         await new Promise((r) => setTimeout(r, 10));
         expect(getCache('a')).toBeNull();
         expect(getCache('b')).toBe('b-val');
@@ -100,7 +100,6 @@ describe('LRU eviction', () => {
         // lru-1 should have been evicted (it was the oldest unaccessed)
         expect(getCache('lru-1')).toBeNull();
     });
-
 });
 
 describe('invalidateCache', () => {
@@ -113,8 +112,8 @@ describe('invalidateCache', () => {
     });
 
     it('invalidates the head entry (has next, no prev)', () => {
-        setCache('a', 1);      // tail
-        setCache('b', 2);      // head, next=a
+        setCache('a', 1); // tail
+        setCache('b', 2); // head, next=a
         invalidateCache('b');
         expect(getCache('b')).toBeNull();
         expect(getCache('a')).toBe(1);
@@ -147,7 +146,11 @@ describe('revalidatePath', () => {
 
         revalidatePath('/dashboard');
 
-        expect(vinxiHttp.setResponseHeader).toHaveBeenCalledWith(fakeEvent, 'X-Revalidate', '/dashboard');
+        expect(vinxiHttp.setResponseHeader).toHaveBeenCalledWith(
+            fakeEvent,
+            'X-Revalidate',
+            '/dashboard',
+        );
     });
 
     it('throws when called outside a server function context', () => {
@@ -155,7 +158,7 @@ describe('revalidatePath', () => {
         vi.mocked(vinxiHttp.getEvent).mockReturnValue(fakeEvent as any);
 
         expect(() => revalidatePath('/dashboard')).toThrow(
-            'This function can only be used in server functions.'
+            'This function can only be used in server functions.',
         );
     });
 });

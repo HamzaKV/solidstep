@@ -15,30 +15,26 @@ const LoginPage = () => {
 
     return (
         <section>
-            <h1 data-testid="heading">Login</h1>
+            <h1 data-testid='heading'>Login</h1>
             <Form action={formAction}>
                 <input
-                    data-testid="username"
-                    name="username"
-                    placeholder="username"
+                    data-testid='username'
+                    name='username'
+                    placeholder='username'
                 />
                 <input
-                    data-testid="password"
-                    name="password"
-                    type="password"
-                    placeholder="password"
+                    data-testid='password'
+                    name='password'
+                    type='password'
+                    placeholder='password'
                 />
-                <button
-                    data-testid="submit"
-                    type="submit"
-                    disabled={pending()}
-                >
+                <button data-testid='submit' type='submit' disabled={pending()}>
                     {pending() ? 'Signing in…' : 'Sign in'}
                 </button>
             </Form>
-            {state().ok && <p data-testid="status">Signed in</p>}
+            {state().ok && <p data-testid='status'>Signed in</p>}
             {state().error && (
-                <p role="alert" data-testid="error">
+                <p role='alert' data-testid='error'>
                     {state().error}
                 </p>
             )}

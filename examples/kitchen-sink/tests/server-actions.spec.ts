@@ -1,7 +1,9 @@
 import { test, expect } from '@playwright/test';
 
 test.describe('server actions via useActionState', () => {
-    test('page is server-rendered with the initial state', async ({ request }) => {
+    test('page is server-rendered with the initial state', async ({
+        request,
+    }) => {
         const res = await request.get('/counter');
         expect(res.status()).toBe(200);
         const html = await res.text();
@@ -37,12 +39,16 @@ test.describe('server actions via useActionState', () => {
         await page.getByTestId('step').fill('not-a-number');
         await page.getByTestId('submit').click();
 
-        await expect(page.getByTestId('error')).toHaveText('step must be a number');
+        await expect(page.getByTestId('error')).toHaveText(
+            'step must be a number',
+        );
         // State is unchanged after a failed action.
         await expect(page.getByTestId('count')).toHaveText('0');
     });
 
-    test('error clears on a subsequent successful submission', async ({ page }) => {
+    test('error clears on a subsequent successful submission', async ({
+        page,
+    }) => {
         await page.goto('/counter');
 
         await page.getByTestId('step').fill('bad');

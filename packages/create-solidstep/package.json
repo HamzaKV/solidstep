@@ -14,7 +14,7 @@
     },
     "scripts": {
         "clean": "rimraf ./dist",
-        "copy-files:root": "copyfiles -u 0 README.md package.json generate/**/* LICENSE ./dist",
+        "copy-files:root": "copyfiles -u 0 README.md package.json generate/**/* LICENSE CHANGELOG.md ./dist",
         "dev": "tsx --no-cache ./bin/main -v",
         "start": "node ./dist/bin/main.js",
         "build": "pnpm clean && tsc && pnpm copy-files:root",
@@ -52,6 +52,7 @@
         "node": ">=20"
     },
     "publishConfig": {
-        "access": "public"
+        "access": "public",
+        "directory": "dist"
     }
 }

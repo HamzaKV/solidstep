@@ -24,20 +24,27 @@ describe('trusted origin — normal request', () => {
 
     it('echoes back the exact trusted origin', () => {
         const headers = check('https://app.example.com', false);
-        expect(headers['Access-Control-Allow-Origin']).toBe('https://app.example.com');
+        expect(headers['Access-Control-Allow-Origin']).toBe(
+            'https://app.example.com',
+        );
     });
 });
 
 describe('trusted origin — preflight request', () => {
     it('returns Allow-Origin, Allow-Methods, and Allow-Headers', () => {
         const headers = check('https://example.com', true);
-        expect(headers['Access-Control-Allow-Origin']).toBe('https://example.com');
+        expect(headers['Access-Control-Allow-Origin']).toBe(
+            'https://example.com',
+        );
         expect(headers['Access-Control-Allow-Methods']).toBeDefined();
         expect(headers['Access-Control-Allow-Headers']).toBeDefined();
     });
 
     it('default allowed methods include GET, POST, PUT, PATCH, DELETE, OPTIONS', () => {
-        const headers = check('https://example.com', true) as Record<string, string>;
+        const headers = check('https://example.com', true) as Record<
+            string,
+            string
+        >;
         const methods = headers['Access-Control-Allow-Methods'].split(', ');
         expect(methods).toContain('GET');
         expect(methods).toContain('POST');
@@ -48,7 +55,10 @@ describe('trusted origin — preflight request', () => {
     });
 
     it('default allowed headers include Content-Type and Authorization', () => {
-        const headers = check('https://example.com', true) as Record<string, string>;
+        const headers = check('https://example.com', true) as Record<
+            string,
+            string
+        >;
         const allowed = headers['Access-Control-Allow-Headers'].split(', ');
         expect(allowed).toContain('Content-Type');
         expect(allowed).toContain('Authorization');
@@ -58,14 +68,22 @@ describe('trusted origin — preflight request', () => {
 describe('custom methods and headers', () => {
     it('uses provided allowMethods', () => {
         const customCheck = cors(trustedOrigins, ['GET', 'POST']);
-        const headers = customCheck('https://example.com', true) as Record<string, string>;
+        const headers = customCheck('https://example.com', true) as Record<
+            string,
+            string
+        >;
         const methods = headers['Access-Control-Allow-Methods'].split(', ');
         expect(methods).toEqual(['GET', 'POST']);
     });
 
     it('uses provided allowHeaders', () => {
-        const customCheck = cors(trustedOrigins, undefined, ['X-Custom-Header']);
-        const headers = customCheck('https://example.com', true) as Record<string, string>;
+        const customCheck = cors(trustedOrigins, undefined, [
+            'X-Custom-Header',
+        ]);
+        const headers = customCheck('https://example.com', true) as Record<
+            string,
+            string
+        >;
         expect(headers['Access-Control-Allow-Headers']).toBe('X-Custom-Header');
     });
 });

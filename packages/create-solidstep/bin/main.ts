@@ -11,13 +11,13 @@ const { values, positionals } = parseArgs({
         help: {
             type: 'boolean',
             short: 'h',
-            description: 'Display help information'
+            description: 'Display help information',
         },
         version: {
             type: 'boolean',
             short: 'v',
-            description: 'Display version information'
-        }
+            description: 'Display version information',
+        },
     },
     strict: true,
     allowPositionals: true,
@@ -52,19 +52,26 @@ const main = async () => {
         }
 
         const templateDir = join(import.meta.dirname, '../generate');
-        const targetDir = createAppDir ? join(process.cwd(), appName) : process.cwd();
+        const targetDir = createAppDir
+            ? join(process.cwd(), appName)
+            : process.cwd();
 
         await cp(templateDir, targetDir, {
             recursive: true,
             filter: (src) => {
                 // Exclude node_modules and .git directories
                 const relativePath = src.replace(templateDir, '');
-                return !relativePath.startsWith('node_modules') && !relativePath.startsWith('.git');
-            }
+                return (
+                    !relativePath.startsWith('node_modules') &&
+                    !relativePath.startsWith('.git')
+                );
+            },
         });
 
         console.log(`SolidStep app created successfully in ${targetDir}`);
-        console.log('Install dependencies using a package manager of your choice (npm, yarn, pnpm, etc.) and run the app using the "dev" or "start" script.');
+        console.log(
+            'Install dependencies using a package manager of your choice (npm, yarn, pnpm, etc.) and run the app using the "dev" or "start" script.',
+        );
 
         process.exit(0);
     } catch (error) {

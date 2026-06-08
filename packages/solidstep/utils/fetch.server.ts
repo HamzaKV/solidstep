@@ -1,8 +1,6 @@
 import { fetch } from 'undici';
 
-export type FetchResponse<T, S extends boolean> = S extends true
-    ? T
-    : Response;
+export type FetchResponse<T, S extends boolean> = S extends true ? T : Response;
 
 type Options = {
     method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';

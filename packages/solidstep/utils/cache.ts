@@ -1,11 +1,11 @@
 import { getEvent, setResponseHeader } from 'vinxi/http';
 
 type CacheValue<T = any> = {
-    key: string
-    value: T
-    expiresAt: number | null
-    prev?: CacheValue<T>
-    next?: CacheValue<T>
+    key: string;
+    value: T;
+    expiresAt: number | null;
+    prev?: CacheValue<T>;
+    next?: CacheValue<T>;
 };
 
 const MAX_CACHE_ENTRIES = 1000;
@@ -65,7 +65,7 @@ export const setCache = <T>(key: string, value: T, ttlMs?: number) => {
     const newNode: CacheValue<T> = {
         key,
         value,
-        expiresAt: ttlMs ? performance.now() + ttlMs : null
+        expiresAt: ttlMs ? performance.now() + ttlMs : null,
     };
 
     newNode.next = head;
@@ -105,6 +105,6 @@ export const revalidatePath = (path: string) => {
         throw new Error('This function can only be used in server functions.');
     }
 
-    // add the revalidate header as a flag for the server action to do diffing 
+    // add the revalidate header as a flag for the server action to do diffing
     setResponseHeader(event, 'X-Revalidate', path);
 };
