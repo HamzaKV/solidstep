@@ -1,9 +1,23 @@
 import { defineConfig } from 'vitest/config';
+import solid from 'vite-plugin-solid';
 
 export default defineConfig({
+    // The Solid plugin compiles JSX/reactivity and resolves `solid-js` to its
+    // client/dev build so component & hook tests can render under jsdom.
+    plugins: [solid()],
     test: {
+        // Global default; component/hook/serialize specs opt into jsdom with a
+        // `// @vitest-environment jsdom` docblock so the pure-logic specs stay
+        // on the faster node environment.
         environment: 'node',
-        include: ['tests/**/*.test.ts'],
+        include: ['tests/**/*.test.{ts,tsx}'],
+        // Solid must be transformed by Vite (not externalized) for reactivity
+        // and `render()` to work correctly under test.
+        server: {
+            deps: {
+                inline: [/solid-js/, /@solidjs\/testing-library/],
+            },
+        },
         coverage: {
             provider: 'v8',
             include: ['utils/**/*.ts'],
@@ -19,15 +33,12 @@ export default defineConfig({
                 'utils/redirect.ts',
                 'utils/server-only.ts',
                 'utils/client-only.ts',
-                'utils/loader.ts',
                 'utils/meta.ts',
                 'utils/options.ts',
                 'utils/instrumentation.ts',
                 'utils/instrumentation-noop.ts',
                 // tightly coupled to Vinxi's file-system router internals
                 'utils/router.ts',
-                'utils/components/**',
-                'utils/hooks/**',
             ],
             thresholds: {
                 lines: 100,

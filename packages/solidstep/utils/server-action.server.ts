@@ -1,21 +1,6 @@
 /// <reference types='vinxi/types/server' />
-import {
-    crossSerializeStream,
-    fromJSON,
-    getCrossReferenceHeader,
-} from 'seroval';
-import {
-    CustomEventPlugin,
-    DOMExceptionPlugin,
-    EventPlugin,
-    FormDataPlugin,
-    HeadersPlugin,
-    ReadableStreamPlugin,
-    RequestPlugin,
-    ResponsePlugin,
-    URLPlugin,
-    URLSearchParamsPlugin,
-} from 'seroval-plugins/web';
+import { fromJSON } from 'seroval';
+import { SEROVAL_PLUGINS, serializeToStream } from './serialize';
 import { sharedConfig } from 'solid-js';
 import { provideRequestEvent } from 'solid-js/web/storage';
 import {
@@ -46,56 +31,6 @@ import {
     getInstrumentation,
     safeExecuteHook,
 } from '../utils/instrumentation';
-
-function createChunk(data: string) {
-    const encodeData = new TextEncoder().encode(data);
-    const bytes = encodeData.length;
-    const baseHex = bytes.toString(16);
-    const totalHex = '00000000'.substring(0, 8 - baseHex.length) + baseHex; // 32-bit
-    const head = new TextEncoder().encode(`;0x${totalHex};`);
-
-    const chunk = new Uint8Array(12 + bytes);
-    chunk.set(head);
-    chunk.set(encodeData, 12);
-    return chunk;
-}
-
-function serializeToStream(id: string, value: any) {
-    return new ReadableStream({
-        start(controller) {
-            crossSerializeStream(value, {
-                scopeId: id,
-                plugins: [
-                    CustomEventPlugin,
-                    DOMExceptionPlugin,
-                    EventPlugin,
-                    FormDataPlugin,
-                    HeadersPlugin,
-                    ReadableStreamPlugin,
-                    RequestPlugin,
-                    ResponsePlugin,
-                    URLSearchParamsPlugin,
-                    URLPlugin,
-                ],
-                onSerialize(data, initial) {
-                    controller.enqueue(
-                        createChunk(
-                            initial
-                                ? `(${getCrossReferenceHeader(id)},${data})`
-                                : data,
-                        ),
-                    );
-                },
-                onDone() {
-                    controller.close();
-                },
-                onError(error) {
-                    controller.error(error);
-                },
-            });
-        },
-    });
-}
 
 class HeaderProxy {
     constructor(private event: HTTPEvent) {}
@@ -219,18 +154,7 @@ export async function handleServerFunction(event: HTTPEvent) {
             const json = JSON.parse(args);
             (json.t
                 ? (fromJSON(json, {
-                      plugins: [
-                          CustomEventPlugin,
-                          DOMExceptionPlugin,
-                          EventPlugin,
-                          FormDataPlugin,
-                          HeadersPlugin,
-                          ReadableStreamPlugin,
-                          RequestPlugin,
-                          ResponsePlugin,
-                          URLSearchParamsPlugin,
-                          URLPlugin,
-                      ],
+                      plugins: SEROVAL_PLUGINS,
                   }) as any)
                 : json
             ).forEach((arg: any) => parsed.push(arg));
@@ -281,18 +205,7 @@ export async function handleServerFunction(event: HTTPEvent) {
             // what should work when #1721 is fixed
             // just use request.json() here
             parsed = fromJSON(await tmpReq.json(), {
-                plugins: [
-                    CustomEventPlugin,
-                    DOMExceptionPlugin,
-                    EventPlugin,
-                    FormDataPlugin,
-                    HeadersPlugin,
-                    ReadableStreamPlugin,
-                    RequestPlugin,
-                    ResponsePlugin,
-                    URLSearchParamsPlugin,
-                    URLPlugin,
-                ],
+                plugins: SEROVAL_PLUGINS,
             });
         }
     }

@@ -1,0 +1,61 @@
+# API Reference
+
+[← Back to docs index](./README.md)
+
+Every public import from the `solidstep` package, mapped to a one-line description and the guide that covers it. These correspond to the `exports` field of the package.
+
+## Core
+
+| Import | Description | Docs |
+|--------|-------------|------|
+| `solidstep` | `defineConfig` — define your app configuration in `app.config.ts`. | [Getting Started](./getting-started.md#configuration) |
+
+## Components & Hooks
+
+| Import | Description | Docs |
+|--------|-------------|------|
+| `solidstep/form` | `Form` component for submitting forms to server actions (with progressive enhancement). | [Server Actions & Forms](./server-actions-and-forms.md#form-actions) |
+| `solidstep/hooks/action-state` | `useActionState` — track form action state, pending, and errors. | [Server Actions & Forms](./server-actions-and-forms.md#form-actions) |
+| `solidstep/hooks/form-status` | `useFormStatus` — read the pending status of the enclosing `<Form>`. | [Server Actions & Forms](./server-actions-and-forms.md#form-actions) |
+
+## Data & Metadata
+
+| Import | Description | Docs |
+|--------|-------------|------|
+| `solidstep/utils/loader` | `defineLoader` and `LoaderDataFromFunction` for server data loading. | [Data Loading](./data-loading.md) |
+| `solidstep/utils/meta` | `meta()` — wrap a `generateMeta` function for SEO/`<head>` metadata. | [Metadata](./metadata.md) |
+| `solidstep/utils/options` | Types/helpers for page `options` (cache, response headers). | [Caching](./caching.md) |
+
+## Server Lifecycle
+
+| Import | Description | Docs |
+|--------|-------------|------|
+| `solidstep/utils/middleware` | `defineMiddleware` and the `Middleware` type for request/response interceptors. | [Middleware](./middleware.md) |
+| `solidstep/utils/instrumentation` | `defineInstrumentation` — server-wide observability/telemetry hooks. | [Instrumentation](./instrumentation.md) |
+| `solidstep/utils/cache` | `invalidateCache` and `revalidatePath` for cache invalidation. | [Caching](./caching.md) |
+| `solidstep/utils/redirect` | `redirect()` — redirect from loaders, actions, or the client. | [Security](./security.md#redirects) |
+| `solidstep/utils/error-handler` | `createErrorFactory` — define and handle typed error collections. | [Security](./security.md#error-handling) |
+
+## Security
+
+| Import | Description | Docs |
+|--------|-------------|------|
+| `solidstep/utils/cookies` | `getCookie` / `setCookie` for reading and writing cookies. | [Security](./security.md#cookies) |
+| `solidstep/utils/cors` | `cors()` — build CORS headers from a trusted-origins list. | [Security](./security.md#cors) |
+| `solidstep/utils/csp` | `createBasePolicy`, `withNonce`, `serializePolicy` for Content Security Policy. | [Security](./security.md#csp) |
+| `solidstep/utils/csrf` | `csrf()` — CSRF protection middleware. | [Security](./security.md#csrf-protection) |
+| `solidstep/utils/server-only` | Side-effect import that throws if a module is loaded on the client. | [Security](./security.md#server-only-code) |
+| `solidstep/utils/client-only` | Side-effect import that marks a module as client-only. | [Security](./security.md) |
+
+## Utilities
+
+| Import | Description | Docs |
+|--------|-------------|------|
+| `solidstep/utils/logger` | `logger` — built-in Pino logger instance. | [Utilities](./utilities.md#logging) |
+| `solidstep/utils/fetch.client` | Type-safe client-side `fetch` wrapper with timeout and error handling. | [Utilities](./utilities.md#fetch-utilities) |
+| `solidstep/utils/fetch.server` | Type-safe server-side `fetch` wrapper (undici) with timeout and error handling. | [Utilities](./utilities.md#fetch-utilities) |
+
+## See Also
+
+- [Architecture](./architecture.md) — how these pieces fit together at runtime.
+- [Docs index](./README.md) — full table of contents.

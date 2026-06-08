@@ -36,6 +36,15 @@ const removeTail = () => {
     tail = tail!.prev!;
 };
 
+/**
+ * Read a value from the in-memory cache by key.
+ *
+ * Expired entries (past their TTL) are evicted on access and treated as a
+ * miss. A hit moves the entry to the front of the LRU list.
+ *
+ * @param key - Cache key.
+ * @returns The cached value, or `null` if missing or expired.
+ */
 export const getCache = <T>(key: string): T | null => {
     const entry = cacheMap.get(key);
     if (!entry) return null;
@@ -53,6 +62,15 @@ export const getCache = <T>(key: string): T | null => {
     return entry.value;
 };
 
+/**
+ * Store a value in the in-memory LRU cache (max 1000 entries).
+ *
+ * Inserting beyond the capacity evicts the least-recently-used entry.
+ *
+ * @param key - Cache key. Reusing a key overwrites its value and TTL.
+ * @param value - Value to cache.
+ * @param ttlMs - Optional time-to-live in milliseconds. Omit for no expiry.
+ */
 export const setCache = <T>(key: string, value: T, ttlMs?: number) => {
     if (cacheMap.has(key)) {
         const node = cacheMap.get(key)!;
@@ -81,6 +99,11 @@ export const setCache = <T>(key: string, value: T, ttlMs?: number) => {
     }
 };
 
+/**
+ * Remove a single entry from the cache. No-op if the key is absent.
+ *
+ * @param key - Cache key to invalidate.
+ */
 export const invalidateCache = (key: string) => {
     const node = cacheMap.get(key);
     if (!node) return;
@@ -93,11 +116,22 @@ export const invalidateCache = (key: string) => {
     cacheMap.delete(key);
 };
 
+/** Empty the entire in-memory cache. */
 export const clearAllCache = () => {
     cacheMap.clear();
     head = tail = undefined;
 };
 
+/**
+ * Mark a path for revalidation from within a server action.
+ *
+ * Sets the `X-Revalidate` response header, which the server action handler
+ * uses as a flag to diff and refresh the given path. Only usable inside a
+ * server function (the `/_server` endpoint); throws otherwise.
+ *
+ * @param path - The path to revalidate.
+ * @throws If called outside of a server function.
+ */
 export const revalidatePath = (path: string) => {
     // get and verify the event
     const event = getEvent();

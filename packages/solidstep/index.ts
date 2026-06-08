@@ -23,13 +23,31 @@ type ViteCustomizableConfig = CustomizableConfig & {
     server?: VinxiViteServerOptions;
 };
 
+/**
+ * Configuration for a SolidStep application.
+ */
 type Config = {
+    /** Vinxi server options (the `experimental` field is managed internally). */
     server?: Omit<AppOptions['server'], 'experimental'>;
+    /**
+     * Vite/Rollup plugins to inject into the generated routers. `type` selects
+     * which router(s) receive the plugin: the `client` (browser) router, the
+     * `server` (SSR) router, or `both`.
+     */
     plugins?: {
         type: 'client' | 'server' | 'both';
         plugin: any;
     }[];
+    /**
+     * Logging configuration. Pass `true` for sensible defaults, or a Pino
+     * `LoggerOptions` object to customize the shared logger (see `logger`).
+     */
     logger?: true | LoggerOptions;
+    /**
+     * Extra Vite config merged into each router. Provide a single object to
+     * apply it everywhere, or a function receiving the target `router` name to
+     * vary config per router.
+     */
     vite?:
         | ViteCustomizableConfig
         | ((options: {
@@ -37,6 +55,32 @@ type Config = {
           }) => ViteCustomizableConfig);
 };
 
+/**
+ * Build a SolidStep application from a `Config`, returning the Vinxi `App`
+ * exported by `app.config.ts`.
+ *
+ * Assembles a multi-router Vinxi app: a `static` router for `public/`, a
+ * `client` router (browser bundle + Solid SSR/server-function client runtime),
+ * and an `http` SSR router wired to the file-system `ServerRouter` and the
+ * `app/middleware` file. User instrumentation (`app/instrumentation.{ts,js}`)
+ * is aliased in when present, otherwise a no-op is used. The resolved logger
+ * config is stored on `globalThis` and persisted to the build output so it is
+ * available at runtime.
+ *
+ * @param config - Server, plugin, logger, and Vite options.
+ * @returns The configured Vinxi `App`.
+ *
+ * @example
+ * ```ts
+ * // app.config.ts
+ * import { defineConfig } from 'solidstep';
+ *
+ * export default defineConfig({
+ *   server: { preset: 'node-server' },
+ *   logger: true,
+ * });
+ * ```
+ */
 export const defineConfig = (
     config: Config = {
         server: {},

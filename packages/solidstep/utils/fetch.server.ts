@@ -10,16 +10,24 @@ type Options = {
 };
 
 /**
- * It's a wrapper around the native fetch function that adds a timeout and a json parser
- * @param {string} url - string - The URL to fetch
- * @param {Options} [options] - {
- *  method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
- *  body?: any;
- *  headers?: any;
- *  MAX_FETCH_TIME?: number;
- * }
- * @param [json=true] - boolean - If the response is JSON, it will be parsed and returned.
- * @returns The return type is Promise<any>
+ * A wrapper around `undici`'s `fetch` that adds an abort timeout and optional
+ * JSON parsing (server build).
+ *
+ * Responses with a 4xx/5xx status are thrown: as the parsed JSON body when
+ * `json` is `true`, otherwise as the raw `Response`. When `json` is `true`, a
+ * successful body containing an `error` field is also thrown (to handle errors
+ * returned under a 200 status). An aborted request (timeout) throws
+ * `Error('Timeout')`.
+ *
+ * @typeParam T - Expected shape of the parsed JSON body.
+ * @typeParam S - Whether JSON parsing is enabled; controls the return type via
+ *   {@link FetchResponse} (`T` when `true`, otherwise the raw `Response`).
+ * @param url - The URL to fetch.
+ * @param options - Request options. `MAX_FETCH_TIME` is the abort timeout in
+ *   milliseconds (defaults to 4000); other fields are forwarded to `fetch`.
+ * @param json - Whether to parse and return the JSON body. Defaults to `true`;
+ *   pass `false` to receive the raw `Response`.
+ * @returns A promise of the parsed body (`T`) or the `Response`, per `S`.
  */
 const Fetch = async <T, S extends boolean = true>(
     url: string,

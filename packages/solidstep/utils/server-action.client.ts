@@ -1,103 +1,7 @@
 import fetch from './fetch.client';
-import { deserialize, toJSONAsync } from 'seroval';
-import {
-    CustomEventPlugin,
-    DOMExceptionPlugin,
-    EventPlugin,
-    FormDataPlugin,
-    HeadersPlugin,
-    ReadableStreamPlugin,
-    RequestPlugin,
-    ResponsePlugin,
-    URLPlugin,
-    URLSearchParamsPlugin,
-} from 'seroval-plugins/web';
+import { toJSONAsync } from 'seroval';
+import { SEROVAL_PLUGINS, SerovalChunkReader } from './serialize';
 import { createDiffDOM } from './diff-dom';
-
-class SerovalChunkReader {
-    reader: ReadableStreamDefaultReader<Uint8Array>;
-    buffer: Uint8Array;
-    done: boolean;
-
-    constructor(stream: ReadableStream<Uint8Array>) {
-        this.reader = stream.getReader();
-        this.buffer = new Uint8Array(0);
-        this.done = false;
-    }
-
-    async readChunk() {
-        // if there's no chunk, read again
-        const chunk = await this.reader.read();
-        if (!chunk.done) {
-            // repopulate the buffer
-            const newBuffer = new Uint8Array(
-                this.buffer.length + chunk.value.length,
-            );
-            newBuffer.set(this.buffer);
-            newBuffer.set(chunk.value, this.buffer.length);
-            this.buffer = newBuffer;
-        } else {
-            this.done = true;
-        }
-    }
-
-    async next(): Promise<any> {
-        // Check if the buffer is empty
-        if (this.buffer.length === 0) {
-            // if we are already done...
-            if (this.done) {
-                return {
-                    done: true,
-                    value: undefined,
-                };
-            }
-            // Otherwise, read a new chunk
-            await this.readChunk();
-            return await this.next();
-        }
-        // Read the "byte header"
-        // The byte header tells us how big the expected data is
-        // so we know how much data we should wait before we
-        // deserialize the data
-        const head = new TextDecoder().decode(this.buffer.subarray(1, 11));
-        const bytes = Number.parseInt(head, 16); // ;0x00000000;
-        if (Number.isNaN(bytes)) {
-            throw new Error(`Malformed server function stream header: ${head}`);
-        }
-
-        // Check if the buffer has enough bytes to be parsed
-        while (bytes > this.buffer.length - 12) {
-            // If it's not enough, and the reader is done
-            // then the chunk is invalid.
-            if (this.done) {
-                throw new Error('Malformed server function stream.');
-            }
-            // Otherwise, we read more chunks
-            await this.readChunk();
-        }
-        // Extract the exact chunk as defined by the byte header
-        const partial = new TextDecoder().decode(
-            this.buffer.subarray(12, 12 + bytes),
-        );
-        // The rest goes to the buffer
-        this.buffer = this.buffer.subarray(12 + bytes);
-
-        // Deserialize the chunk
-        return {
-            done: false,
-            value: deserialize(partial),
-        };
-    }
-
-    async drain() {
-        while (true) {
-            const result = await this.next();
-            if (result.done) {
-                break;
-            }
-        }
-    }
-}
 
 async function deserializeStream(id: string, response: Response) {
     if (!response.body) {
@@ -147,19 +51,6 @@ function createRequest(
     );
 }
 
-const plugins = [
-    CustomEventPlugin,
-    DOMExceptionPlugin,
-    EventPlugin,
-    FormDataPlugin,
-    HeadersPlugin,
-    ReadableStreamPlugin,
-    RequestPlugin,
-    ResponsePlugin,
-    URLSearchParamsPlugin,
-    URLPlugin,
-];
-
 async function fetchServerFunction(
     base: string,
     id: string,
@@ -183,7 +74,9 @@ async function fetchServerFunction(
             : createRequest(base, id, instance, {
                   ...options,
                   body: JSON.stringify(
-                      await Promise.resolve(toJSONAsync(args, { plugins })),
+                      await Promise.resolve(
+                          toJSONAsync(args, { plugins: SEROVAL_PLUGINS }),
+                      ),
                   ),
                   headers: {
                       ...options.headers,
@@ -283,7 +176,8 @@ export function createServerReference(fn: Function, id: string, name: string) {
                                                 JSON.stringify(
                                                     await Promise.resolve(
                                                         toJSONAsync(args, {
-                                                            plugins,
+                                                            plugins:
+                                                                SEROVAL_PLUGINS,
                                                         }),
                                                     ),
                                                 ),

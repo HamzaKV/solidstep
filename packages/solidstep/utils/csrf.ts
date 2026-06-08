@@ -1,5 +1,20 @@
 const SAFE_METHODS = ['GET', 'OPTIONS', 'HEAD', 'TRACE'];
 
+/**
+ * Create a CSRF check bound to an allowlist of trusted origins.
+ *
+ * The returned function validates an incoming request: safe methods always
+ * pass. For unsafe methods it verifies the `Origin` header against the request
+ * origin and the allowlist; when no `Origin` is present over HTTPS it falls
+ * back to strict `Referer` checks to guard against MITM.
+ *
+ * @param trustedOrigins - Hosts (e.g. `example.com`) permitted as cross-origin
+ *   sources for state-changing requests.
+ * @param safeMethods - Methods exempt from the check. Defaults to GET, OPTIONS,
+ *   HEAD, and TRACE.
+ * @returns A function `(requestMethod, requestUrl, origin?, referer?)` that
+ *   returns `{ success, message }` — `success: false` on a failed check.
+ */
 export const csrf =
     (trustedOrigins: string[], safeMethods: string[] = SAFE_METHODS) =>
     (

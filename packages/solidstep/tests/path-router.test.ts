@@ -227,3 +227,37 @@ describe('insertRoute — reusing existing param and catch-all nodes', () => {
         expect(matchRoute(root, '/a/b')!.handler).toBe(h2);
     });
 });
+
+describe('robustness — collisions, depth, and group segments', () => {
+    it('captures distinct values when the same param name repeats at different depths', () => {
+        // Re-using `[id]` at two levels: the last write wins per segment, and
+        // each position is captured independently into the same key.
+        const h = makePageHandler('/[id]/posts/[id]');
+        insertRoute(root, '/[id]/posts/[id]', h);
+        const result = matchRoute(root, '/42/posts/99');
+        expect(result!.handler).toBe(h);
+        // Same key — the deeper segment overwrites the shallower one.
+        expect(result!.params).toEqual({ id: '99' });
+    });
+
+    it('matches a deeply nested path mixing static, param, and catch-all segments', () => {
+        const h = makePageHandler('/a/[b]/c/[d]/e/[...rest]');
+        insertRoute(root, '/a/[b]/c/[d]/e/[...rest]', h);
+        const result = matchRoute(root, '/a/1/c/2/e/x/y/z');
+        expect(result!.handler).toBe(h);
+        expect(result!.params).toEqual({
+            b: '1',
+            d: '2',
+            rest: ['x', 'y', 'z'],
+        });
+    });
+
+    it('treats an @-prefixed parallel-route slot as a plain static segment', () => {
+        // Parallel-route groups are resolved by the router/server, not by
+        // path-router — here `@graph` is just a static path segment.
+        const h = makePageHandler('/dashboard/@graph');
+        insertRoute(root, '/dashboard/@graph', h);
+        expect(matchRoute(root, '/dashboard/@graph')!.handler).toBe(h);
+        expect(matchRoute(root, '/dashboard/graph')).toBeNull();
+    });
+});
