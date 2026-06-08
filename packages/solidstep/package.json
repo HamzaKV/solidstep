@@ -138,7 +138,6 @@
         "node": ">=20"
     },
     "publishConfig": {
-        "access": "public",
-        "directory": "dist"
+        "access": "public"
     }
 }

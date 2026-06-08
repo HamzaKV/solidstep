@@ -14,7 +14,7 @@
     "build": "pnpm --filter \"./packages/*\" build",
     "changeset": "changeset",
     "version-packages": "changeset version",
-    "release": "pnpm --filter \"./packages/*\" build && pnpm --filter \"./packages/*\" publish --access public --no-git-checks && changeset tag"
+    "release": "bash scripts/release.sh"
   },
   "dependencies": {
     "@biomejs/biome": "^1.9.4",
