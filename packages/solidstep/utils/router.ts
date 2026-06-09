@@ -2,12 +2,15 @@ import { BaseFileSystemRouter, cleanPath } from 'vinxi/fs-router';
 
 export class ServerRouter extends BaseFileSystemRouter {
     toPath(src: string) {
-        const routePath = cleanPath(src, this.config)
-            .replace(
-                new RegExp(`\.(${(this.config.extensions ?? []).join('|')})$`),
-                '',
-            )
-            .replace(/\/(page|route|layout|error|not-found|loading)$/, '');
+        // `cleanPath` already strips the file extension. Stripping it again here
+        // is not only redundant but harmful: the extension regex uses an
+        // unescaped `.` (a wildcard), so on an already-extensionless path a root
+        // file like `robots` (ends in `ts`) would have `ots` mangled away. Only
+        // strip the special-file suffix here.
+        const routePath = cleanPath(src, this.config).replace(
+            /\/(page|route|layout|error|not-found|loading)$/,
+            '',
+        );
 
         return routePath?.length > 0 ? routePath : '/';
     }
@@ -28,6 +31,24 @@ export class ServerRouter extends BaseFileSystemRouter {
                 $handler: {
                     src: filePath,
                     pick: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
+                },
+            };
+        }
+
+        // Dynamic metadata files at the app root: robots / sitemap / manifest /
+        // llms. Each exports a default returning the response body; the server
+        // serves it at the conventional URL with the right Content-Type.
+        const metadataMatch = filePath.match(
+            /\/(robots|sitemap|manifest|llms)\.(js|ts)$/,
+        );
+        if (metadataMatch && path === `/${metadataMatch[1]}`) {
+            return {
+                type: 'metadata',
+                metaName: metadataMatch[1],
+                path: `/metadata/${metadataMatch[1]}`,
+                $handler: {
+                    src: filePath,
+                    pick: ['default'],
                 },
             };
         }
@@ -188,12 +209,12 @@ export class ServerRouter extends BaseFileSystemRouter {
 
 export class ClientRouter extends BaseFileSystemRouter {
     toPath(src: string) {
-        const routePath = cleanPath(src, this.config)
-            .replace(
-                new RegExp(`\.(${(this.config.extensions ?? []).join('|')})$`),
-                '',
-            )
-            .replace(/\/(page|route|layout|error|not-found|loading)$/, '');
+        // See ServerRouter.toPath: `cleanPath` already removes the extension;
+        // re-stripping with the wildcard `.` regex corrupts root file names.
+        const routePath = cleanPath(src, this.config).replace(
+            /\/(page|route|layout|error|not-found|loading)$/,
+            '',
+        );
 
         return routePath?.length > 0 ? routePath : '/';
     }

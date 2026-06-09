@@ -11,6 +11,7 @@ This is the documentation index. Pages are grouped into **Guides**, **Reference*
 - [Data Loading](./data-loading.md) — `defineLoader` and typed loader data.
 - [Server Actions & Forms](./server-actions-and-forms.md) — server functions, `<Form>`, `useActionState`, `useFormStatus`, progressive enhancement.
 - [Metadata](./metadata.md) — SEO metadata with `generateMeta` / `meta()`.
+- [Metadata Files](./metadata-files.md) — dynamic `robots.txt`, `sitemap.xml`, `manifest`, `llms.txt`.
 - [Middleware](./middleware.md) — request/response interceptors with `defineMiddleware`.
 - [Instrumentation](./instrumentation.md) — observability hooks and OpenTelemetry.
 - [Caching](./caching.md) — page-level caching and cache invalidation.
