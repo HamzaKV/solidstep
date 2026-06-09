@@ -1,8 +1,10 @@
-import { hydrate } from 'solid-js/web';
+import { hydrate, createComponent } from 'solid-js/web';
+import { Suspense, ErrorBoundary } from 'solid-js';
 import 'vinxi/client';
 import fileRoutes from 'vinxi/routes';
 import { getManifest } from 'vinxi/manifest';
 import { createDiffDOM } from './utils/diff-dom';
+import { createDeferredResource } from './utils/deferred';
 
 window.onpageshow = () => {
     const state = window.history.state;
@@ -57,6 +59,7 @@ export const main = async (
     routeParams: Record<string, string> = {},
     searchParams: Record<string, string> = {},
     loaderDataManifest: Record<string, any> = {},
+    deferred: string[] = [],
 ) => {
     // find the route that matches the path
     const pageModule = fileRoutes.find((route) => route.path === modulePath);
@@ -93,6 +96,7 @@ export const main = async (
             parentPath === segments.join('/') && (route as any).type === 'group'
         );
     });
+    const normalize = (p: string) => `/${p.split('/').slice(2).join('/')}`;
     if (groupModules && groupModules.length > 0) {
         for (const groupModule of groupModules) {
             const groupName = groupModule.path
@@ -100,7 +104,25 @@ export const main = async (
                 .at(-1)
                 ?.replace('@', '');
             if (!groupName) continue;
-            groups[groupName] = groupModule;
+            // The group's loading.tsx/error.tsx are normal loading/error routes;
+            // match them by the group's normalized path.
+            const groupNorm = normalize(groupModule.path);
+            const loading = fileRoutes.find(
+                (r) =>
+                    (r as any).type === 'loading' &&
+                    normalize(r.path) === groupNorm,
+            );
+            const error = fileRoutes.find(
+                (r) =>
+                    (r as any).type === 'error' &&
+                    normalize(r.path) === groupNorm,
+            );
+            groups[groupName] = {
+                page: groupModule,
+                path: groupModule.path,
+                loading,
+                error,
+            };
         }
     }
     const compose = layouts.reduceRight(
@@ -117,16 +139,61 @@ export const main = async (
                     slotPromises.push(
                         (async () => {
                             const { default: groupPage } = await importModule(
-                                group.$component,
+                                group.page.$component,
                             );
-                            const groupLoaderData =
-                                loaderDataManifest[group.path] || {};
-                            slots[groupName] = () =>
-                                groupPage({
-                                    routeParams,
-                                    searchParams,
-                                    loaderData: groupLoaderData,
-                                });
+                            const isDeferred = deferred.includes(group.path);
+                            const GroupLoading = group.loading
+                                ? (await importModule(group.loading.$component))
+                                      .default
+                                : null;
+                            const GroupError = group.error
+                                ? (await importModule(group.error.$component))
+                                      .default
+                                : null;
+                            slots[groupName] = () => {
+                                const inner = () => {
+                                    if (!isDeferred) {
+                                        return groupPage({
+                                            routeParams,
+                                            searchParams,
+                                            loaderData:
+                                                loaderDataManifest[
+                                                    group.path
+                                                ] || {},
+                                        });
+                                    }
+                                    const resource = createDeferredResource();
+                                    return createComponent(Suspense, {
+                                        fallback: GroupLoading
+                                            ? createComponent(GroupLoading, {
+                                                  routeParams,
+                                                  searchParams,
+                                              })
+                                            : undefined,
+                                        get children() {
+                                            return groupPage({
+                                                routeParams,
+                                                searchParams,
+                                                loaderData: resource,
+                                            });
+                                        },
+                                    });
+                                };
+                                if (GroupError) {
+                                    return createComponent(ErrorBoundary, {
+                                        fallback: (err: any) =>
+                                            createComponent(GroupError, {
+                                                error: err,
+                                                routeParams,
+                                                searchParams,
+                                            }),
+                                        get children() {
+                                            return inner();
+                                        },
+                                    });
+                                }
+                                return inner();
+                            };
                         })(),
                     );
                 }
@@ -143,6 +210,23 @@ export const main = async (
         },
         async () => {
             const { default: page } = await importModule(pageModule.$component);
+            // Deferred page: mirror the server's resource + <Suspense> at the
+            // same tree position so hydration restores the streamed value from
+            // `_$HY` instead of re-running (the fetcher never resolves here).
+            if (deferred.includes(modulePath)) {
+                return () => {
+                    const resource = createDeferredResource();
+                    return createComponent(Suspense, {
+                        get children() {
+                            return page({
+                                routeParams,
+                                searchParams,
+                                loaderData: resource,
+                            });
+                        },
+                    });
+                };
+            }
             return () =>
                 page({
                     routeParams,

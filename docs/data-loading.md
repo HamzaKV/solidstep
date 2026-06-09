@@ -50,6 +50,38 @@ Loader caching is independent of [page-level caching](./caching.md): it memoizes
 
 > Loader data caching is in-memory and per-process (like the page cache). A persistent/shared cache is on the roadmap.
 
+## Deferred loaders (streaming)
+
+By default a page loader is **sequential**: the page waits for it before any HTML is sent. Mark a page loader `type: 'defer'` to stream the shell **immediately** and stream the loader's data in afterwards — useful for slow, non-critical data.
+
+```tsx
+export const loader = defineLoader(
+  async () => {
+    const feed = await slowFeed(); // slow, non-critical
+    return { feed };
+  },
+  { type: 'defer' },
+);
+```
+
+A deferred loader is exposed to the page as an **accessor** (a Solid resource) rather than a plain object. Reading it suspends until the data arrives; the framework wraps the page in `<Suspense>` and uses the route's `loading.tsx` as the fallback (a minimal fallback is used if there is none):
+
+```tsx
+type LoaderData = LoaderDataFromFunction<typeof loader>;
+
+export default function Page(props: { loaderData: () => LoaderData | undefined }) {
+  // Renders loading.tsx until the deferred data streams in.
+  return <For each={props.loaderData()?.feed}>{(item) => <li>{item.title}</li>}</For>;
+}
+```
+
+Under the hood the framework renders deferred routes with Solid's `renderToStream`: the shell (layout chrome + any sequential data) is sent first, then each deferred value streams in and hydrates. Non-deferred routes are unaffected and keep the standard render path.
+
+Notes:
+- Only **page** loaders support `defer` today (layout loaders are always sequential). Per-group deferral is on the roadmap.
+- Deferred routes are **not** page-cached (they're streamed).
+- A deferred loader can't issue a redirect (headers are already sent once streaming begins) — redirect from a sequential loader instead.
+
 ## Related
 
 - [Routing](./routing.md) — where loaders live in the file tree.

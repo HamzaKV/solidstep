@@ -55,7 +55,13 @@ export class ServerRouter extends BaseFileSystemRouter {
 
         // biome-ignore lint/correctness/noEmptyCharacterClassInRegex: <explanation>
         const scopedPackageMatch = path.match(/@[^]+/g);
-        if (scopedPackageMatch) {
+        // A `@group` dir's `page` becomes a group route; its `loading`/`error`
+        // fall through to the normal loading/error recognition below (they get
+        // distinct paths and are reattached to the group in the manifest).
+        if (
+            scopedPackageMatch &&
+            !/\/(loading|error)\.(jsx|js|tsx|ts)$/.test(filePath)
+        ) {
             // Remove the scoped package part
             const scopedPackage = scopedPackageMatch[0];
             const parent = path.replace(`/${scopedPackage}`, '');
@@ -230,7 +236,10 @@ export class ClientRouter extends BaseFileSystemRouter {
 
         // biome-ignore lint/correctness/noEmptyCharacterClassInRegex: <explanation>
         const scopedPackageMatch = path.match(/@[^]+/g);
-        if (scopedPackageMatch) {
+        if (
+            scopedPackageMatch &&
+            !/\/(loading|error)\.(jsx|js|tsx|ts)$/.test(filePath)
+        ) {
             // Remove the scoped package part
             const scopedPackage = scopedPackageMatch[0];
             const parent = path.replace(`/${scopedPackage}`, '');

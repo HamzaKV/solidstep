@@ -6,7 +6,14 @@ import {
     setResponseStatus,
 } from 'vinxi/http';
 import { getManifest } from 'vinxi/manifest';
-import { generateHydrationScript, renderToString } from 'solid-js/web';
+import {
+    generateHydrationScript,
+    renderToString,
+    renderToStream,
+    createComponent,
+} from 'solid-js/web';
+import { Suspense, ErrorBoundary } from 'solid-js';
+import { createDeferredResource } from './utils/deferred';
 import type { Meta } from './utils/meta';
 import fileRoutes, { type RouteModule } from 'vinxi/routes';
 import { RedirectError } from './utils/redirect';
@@ -186,10 +193,18 @@ const createRouteManifest = async () => {
                         .filter((s) => !s.startsWith('('))
                         .at(-1);
                     if (!groupName) continue;
+                    // A `loading.tsx`/`error.tsx` inside the @group dir was
+                    // recognized as a normal loading/error route; look it up by
+                    // the group's normalized path and attach it to the slot.
+                    const groupNormPath = getNormalizedPath(group.path);
+                    const groupLoading = loadingPagesMap.get(groupNormPath);
+                    const groupError = errorPagesMap.get(groupNormPath);
                     groups[groupName] = {
                         manifestPath: group.path,
                         page: group.$component,
                         loader: group.$loader,
+                        loadingPage: groupLoading?.$component,
+                        errorPage: groupError?.$component,
                     };
                 }
             }
@@ -390,16 +405,41 @@ const render = async ({
     // get an entry here, which is how the closures below decide whether to
     // populate loaderData (matching the previous in-closure behavior).
     const resolvedLoaderData = new Map<string, any>();
+    // Deferred loaders (`type: 'defer'`) are started but NOT awaited here; their
+    // promise is handed to a Solid resource so the component can stream it in
+    // under `<Suspense>`. Sequential loaders are awaited as before.
+    const deferredLoaderData = new Map<string, Promise<any>>();
     await Promise.all(
         loaderTargets.map(async ({ manifestPath, loader }) => {
             const { loader: loaderFn } = await getCachedModule<{ loader: any }>(
                 loader,
             );
             if (!loaderFn) return;
+            // Only the page loader supports `defer` for now; layout loaders are
+            // always awaited (sequential).
+            const isDeferred =
+                loaderFn.options?.type === 'defer' &&
+                manifestPath === pageToRender?.manifestPath;
+            if (isDeferred) {
+                const pending = getCachedLoaderData(
+                    loaderFn,
+                    manifestPath,
+                    req,
+                );
+                // Swallow rejections here; the resource created from this promise
+                // re-observes it and routes the error to a Suspense/ErrorBoundary.
+                pending.catch(() => undefined);
+                deferredLoaderData.set(manifestPath, pending);
+                return;
+            }
             const data = await getCachedLoaderData(loaderFn, manifestPath, req);
             resolvedLoaderData.set(manifestPath, data);
         }),
     );
+    const hasDeferred = deferredLoaderData.size > 0;
+    // Set by the group loop below when a group has a loading/error boundary or a
+    // deferred loader — such routes also take the streaming path.
+    let hasStreamingGroup = false;
 
     const compose = entry.layouts.reduceRight(
         (children, layout, index) => async () => {
@@ -440,6 +480,7 @@ const render = async ({
                 for (const [groupName, group] of Object.entries(groups)) {
                     slotPromises.push(
                         (async () => {
+                            const slotName = groupName.replace('@', '');
                             const moduleSrc = `${group.page.src}&pick=$css`;
                             const moduleAssets =
                                 await clientManifest.inputs[moduleSrc].assets();
@@ -453,21 +494,124 @@ const render = async ({
                                       group.loader,
                                   )
                                 : { loader: null };
-                            let data: any = {};
+
+                            const groupDeferred =
+                                groupLoader?.options?.type === 'defer';
+                            const needsWrap =
+                                !!group.loadingPage ||
+                                !!group.errorPage ||
+                                groupDeferred;
+
+                            // Plain group (no boundary): await its loader and
+                            // pass the data directly, exactly as before.
+                            if (!needsWrap) {
+                                let data: any = {};
+                                if (groupLoader) {
+                                    data = await getCachedLoaderData(
+                                        groupLoader,
+                                        group.manifestPath,
+                                        req,
+                                    );
+                                    loaderData[group.manifestPath] = data;
+                                }
+                                slots[slotName] = () =>
+                                    groupPage({
+                                        routeParams,
+                                        searchParams,
+                                        loaderData: data,
+                                    });
+                                return;
+                            }
+
+                            // Boundary group: render via <Suspense>/<ErrorBoundary>
+                            // so its loading.tsx/error.tsx isolate this slot.
+                            hasStreamingGroup = true;
+                            let GroupLoading: any = null;
+                            let GroupError: any = null;
+                            if (group.loadingPage) {
+                                const src = `${group.loadingPage.src}&pick=$css`;
+                                assets.push(
+                                    ...(await clientManifest.inputs[
+                                        src
+                                    ].assets()),
+                                );
+                                GroupLoading = (
+                                    await getCachedModule<{ default: any }>(
+                                        group.loadingPage,
+                                    )
+                                ).default;
+                            }
+                            if (group.errorPage) {
+                                const src = `${group.errorPage.src}&pick=$css`;
+                                assets.push(
+                                    ...(await clientManifest.inputs[
+                                        src
+                                    ].assets()),
+                                );
+                                GroupError = (
+                                    await getCachedModule<{ default: any }>(
+                                        group.errorPage,
+                                    )
+                                ).default;
+                            }
+                            // A boundary group with a loader streams its data in
+                            // as a resource (so loader errors reach the
+                            // ErrorBoundary and hydrate consistently).
+                            let pending: Promise<any> | null = null;
                             if (groupLoader) {
-                                data = await getCachedLoaderData(
+                                pending = getCachedLoaderData(
                                     groupLoader,
                                     group.manifestPath,
                                     req,
                                 );
-                                loaderData[group.manifestPath] = data;
+                                pending.catch(() => undefined);
+                                deferredLoaderData.set(
+                                    group.manifestPath,
+                                    pending,
+                                );
                             }
-                            slots[groupName.replace('@', '')] = () =>
-                                groupPage({
-                                    routeParams,
-                                    searchParams,
-                                    loaderData: data,
-                                });
+                            slots[slotName] = () => {
+                                const inner = () => {
+                                    if (!pending) {
+                                        return groupPage({
+                                            routeParams,
+                                            searchParams,
+                                            loaderData: {},
+                                        });
+                                    }
+                                    const resource =
+                                        createDeferredResource(pending);
+                                    return createComponent(Suspense, {
+                                        fallback: GroupLoading
+                                            ? createComponent(GroupLoading, {
+                                                  routeParams,
+                                                  searchParams,
+                                              })
+                                            : undefined,
+                                        get children() {
+                                            return groupPage({
+                                                routeParams,
+                                                searchParams,
+                                                loaderData: resource,
+                                            });
+                                        },
+                                    });
+                                };
+                                if (GroupError) {
+                                    return createComponent(ErrorBoundary, {
+                                        fallback: (err: any) =>
+                                            createComponent(GroupError, {
+                                                error: err,
+                                                routeParams,
+                                                searchParams,
+                                            }),
+                                        get children() {
+                                            return inner();
+                                        },
+                                    });
+                                }
+                                return inner();
+                            };
                         })(),
                     );
                 }
@@ -527,11 +671,60 @@ const render = async ({
             if (toRender === 'error') {
                 props.error = error;
             }
+
+            // Deferred page loader: stream its data in under <Suspense> instead
+            // of blocking the shell. `loading.tsx` (if present) is the fallback.
+            const deferredPromise = deferredLoaderData.get(
+                pageToRender.manifestPath,
+            );
+            if (deferredPromise) {
+                let LoadingFallback: any = null;
+                if (entry.loadingPage) {
+                    const loadingSrc = `${entry.loadingPage.page.src}&pick=$css`;
+                    const loadingAssets =
+                        await clientManifest.inputs[loadingSrc].assets();
+                    assets.push(...loadingAssets);
+                    const { default: lf } = await getCachedModule<{
+                        default: any;
+                    }>(entry.loadingPage.page);
+                    LoadingFallback = lf;
+                }
+                return () => {
+                    const resource = createDeferredResource(deferredPromise);
+                    return createComponent(Suspense, {
+                        fallback: LoadingFallback
+                            ? createComponent(LoadingFallback, {
+                                  routeParams,
+                                  searchParams,
+                              })
+                            : undefined,
+                        get children() {
+                            return page({ ...props, loaderData: resource });
+                        },
+                    });
+                };
+            }
             return () => page(props);
         },
     );
 
     const composed = await compose();
+
+    // Deferred route: hand the composed tree back to the caller to stream via
+    // `renderToStream` (the page suspends on its deferred resource). Streamed
+    // responses are not page-cached. `meta`/`assets` are fully populated by the
+    // awaited `compose()` above, so the caller can emit the <head> first.
+    if ((hasDeferred || hasStreamingGroup) && toRender === 'main') {
+        return {
+            deferred: true as const,
+            composed,
+            documentMeta: meta,
+            documentAssets: assets,
+            loaderData,
+            deferredKeys: [...deferredLoaderData.keys()],
+        };
+    }
+
     const rendered = await renderToString(() => composed());
 
     if (toRender === 'main') {
@@ -554,6 +747,31 @@ const render = async ({
         documentAssets: assets,
         loaderData: loaderData,
     };
+};
+
+// Whether a matched page route needs the streaming (renderToStream) path: the
+// page loader is deferred, or any parallel-route group has a loading/error
+// boundary or a deferred loader. Loader modules are cached, so imports are cheap.
+const routeNeedsStreaming = async (
+    entry: RoutePageHandler,
+): Promise<boolean> => {
+    const pageLoader = entry.mainPage.loader;
+    if (pageLoader) {
+        const { loader: loaderFn } = await getCachedModule<{ loader: any }>(
+            pageLoader as Import,
+        );
+        if (loaderFn?.options?.type === 'defer') return true;
+    }
+    for (const group of Object.values(entry.groups || {})) {
+        if (group.loadingPage || group.errorPage) return true;
+        if (group.loader) {
+            const { loader: loaderFn } = await getCachedModule<{ loader: any }>(
+                group.loader as Import,
+            );
+            if (loaderFn?.options?.type === 'defer') return true;
+        }
+    }
+    return false;
 };
 
 let routeManifest: RouteNode | null = null;
@@ -833,6 +1051,93 @@ const handler = eventHandler(async (event) => {
                                 )) {
                                     setHeader(key, value);
                                 }
+                            }
+
+                            // Deferred route: stream the shell immediately and
+                            // stream deferred loader data in afterwards via Solid's
+                            // renderToStream + Suspense. Non-deferred routes fall
+                            // through to the unchanged renderToString path below.
+                            if (
+                                await routeNeedsStreaming(
+                                    matched as RoutePageHandler,
+                                )
+                            ) {
+                                const result = (await render({
+                                    toRender: 'main',
+                                    entry: matched as RoutePageHandler,
+                                    routeParams: params,
+                                    searchParams,
+                                    req,
+                                    pageOptions: options,
+                                    cspNonce,
+                                })) as any;
+                                const assetsHtml = (
+                                    result.documentAssets as any[]
+                                )
+                                    .map((asset) => {
+                                        const attributeString = Object.entries(
+                                            asset.attrs,
+                                        )
+                                            .map(
+                                                ([key, value]) =>
+                                                    `${key}="${value}"`,
+                                            )
+                                            .join(' ');
+                                        if (asset.tag === 'script') {
+                                            return `<script ${attributeString} ${cspNonce ? `nonce="${cspNonce}"` : ''}></script>`;
+                                        }
+                                        if (asset.tag === 'link') {
+                                            return `<link ${attributeString}>`;
+                                        }
+                                        if (asset.tag === 'style') {
+                                            return `<style ${attributeString}>${asset.children || ''}</style>`;
+                                        }
+                                        return '';
+                                    })
+                                    .join('\n');
+                                const headHtml = `${generateHtmlHead({
+                                    ...meta,
+                                    ...result.documentMeta,
+                                })}\n${assetsHtml}\n${hydrationScript({ nonce: cspNonce })}`;
+                                const entryPath =
+                                    clientManifest!.inputs[
+                                        clientManifest!.handler
+                                    ].output.path;
+                                const mainScript = `<script type="module" ${cspNonce ? `nonce="${cspNonce}"` : ''}>import main from '${entryPath}';main('${(matched as RoutePageHandler).mainPage.manifestPath}',${JSON.stringify(params)},${JSON.stringify(searchParams)},${JSON.stringify(result.loaderData)},${JSON.stringify(result.deferredKeys)});</script>`;
+                                setResponseStatus(200);
+                                push(
+                                    `<!doctype html><html lang="en"><head>${headHtml}</head>`,
+                                );
+                                await new Promise<void>((resolve) => {
+                                    // The runtime `pipe(writable)` calls
+                                    // `writable.write()` for chunks and
+                                    // `writable.end()` on completion, and the
+                                    // options accept `onError` — both wider than
+                                    // the published types, hence the casts.
+                                    const { pipe } = renderToStream(
+                                        () => result.composed(),
+                                        {
+                                            nonce: cspNonce,
+                                            onError(e: any) {
+                                                streamError = e;
+                                                if (import.meta.env.DEV) {
+                                                    console.error(e);
+                                                }
+                                            },
+                                        } as any,
+                                    );
+                                    pipe({
+                                        write: (v: string) => push(v),
+                                        end: () => {
+                                            push(manifestHtml);
+                                            push(mainScript);
+                                            push('</html>');
+                                            resolve();
+                                        },
+                                    } as any);
+                                });
+                                controller.close();
+                                return;
                             }
                             try {
                                 if (
