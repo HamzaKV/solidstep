@@ -6,7 +6,14 @@ import {
     setResponseStatus,
 } from 'vinxi/http';
 import { getManifest } from 'vinxi/manifest';
-import { generateHydrationScript, renderToString } from 'solid-js/web';
+import {
+    generateHydrationScript,
+    renderToString,
+    renderToStream,
+    createComponent,
+} from 'solid-js/web';
+import { Suspense } from 'solid-js';
+import { createDeferredResource } from './utils/deferred';
 import type { Meta } from './utils/meta';
 import fileRoutes, { type RouteModule } from 'vinxi/routes';
 import { RedirectError } from './utils/redirect';
@@ -390,16 +397,38 @@ const render = async ({
     // get an entry here, which is how the closures below decide whether to
     // populate loaderData (matching the previous in-closure behavior).
     const resolvedLoaderData = new Map<string, any>();
+    // Deferred loaders (`type: 'defer'`) are started but NOT awaited here; their
+    // promise is handed to a Solid resource so the component can stream it in
+    // under `<Suspense>`. Sequential loaders are awaited as before.
+    const deferredLoaderData = new Map<string, Promise<any>>();
     await Promise.all(
         loaderTargets.map(async ({ manifestPath, loader }) => {
             const { loader: loaderFn } = await getCachedModule<{ loader: any }>(
                 loader,
             );
             if (!loaderFn) return;
+            // Only the page loader supports `defer` for now; layout loaders are
+            // always awaited (sequential).
+            const isDeferred =
+                loaderFn.options?.type === 'defer' &&
+                manifestPath === pageToRender?.manifestPath;
+            if (isDeferred) {
+                const pending = getCachedLoaderData(
+                    loaderFn,
+                    manifestPath,
+                    req,
+                );
+                // Swallow rejections here; the resource created from this promise
+                // re-observes it and routes the error to a Suspense/ErrorBoundary.
+                pending.catch(() => undefined);
+                deferredLoaderData.set(manifestPath, pending);
+                return;
+            }
             const data = await getCachedLoaderData(loaderFn, manifestPath, req);
             resolvedLoaderData.set(manifestPath, data);
         }),
     );
+    const hasDeferred = deferredLoaderData.size > 0;
 
     const compose = entry.layouts.reduceRight(
         (children, layout, index) => async () => {
@@ -527,11 +556,60 @@ const render = async ({
             if (toRender === 'error') {
                 props.error = error;
             }
+
+            // Deferred page loader: stream its data in under <Suspense> instead
+            // of blocking the shell. `loading.tsx` (if present) is the fallback.
+            const deferredPromise = deferredLoaderData.get(
+                pageToRender.manifestPath,
+            );
+            if (deferredPromise) {
+                let LoadingFallback: any = null;
+                if (entry.loadingPage) {
+                    const loadingSrc = `${entry.loadingPage.page.src}&pick=$css`;
+                    const loadingAssets =
+                        await clientManifest.inputs[loadingSrc].assets();
+                    assets.push(...loadingAssets);
+                    const { default: lf } = await getCachedModule<{
+                        default: any;
+                    }>(entry.loadingPage.page);
+                    LoadingFallback = lf;
+                }
+                return () => {
+                    const resource = createDeferredResource(deferredPromise);
+                    return createComponent(Suspense, {
+                        fallback: LoadingFallback
+                            ? createComponent(LoadingFallback, {
+                                  routeParams,
+                                  searchParams,
+                              })
+                            : undefined,
+                        get children() {
+                            return page({ ...props, loaderData: resource });
+                        },
+                    });
+                };
+            }
             return () => page(props);
         },
     );
 
     const composed = await compose();
+
+    // Deferred route: hand the composed tree back to the caller to stream via
+    // `renderToStream` (the page suspends on its deferred resource). Streamed
+    // responses are not page-cached. `meta`/`assets` are fully populated by the
+    // awaited `compose()` above, so the caller can emit the <head> first.
+    if (hasDeferred && toRender === 'main') {
+        return {
+            deferred: true as const,
+            composed,
+            documentMeta: meta,
+            documentAssets: assets,
+            loaderData,
+            deferredKeys: [...deferredLoaderData.keys()],
+        };
+    }
+
     const rendered = await renderToString(() => composed());
 
     if (toRender === 'main') {
@@ -554,6 +632,19 @@ const render = async ({
         documentAssets: assets,
         loaderData: loaderData,
     };
+};
+
+// Whether a matched page route uses a deferred loader (page loader only, for
+// now). The loader module is cached, so this import is cheap.
+const hasDeferredLoaders = async (
+    entry: RoutePageHandler,
+): Promise<boolean> => {
+    const loaderRef = entry.mainPage.loader;
+    if (!loaderRef) return false;
+    const { loader: loaderFn } = await getCachedModule<{ loader: any }>(
+        loaderRef as Import,
+    );
+    return loaderFn?.options?.type === 'defer';
 };
 
 let routeManifest: RouteNode | null = null;
@@ -833,6 +924,93 @@ const handler = eventHandler(async (event) => {
                                 )) {
                                     setHeader(key, value);
                                 }
+                            }
+
+                            // Deferred route: stream the shell immediately and
+                            // stream deferred loader data in afterwards via Solid's
+                            // renderToStream + Suspense. Non-deferred routes fall
+                            // through to the unchanged renderToString path below.
+                            if (
+                                await hasDeferredLoaders(
+                                    matched as RoutePageHandler,
+                                )
+                            ) {
+                                const result = (await render({
+                                    toRender: 'main',
+                                    entry: matched as RoutePageHandler,
+                                    routeParams: params,
+                                    searchParams,
+                                    req,
+                                    pageOptions: options,
+                                    cspNonce,
+                                })) as any;
+                                const assetsHtml = (
+                                    result.documentAssets as any[]
+                                )
+                                    .map((asset) => {
+                                        const attributeString = Object.entries(
+                                            asset.attrs,
+                                        )
+                                            .map(
+                                                ([key, value]) =>
+                                                    `${key}="${value}"`,
+                                            )
+                                            .join(' ');
+                                        if (asset.tag === 'script') {
+                                            return `<script ${attributeString} ${cspNonce ? `nonce="${cspNonce}"` : ''}></script>`;
+                                        }
+                                        if (asset.tag === 'link') {
+                                            return `<link ${attributeString}>`;
+                                        }
+                                        if (asset.tag === 'style') {
+                                            return `<style ${attributeString}>${asset.children || ''}</style>`;
+                                        }
+                                        return '';
+                                    })
+                                    .join('\n');
+                                const headHtml = `${generateHtmlHead({
+                                    ...meta,
+                                    ...result.documentMeta,
+                                })}\n${assetsHtml}\n${hydrationScript({ nonce: cspNonce })}`;
+                                const entryPath =
+                                    clientManifest!.inputs[
+                                        clientManifest!.handler
+                                    ].output.path;
+                                const mainScript = `<script type="module" ${cspNonce ? `nonce="${cspNonce}"` : ''}>import main from '${entryPath}';main('${(matched as RoutePageHandler).mainPage.manifestPath}',${JSON.stringify(params)},${JSON.stringify(searchParams)},${JSON.stringify(result.loaderData)},${JSON.stringify(result.deferredKeys)});</script>`;
+                                setResponseStatus(200);
+                                push(
+                                    `<!doctype html><html lang="en"><head>${headHtml}</head>`,
+                                );
+                                await new Promise<void>((resolve) => {
+                                    // The runtime `pipe(writable)` calls
+                                    // `writable.write()` for chunks and
+                                    // `writable.end()` on completion, and the
+                                    // options accept `onError` — both wider than
+                                    // the published types, hence the casts.
+                                    const { pipe } = renderToStream(
+                                        () => result.composed(),
+                                        {
+                                            nonce: cspNonce,
+                                            onError(e: any) {
+                                                streamError = e;
+                                                if (import.meta.env.DEV) {
+                                                    console.error(e);
+                                                }
+                                            },
+                                        } as any,
+                                    );
+                                    pipe({
+                                        write: (v: string) => push(v),
+                                        end: () => {
+                                            push(manifestHtml);
+                                            push(mainScript);
+                                            push('</html>');
+                                            resolve();
+                                        },
+                                    } as any);
+                                });
+                                controller.close();
+                                return;
                             }
                             try {
                                 if (

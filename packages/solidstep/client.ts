@@ -1,8 +1,10 @@
-import { hydrate } from 'solid-js/web';
+import { hydrate, createComponent } from 'solid-js/web';
+import { Suspense } from 'solid-js';
 import 'vinxi/client';
 import fileRoutes from 'vinxi/routes';
 import { getManifest } from 'vinxi/manifest';
 import { createDiffDOM } from './utils/diff-dom';
+import { createDeferredResource } from './utils/deferred';
 
 window.onpageshow = () => {
     const state = window.history.state;
@@ -57,6 +59,7 @@ export const main = async (
     routeParams: Record<string, string> = {},
     searchParams: Record<string, string> = {},
     loaderDataManifest: Record<string, any> = {},
+    deferred: string[] = [],
 ) => {
     // find the route that matches the path
     const pageModule = fileRoutes.find((route) => route.path === modulePath);
@@ -143,6 +146,23 @@ export const main = async (
         },
         async () => {
             const { default: page } = await importModule(pageModule.$component);
+            // Deferred page: mirror the server's resource + <Suspense> at the
+            // same tree position so hydration restores the streamed value from
+            // `_$HY` instead of re-running (the fetcher never resolves here).
+            if (deferred.includes(modulePath)) {
+                return () => {
+                    const resource = createDeferredResource();
+                    return createComponent(Suspense, {
+                        get children() {
+                            return page({
+                                routeParams,
+                                searchParams,
+                                loaderData: resource,
+                            });
+                        },
+                    });
+                };
+            }
             return () =>
                 page({
                     routeParams,
