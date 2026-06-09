@@ -11,6 +11,7 @@ import type { Meta } from './utils/meta';
 import fileRoutes, { type RouteModule } from 'vinxi/routes';
 import { RedirectError } from './utils/redirect';
 import { setCache, getCache } from './utils/cache';
+import { getCachedLoaderData } from './utils/loader-cache';
 import { handleServerFunction } from './utils/server-action.server';
 import { readFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
@@ -50,14 +51,38 @@ const getCachedModule = async <T>(importFn: Import): Promise<T> => {
 };
 
 type FileRoute = RouteModule & {
-    type: 'route' | 'loading' | 'error' | 'not-found' | 'layout' | 'group';
+    type:
+        | 'route'
+        | 'loading'
+        | 'error'
+        | 'not-found'
+        | 'layout'
+        | 'group'
+        | 'metadata';
     $component: Import;
     $loader?: Import;
     $generateMeta?: Import;
     $handler?: Import;
     $options?: Import;
     parent?: string; // for groups
+    metaName?: string; // for metadata files (robots/sitemap/manifest/llms)
 };
+
+// Maps a metadata convention file to its served URL + Content-Type.
+const METADATA_FILES: Record<string, { url: string; contentType: string }> = {
+    robots: { url: '/robots.txt', contentType: 'text/plain; charset=utf-8' },
+    sitemap: {
+        url: '/sitemap.xml',
+        contentType: 'application/xml; charset=utf-8',
+    },
+    manifest: {
+        url: '/manifest.webmanifest',
+        contentType: 'application/manifest+json; charset=utf-8',
+    },
+    llms: { url: '/llms.txt', contentType: 'text/plain; charset=utf-8' },
+};
+
+type MetadataRoute = { url: string; contentType: string; handler: Import };
 
 const isPageFile = (file: string) =>
     file.endsWith('page.tsx') ||
@@ -84,11 +109,27 @@ const createRouteManifest = async () => {
     const loadingPagesMap = new Map<string, FileRoute>();
     const errorPagesMap = new Map<string, FileRoute>();
     const groupsMap = new Map<string, FileRoute[]>();
+    const metadataMap = new Map<string, MetadataRoute>();
     let notFoundPage: FileRoute | undefined;
 
     for (const fileRoute of fileRoutes as FileRoute[]) {
         if (fileRoute.type === 'route') {
             allRoutes.push(fileRoute);
+        }
+
+        if (
+            fileRoute.type === 'metadata' &&
+            fileRoute.metaName &&
+            fileRoute.$handler
+        ) {
+            const def = METADATA_FILES[fileRoute.metaName];
+            if (def) {
+                metadataMap.set(def.url, {
+                    url: def.url,
+                    contentType: def.contentType,
+                    handler: fileRoute.$handler,
+                });
+            }
         }
 
         if (fileRoute.type === 'layout') {
@@ -227,7 +268,7 @@ const createRouteManifest = async () => {
         }
     }
 
-    return rootNode;
+    return { rootNode, metadataMap };
 };
 
 const template = `
@@ -355,8 +396,8 @@ const render = async ({
                 loader,
             );
             if (!loaderFn) return;
-            const result = await loaderFn.loader(req);
-            resolvedLoaderData.set(manifestPath, result.data || {});
+            const data = await getCachedLoaderData(loaderFn, manifestPath, req);
+            resolvedLoaderData.set(manifestPath, data);
         }),
     );
 
@@ -412,10 +453,13 @@ const render = async ({
                                       group.loader,
                                   )
                                 : { loader: null };
-                            let data = {};
+                            let data: any = {};
                             if (groupLoader) {
-                                const result = await groupLoader.loader(req);
-                                data = result.data || {};
+                                data = await getCachedLoaderData(
+                                    groupLoader,
+                                    group.manifestPath,
+                                    req,
+                                );
                                 loaderData[group.manifestPath] = data;
                             }
                             slots[groupName.replace('@', '')] = () =>
@@ -513,6 +557,7 @@ const render = async ({
 };
 
 let routeManifest: RouteNode | null = null;
+let metadataManifest: Map<string, MetadataRoute> | null = null;
 type Manifest = ReturnType<typeof getManifest>;
 let clientManifest: Manifest | null = null;
 
@@ -529,7 +574,9 @@ const hydrationScript = ({
 
 const onStart = async () => {
     try {
-        routeManifest = await createRouteManifest();
+        const manifest = await createRouteManifest();
+        routeManifest = manifest.rootNode;
+        metadataManifest = manifest.metadataMap;
         const sharedConfig = (globalThis as any).__SOLIDSTEP_CONFIG__;
         if (!sharedConfig) {
             const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -573,7 +620,9 @@ const handler = eventHandler(async (event) => {
         }
 
         if (!routeManifest) {
-            routeManifest = await createRouteManifest();
+            const manifest = await createRouteManifest();
+            routeManifest = manifest.rootNode;
+            metadataManifest = manifest.metadataMap;
         }
 
         if (!clientManifest) {
@@ -585,6 +634,25 @@ const handler = eventHandler(async (event) => {
         const urlObj = new URL(req.url);
         const pathnamePart = urlObj.pathname;
         const searchParams = Object.fromEntries(urlObj.searchParams);
+
+        // Dynamic metadata files (robots.txt / sitemap.xml / manifest / llms.txt).
+        // A matching static file in public/ is served by the static router first.
+        const metaRoute = metadataManifest?.get(pathnamePart);
+        if (metaRoute) {
+            const mod = await getCachedModule<{
+                default?: (req: Request) => unknown | Promise<unknown>;
+            }>(metaRoute.handler);
+            if (typeof mod.default === 'function') {
+                const result = await mod.default(req);
+                if (result instanceof Response) {
+                    return result;
+                }
+                setHeader('Content-Type', metaRoute.contentType);
+                return typeof result === 'string'
+                    ? result
+                    : JSON.stringify(result);
+            }
+        }
 
         const match = matchRoute(routeManifest, pathnamePart);
         const matched = match?.handler;

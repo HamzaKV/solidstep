@@ -3,7 +3,23 @@ import { isServer } from 'solid-js/web';
 type LoaderFunction<T> = (request?: Request) => Promise<T>;
 
 type LoaderOptions = {
+    /**
+     * Execution strategy relative to sibling loaders. `'sequential'` (default)
+     * blocks the initial render; `'defer'` streams the data in after the shell.
+     */
     type?: 'defer' | 'sequential';
+    /**
+     * Cache the loader's resolved data on the server.
+     *
+     * - `ttl` — lifetime in milliseconds (`0`/omitted = no expiry).
+     * - `key` — override the cache key. Defaults to the request `pathname` +
+     *   search, so the same loader caches per-URL. Provide a stable string to
+     *   share one cached value across URLs.
+     */
+    cache?: {
+        ttl?: number;
+        key?: string;
+    };
 };
 
 /**

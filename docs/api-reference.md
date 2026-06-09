@@ -24,6 +24,7 @@ Every public import from the `solidstep` package, mapped to a one-line descripti
 |--------|-------------|------|
 | `solidstep/utils/loader` | `defineLoader` and `LoaderDataFromFunction` for server data loading. | [Data Loading](./data-loading.md) |
 | `solidstep/utils/meta` | `meta()` — wrap a `generateMeta` function for SEO/`<head>` metadata. | [Metadata](./metadata.md) |
+| `solidstep/utils/metadata` | `sitemap()` / `robots()` body helpers for dynamic metadata files. | [Metadata Files](./metadata-files.md) |
 | `solidstep/utils/options` | Types/helpers for page `options` (cache, response headers). | [Caching](./caching.md) |
 
 ## Server Lifecycle
