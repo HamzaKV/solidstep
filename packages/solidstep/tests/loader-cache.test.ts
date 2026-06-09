@@ -9,7 +9,9 @@ vi.mock('vinxi/http', () => ({
 import { getCachedLoaderData } from '../utils/loader-cache';
 import { clearAllCache } from '../utils/cache';
 
-beforeEach(() => clearAllCache());
+beforeEach(async () => {
+    await clearAllCache();
+});
 
 const req = (url = 'https://example.com/page?q=1') => new Request(url);
 

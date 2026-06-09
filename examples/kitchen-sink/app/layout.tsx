@@ -24,6 +24,7 @@ const RootLayout: Component<{ children: () => JSX.Element }> = (props) => {
                 <a href='/about'>About</a>
                 <a href='/counter'>Counter</a>
                 <a href='/dashboard'>Dashboard</a>
+                <a href='/cache-tags'>Cache Tags</a>
             </nav>
             <main>{props.children()}</main>
         </body>

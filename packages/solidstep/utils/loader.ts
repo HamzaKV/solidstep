@@ -15,10 +15,16 @@ type LoaderOptions = {
      * - `key` — override the cache key. Defaults to the request `pathname` +
      *   search, so the same loader caches per-URL. Provide a stable string to
      *   share one cached value across URLs.
+     * - `swr` — stale-while-revalidate window in milliseconds applied after
+     *   `ttl`. Within it the stale value is served immediately while one
+     *   background revalidation refreshes the cache.
+     * - `tags` — tags for group invalidation via `invalidateTag`.
      */
     cache?: {
         ttl?: number;
         key?: string;
+        swr?: number;
+        tags?: string[];
     };
 };
 

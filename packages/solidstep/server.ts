@@ -17,8 +17,10 @@ import { createDeferredResource } from './utils/deferred';
 import type { Meta } from './utils/meta';
 import fileRoutes, { type RouteModule } from 'vinxi/routes';
 import { RedirectError } from './utils/redirect';
-import { setCache, getCache } from './utils/cache';
+import { getCache, setCacheWithOptions, setCacheStore } from './utils/cache';
+import { MemoryCacheStore, FilesystemCacheStore } from './utils/cache-store';
 import { getCachedLoaderData } from './utils/loader-cache';
+import { runSequentialLoader } from './utils/loader-error';
 import { handleServerFunction } from './utils/server-action.server';
 import { readFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
@@ -345,7 +347,7 @@ const render = async ({
 }) => {
     const url = new URL(req.url);
     const path = url.pathname;
-    const cachedEntry = getCache<{
+    const cachedEntry = await getCache<{
         rendered: string;
         documentMeta: Meta;
         documentAssets: any[];
@@ -362,7 +364,9 @@ const render = async ({
     }
 
     type CacheOptions = {
-        ttl: number;
+        ttl?: number;
+        swr?: number;
+        tags?: string[];
     };
     let meta: Meta = {};
     const loaderData: Record<string, any> = {};
@@ -432,7 +436,15 @@ const render = async ({
                 deferredLoaderData.set(manifestPath, pending);
                 return;
             }
-            const data = await getCachedLoaderData(loaderFn, manifestPath, req);
+            // Isolate sequential loader failures: a layout/group loader that
+            // throws yields a serializable error sentinel (siblings still
+            // render); only the page loader re-throws to the route error page.
+            const data = await runSequentialLoader(
+                loaderFn,
+                manifestPath,
+                req,
+                manifestPath === pageToRender?.manifestPath,
+            );
             resolvedLoaderData.set(manifestPath, data);
         }),
     );
@@ -507,10 +519,14 @@ const render = async ({
                             if (!needsWrap) {
                                 let data: any = {};
                                 if (groupLoader) {
-                                    data = await getCachedLoaderData(
+                                    // Isolate: a failing plain-group loader
+                                    // yields a sentinel rather than taking down
+                                    // the whole render.
+                                    data = await runSequentialLoader(
                                         groupLoader,
                                         group.manifestPath,
                                         req,
+                                        false,
                                     );
                                     loaderData[group.manifestPath] = data;
                                 }
@@ -729,7 +745,7 @@ const render = async ({
 
     if (toRender === 'main') {
         const options = pageOptions?.cache as CacheOptions | undefined;
-        setCache(
+        await setCacheWithOptions(
             path,
             {
                 rendered: rendered,
@@ -737,7 +753,11 @@ const render = async ({
                 documentAssets: assets,
                 loaderData: loaderData,
             },
-            options?.ttl ? options.ttl : 0,
+            {
+                ttl: options?.ttl ? options.ttl : 0,
+                swr: options?.swr,
+                tags: options?.tags,
+            },
         );
     }
 
@@ -795,15 +815,31 @@ const onStart = async () => {
         const manifest = await createRouteManifest();
         routeManifest = manifest.rootNode;
         metadataManifest = manifest.metadataMap;
-        const sharedConfig = (globalThis as any).__SOLIDSTEP_CONFIG__;
+        let sharedConfig = (globalThis as any).__SOLIDSTEP_CONFIG__;
         if (!sharedConfig) {
             const __dirname = dirname(fileURLToPath(import.meta.url));
             const configContent = await readFile(
                 `${__dirname}/.config.json`,
                 'utf-8',
             );
+            sharedConfig = JSON.parse(configContent);
             // @ts-ignore
-            globalThis.__SOLIDSTEP_CONFIG__ = JSON.parse(configContent);
+            globalThis.__SOLIDSTEP_CONFIG__ = sharedConfig;
+        }
+
+        // Select the built-in cache backend from config. Applied before
+        // instrumentation `register()` so a user `setCacheStore(...)` there
+        // (e.g. a Redis adapter) can override it.
+        const cacheConfig = sharedConfig?.cache as
+            | { type?: 'memory'; maxEntries?: number }
+            | { type: 'filesystem'; dir: string }
+            | undefined;
+        if (cacheConfig?.type === 'filesystem') {
+            setCacheStore(new FilesystemCacheStore({ dir: cacheConfig.dir }));
+        } else if (cacheConfig?.maxEntries) {
+            setCacheStore(
+                new MemoryCacheStore({ maxEntries: cacheConfig.maxEntries }),
+            );
         }
     } catch (e) {
         console.error('Error creating route manifest:', e);

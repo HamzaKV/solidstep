@@ -264,11 +264,11 @@ export async function handleServerFunction(event: HTTPEvent) {
         // Step 1: check if revalidation is needed
         if (revalidatePath) {
             // Step 2: get generated html page from cache
-            const cacheValue = getCache<any | null>(revalidatePath);
+            const cacheValue = await getCache<any | null>(revalidatePath);
             const oldHtml = cacheValue?.rendered;
 
             // Step 3: invalidate cache for path
-            invalidateCache(revalidatePath);
+            await invalidateCache(revalidatePath);
 
             let diff: any;
 
@@ -284,7 +284,7 @@ export async function handleServerFunction(event: HTTPEvent) {
                     false,
                 );
                 await response.text(); // ensure the fetch is completed and cache is populated
-                const newCacheValue = getCache<any | null>(revalidatePath);
+                const newCacheValue = await getCache<any | null>(revalidatePath);
                 const newHtml = newCacheValue?.rendered;
                 const dd = createDiffDOM({
                     skipSelector: 'SCRIPT, STYLE, NOSCRIPT',

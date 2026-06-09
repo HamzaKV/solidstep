@@ -44,6 +44,21 @@ type Config = {
      */
     logger?: true | LoggerOptions;
     /**
+     * Select the built-in cache backend used for the page-render and loader
+     * data caches. Defaults to an in-memory LRU.
+     *
+     * - `{ type: 'memory', maxEntries }` — in-memory LRU (the default).
+     * - `{ type: 'filesystem', dir }` — persist entries to disk under `dir`
+     *   (node-server presets only).
+     *
+     * For an external store (e.g. Redis), call `setCacheStore(store)` from
+     * `solidstep/utils/cache` inside your instrumentation `register()` hook —
+     * that overrides whatever is selected here.
+     */
+    cache?:
+        | { type?: 'memory'; maxEntries?: number }
+        | { type: 'filesystem'; dir: string };
+    /**
      * Extra Vite config merged into each router. Provide a single object to
      * apply it everywhere, or a function receiving the target `router` name to
      * vary config per router.
@@ -95,6 +110,7 @@ export const defineConfig = (
 
     const sharedConfig = {
         logger: config.logger || false,
+        cache: config.cache,
     };
 
     // @ts-ignore

@@ -7,130 +7,187 @@ vi.mock('vinxi/http', () => ({
 
 import {
     getCache,
+    getCacheEntry,
     setCache,
+    setCacheWithOptions,
     invalidateCache,
+    invalidateTag,
     clearAllCache,
     revalidatePath,
+    getCacheStore,
+    setCacheStore,
+    MemoryCacheStore,
 } from '../utils/cache';
 import * as vinxiHttp from 'vinxi/http';
 
-beforeEach(() => {
-    clearAllCache();
+beforeEach(async () => {
+    await clearAllCache();
 });
 
-afterEach(() => {
-    clearAllCache();
+afterEach(async () => {
+    await clearAllCache();
 });
 
 describe('setCache / getCache', () => {
-    it('stores and retrieves a value without TTL', () => {
-        setCache('key1', { data: 42 });
-        expect(getCache('key1')).toEqual({ data: 42 });
+    it('stores and retrieves a value without TTL', async () => {
+        await setCache('key1', { data: 42 });
+        expect(await getCache('key1')).toEqual({ data: 42 });
     });
 
-    it('returns null for a key that was never set', () => {
-        expect(getCache('missing')).toBeNull();
+    it('returns null for a key that was never set', async () => {
+        expect(await getCache('missing')).toBeNull();
     });
 
-    it('stores and retrieves with an explicit TTL', () => {
-        setCache('key2', 'hello', 60_000);
-        expect(getCache('key2')).toBe('hello');
+    it('stores and retrieves with an explicit TTL', async () => {
+        await setCache('key2', 'hello', 60_000);
+        expect(await getCache('key2')).toBe('hello');
     });
 
     it('returns null after TTL expires', async () => {
-        setCache('key3', 'short-lived', 1);
+        await setCache('key3', 'short-lived', 1);
         await new Promise((r) => setTimeout(r, 10));
-        expect(getCache('key3')).toBeNull();
+        expect(await getCache('key3')).toBeNull();
     });
 
-    it('returns cached value before TTL expires', () => {
-        setCache('key4', 'alive', 60_000);
-        expect(getCache('key4')).toBe('alive');
+    it('returns cached value before TTL expires', async () => {
+        await setCache('key4', 'alive', 60_000);
+        expect(await getCache('key4')).toBe('alive');
     });
 
-    it('overwrites an existing key', () => {
-        setCache('k', 'first');
-        setCache('k', 'second');
-        expect(getCache('k')).toBe('second');
+    it('overwrites an existing key', async () => {
+        await setCache('k', 'first');
+        await setCache('k', 'second');
+        expect(await getCache('k')).toBe('second');
     });
 
-    it('updates expiresAt when overwriting an existing key with a TTL', () => {
-        setCache('k', 'first');
-        setCache('k', 'second', 60_000);
-        expect(getCache('k')).toBe('second');
+    it('updates expiresAt when overwriting an existing key with a TTL', async () => {
+        await setCache('k', 'first');
+        await setCache('k', 'second', 60_000);
+        expect(await getCache('k')).toBe('second');
     });
 
     it('removes expired head entry that has a next neighbor', async () => {
-        setCache('a', 'a-val'); // tail; head will be b
-        setCache('b', 'b-val', 1); // head, with next=a
+        await setCache('a', 'a-val'); // tail; head will be b
+        await setCache('b', 'b-val', 1); // head, with next=a
         await new Promise((r) => setTimeout(r, 10));
-        expect(getCache('b')).toBeNull();
-        expect(getCache('a')).toBe('a-val');
+        expect(await getCache('b')).toBeNull();
+        expect(await getCache('a')).toBe('a-val');
     });
 
     it('removes expired tail entry that has a prev neighbor', async () => {
-        setCache('a', 'a-val', 1); // tail, with prev=b
-        setCache('b', 'b-val'); // head
+        await setCache('a', 'a-val', 1); // tail, with prev=b
+        await setCache('b', 'b-val'); // head
         await new Promise((r) => setTimeout(r, 10));
-        expect(getCache('a')).toBeNull();
-        expect(getCache('b')).toBe('b-val');
+        expect(await getCache('a')).toBeNull();
+        expect(await getCache('b')).toBe('b-val');
     });
 
-    it('handles different value types', () => {
-        setCache<number>('num', 123);
-        setCache<boolean>('bool', true);
-        setCache<null>('null', null);
-        expect(getCache<number>('num')).toBe(123);
-        expect(getCache<boolean>('bool')).toBe(true);
-        expect(getCache<null>('null')).toBeNull();
+    it('handles different value types', async () => {
+        await setCache<number>('num', 123);
+        await setCache<boolean>('bool', true);
+        await setCache<null>('null', null);
+        expect(await getCache<number>('num')).toBe(123);
+        expect(await getCache<boolean>('bool')).toBe(true);
+        expect(await getCache<null>('null')).toBeNull();
     });
 });
 
-describe('LRU eviction', () => {
-    it('evicts the least recently used entry when capacity is exceeded', () => {
-        for (let i = 0; i < 1000; i++) {
-            setCache(`lru-${i}`, i);
+describe('getCacheEntry', () => {
+    it('returns null for a miss', async () => {
+        expect(await getCacheEntry('nope')).toBeNull();
+    });
+
+    it('exposes deadlines for a stored entry', async () => {
+        await setCacheWithOptions('e', 'v', { ttl: 1000, swr: 500 });
+        const entry = await getCacheEntry<string>('e');
+        expect(entry?.value).toBe('v');
+        expect(entry?.staleAt).toBeTypeOf('number');
+        expect(entry?.expiresAt).toBeGreaterThan(entry!.staleAt!);
+    });
+
+    it('serves a stale-but-not-expired entry within the SWR window', async () => {
+        vi.useFakeTimers();
+        try {
+            await setCacheWithOptions('s', 'v', { ttl: 1000, swr: 5000 });
+            vi.advanceTimersByTime(2000); // past staleAt, before expiresAt
+            const entry = await getCacheEntry<string>('s');
+            expect(entry?.value).toBe('v');
+            expect(entry!.staleAt!).toBeLessThan(Date.now());
+        } finally {
+            vi.useRealTimers();
         }
-        // Access lru-0 to move it to the front
-        getCache('lru-0');
-        // Insert one more to trigger eviction (tail should be lru-1 now)
-        setCache('lru-new', 'new');
-        expect(getCache('lru-0')).toBe(0);
-        expect(getCache('lru-new')).toBe('new');
-        // lru-1 should have been evicted (it was the oldest unaccessed)
-        expect(getCache('lru-1')).toBeNull();
+    });
+
+    it('evicts and reports a miss once hard-expired', async () => {
+        vi.useFakeTimers();
+        try {
+            await setCacheWithOptions('h', 'v', { ttl: 1000, swr: 500 });
+            vi.advanceTimersByTime(2000); // past expiresAt
+            expect(await getCacheEntry('h')).toBeNull();
+            expect(await getCache('h')).toBeNull();
+        } finally {
+            vi.useRealTimers();
+        }
     });
 });
 
 describe('invalidateCache', () => {
-    it('removes a specific key', () => {
-        setCache('a', 1);
-        setCache('b', 2);
-        invalidateCache('a');
-        expect(getCache('a')).toBeNull();
-        expect(getCache('b')).toBe(2);
+    it('removes a specific key', async () => {
+        await setCache('a', 1);
+        await setCache('b', 2);
+        await invalidateCache('a');
+        expect(await getCache('a')).toBeNull();
+        expect(await getCache('b')).toBe(2);
     });
 
-    it('invalidates the head entry (has next, no prev)', () => {
-        setCache('a', 1); // tail
-        setCache('b', 2); // head, next=a
-        invalidateCache('b');
-        expect(getCache('b')).toBeNull();
-        expect(getCache('a')).toBe(1);
+    it('invalidates the head entry (has next, no prev)', async () => {
+        await setCache('a', 1); // tail
+        await setCache('b', 2); // head, next=a
+        await invalidateCache('b');
+        expect(await getCache('b')).toBeNull();
+        expect(await getCache('a')).toBe(1);
     });
 
-    it('is a no-op for a missing key', () => {
-        expect(() => invalidateCache('not-here')).not.toThrow();
+    it('is a no-op for a missing key', async () => {
+        await expect(invalidateCache('not-here')).resolves.toBeUndefined();
+    });
+});
+
+describe('invalidateTag', () => {
+    it('removes every entry sharing a tag, leaving others', async () => {
+        await setCacheWithOptions('p1', 1, { tags: ['posts'] });
+        await setCacheWithOptions('p2', 2, { tags: ['posts', 'home'] });
+        await setCacheWithOptions('u1', 3, { tags: ['users'] });
+        await invalidateTag('posts');
+        expect(await getCache('p1')).toBeNull();
+        expect(await getCache('p2')).toBeNull();
+        expect(await getCache('u1')).toBe(3);
     });
 });
 
 describe('clearAllCache', () => {
-    it('removes all entries', () => {
-        setCache('x', 1);
-        setCache('y', 2);
-        clearAllCache();
-        expect(getCache('x')).toBeNull();
-        expect(getCache('y')).toBeNull();
+    it('removes all entries', async () => {
+        await setCache('x', 1);
+        await setCache('y', 2);
+        await clearAllCache();
+        expect(await getCache('x')).toBeNull();
+        expect(await getCache('y')).toBeNull();
+    });
+});
+
+describe('store registry', () => {
+    afterEach(() => {
+        // Restore the default store so other suites are unaffected.
+        setCacheStore(new MemoryCacheStore());
+    });
+
+    it('routes reads/writes through the active store', async () => {
+        const custom = new MemoryCacheStore({ maxEntries: 2 });
+        setCacheStore(custom);
+        expect(getCacheStore()).toBe(custom);
+        await setCache('via-store', 'v');
+        expect(await getCache('via-store')).toBe('v');
+        expect(await custom.get('via-store')).not.toBeNull();
     });
 });
 

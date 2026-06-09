@@ -1,102 +1,100 @@
 import { getEvent, setResponseHeader } from 'vinxi/http';
+import {
+    MemoryCacheStore,
+    type CacheEntry,
+    type CacheSetOptions,
+    type CacheStore,
+} from './cache-store';
 
-type CacheValue<T = any> = {
-    key: string;
-    value: T;
-    expiresAt: number | null;
-    prev?: CacheValue<T>;
-    next?: CacheValue<T>;
+export type { CacheEntry, CacheSetOptions, CacheStore } from './cache-store';
+export {
+    MemoryCacheStore,
+    FilesystemCacheStore,
+    type MaybePromise,
+} from './cache-store';
+
+// The active cache backend. Defaults to an in-memory LRU; swap it at runtime
+// (e.g. inside instrumentation `register()`) via `setCacheStore`.
+let activeStore: CacheStore = new MemoryCacheStore();
+
+/**
+ * Replace the active cache backend. Call once at server startup (typically in
+ * the instrumentation `register()` hook) to plug in a filesystem or external
+ * (e.g. Redis) store. Overrides any built-in store selected via `defineConfig`.
+ *
+ * @param store - The {@link CacheStore} implementation to use.
+ */
+export const setCacheStore = (store: CacheStore): void => {
+    activeStore = store;
 };
 
-const MAX_CACHE_ENTRIES = 1000;
+/** Get the active {@link CacheStore} backend. */
+export const getCacheStore = (): CacheStore => activeStore;
 
-const cacheMap = new Map<string, CacheValue>();
-let head: CacheValue | undefined;
-let tail: CacheValue | undefined;
-
-const moveToFront = <T>(node: CacheValue<T>) => {
-    if (node === head) return;
-
-    // node.prev is always defined here: node !== head guarantees a predecessor
-    node.prev!.next = node.next;
-    if (node.next) node.next.prev = node.prev;
-    if (node === tail) tail = node.prev;
-
-    // head is always defined here: there are ≥2 nodes when moveToFront is reached
-    node.prev = undefined;
-    node.next = head;
-    head!.prev = node;
-    head = node;
-};
-
-// Only called when cacheMap.size > MAX_CACHE_ENTRIES, so tail and tail.prev are always defined.
-const removeTail = () => {
-    cacheMap.delete(tail!.key);
-    tail!.prev!.next = undefined;
-    tail = tail!.prev!;
+/**
+ * Read a raw cache entry, enforcing **hard expiry**: an entry past its
+ * `expiresAt` (wall-clock) is deleted and reported as a miss. A stale-but-not-
+ * expired entry (within its SWR window) is returned as-is so callers can serve
+ * it while revalidating.
+ *
+ * @param key - Cache key.
+ * @returns The live {@link CacheEntry}, or `null` if missing or hard-expired.
+ */
+export const getCacheEntry = async <T>(
+    key: string,
+): Promise<CacheEntry<T> | null> => {
+    const entry = await activeStore.get<T>(key);
+    if (!entry) return null;
+    if (entry.expiresAt !== null && entry.expiresAt <= Date.now()) {
+        await activeStore.delete(key);
+        return null;
+    }
+    return entry;
 };
 
 /**
- * Read a value from the in-memory cache by key.
+ * Read a value from the cache by key.
  *
- * Expired entries (past their TTL) are evicted on access and treated as a
- * miss. A hit moves the entry to the front of the LRU list.
+ * Hard-expired entries are evicted on access and treated as a miss. Within the
+ * SWR window the (stale) value is still returned.
  *
  * @param key - Cache key.
  * @returns The cached value, or `null` if missing or expired.
  */
-export const getCache = <T>(key: string): T | null => {
-    const entry = cacheMap.get(key);
-    if (!entry) return null;
-
-    if (entry.expiresAt && entry.expiresAt < performance.now()) {
-        cacheMap.delete(key);
-        if (entry.prev) entry.prev.next = entry.next;
-        if (entry.next) entry.next.prev = entry.prev;
-        if (entry === head) head = entry.next;
-        if (entry === tail) tail = entry.prev;
-        return null;
-    }
-
-    moveToFront(entry);
-    return entry.value;
+export const getCache = async <T>(key: string): Promise<T | null> => {
+    const entry = await getCacheEntry<T>(key);
+    return entry ? entry.value : null;
 };
 
 /**
- * Store a value in the in-memory LRU cache (max 1000 entries).
+ * Store a value in the cache with full {@link CacheSetOptions} (TTL, SWR window,
+ * tags). All deadlines are wall-clock (`Date.now()`-based).
  *
- * Inserting beyond the capacity evicts the least-recently-used entry.
+ * @param key - Cache key. Reusing a key overwrites its value, deadlines, and tags.
+ * @param value - Value to cache.
+ * @param options - TTL/SWR/tags.
+ */
+export const setCacheWithOptions = async <T>(
+    key: string,
+    value: T,
+    options?: CacheSetOptions,
+): Promise<void> => {
+    await activeStore.set(key, value, options);
+};
+
+/**
+ * Store a value in the cache.
  *
  * @param key - Cache key. Reusing a key overwrites its value and TTL.
  * @param value - Value to cache.
- * @param ttlMs - Optional time-to-live in milliseconds. Omit for no expiry.
+ * @param ttlMs - Optional time-to-live in milliseconds (wall-clock). Omit for no expiry.
  */
-export const setCache = <T>(key: string, value: T, ttlMs?: number) => {
-    if (cacheMap.has(key)) {
-        const node = cacheMap.get(key)!;
-        node.value = value;
-        node.expiresAt = ttlMs ? performance.now() + ttlMs : null;
-        moveToFront(node);
-        return;
-    }
-
-    const newNode: CacheValue<T> = {
-        key,
-        value,
-        expiresAt: ttlMs ? performance.now() + ttlMs : null,
-    };
-
-    newNode.next = head;
-    if (head) head.prev = newNode;
-    head = newNode;
-
-    if (!tail) tail = newNode;
-
-    cacheMap.set(key, newNode);
-
-    if (cacheMap.size > MAX_CACHE_ENTRIES) {
-        removeTail();
-    }
+export const setCache = async <T>(
+    key: string,
+    value: T,
+    ttlMs?: number,
+): Promise<void> => {
+    await activeStore.set(key, value, { ttl: ttlMs });
 };
 
 /**
@@ -104,22 +102,22 @@ export const setCache = <T>(key: string, value: T, ttlMs?: number) => {
  *
  * @param key - Cache key to invalidate.
  */
-export const invalidateCache = (key: string) => {
-    const node = cacheMap.get(key);
-    if (!node) return;
-
-    if (node.prev) node.prev.next = node.next;
-    if (node.next) node.next.prev = node.prev;
-    if (node === head) head = node.next;
-    if (node === tail) tail = node.prev;
-
-    cacheMap.delete(key);
+export const invalidateCache = async (key: string): Promise<void> => {
+    await activeStore.delete(key);
 };
 
-/** Empty the entire in-memory cache. */
-export const clearAllCache = () => {
-    cacheMap.clear();
-    head = tail = undefined;
+/**
+ * Invalidate every cache entry associated with `tag`.
+ *
+ * @param tag - The tag whose entries should be removed.
+ */
+export const invalidateTag = async (tag: string): Promise<void> => {
+    await activeStore.invalidateTag(tag);
+};
+
+/** Empty the entire cache. */
+export const clearAllCache = async (): Promise<void> => {
+    await activeStore.clear();
 };
 
 /**

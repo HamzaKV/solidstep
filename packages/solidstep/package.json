@@ -30,6 +30,10 @@
             "types": "./utils/cache.d.ts",
             "default": "./utils/cache.js"
         },
+        "./utils/cache-store": {
+            "types": "./utils/cache-store.d.ts",
+            "default": "./utils/cache-store.js"
+        },
         "./utils/client-only": {
             "types": "./utils/client-only.d.ts",
             "default": "./utils/client-only.js"

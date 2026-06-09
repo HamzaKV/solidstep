@@ -15,4 +15,11 @@ export default defineConfig({
             'node:sqlite': sqliteStub,
         },
     },
+    // Built-in cache backend for the page-render and loader-data caches.
+    // `memory` (the default) is an in-memory LRU. To persist entries to disk on
+    // a node-server preset, swap in the filesystem adapter:
+    //   cache: { type: 'filesystem', dir: '.cache/solidstep' },
+    // For an external store (e.g. Redis), call setCacheStore(...) from
+    // app/instrumentation.ts instead (it overrides this selection).
+    cache: { type: 'memory' },
 });

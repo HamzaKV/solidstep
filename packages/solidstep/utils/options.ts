@@ -6,6 +6,13 @@ export type Options = {
     cache?: {
         /** Time-to-live for the cached render, in milliseconds. */
         ttl?: number;
+        /**
+         * Stale-while-revalidate window in milliseconds, applied after `ttl`.
+         * Within it the cached render is still served (stale).
+         */
+        swr?: number;
+        /** Tags for group invalidation of the cached render via `invalidateTag`. */
+        tags?: string[];
     };
     /** Extra headers to set on the route's response. */
     responseHeaders?: {
