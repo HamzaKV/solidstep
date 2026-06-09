@@ -100,6 +100,25 @@ export default function RootLayout(props: {
 }
 ```
 
+### Per-group loading & error boundaries
+
+A `@group` directory may include its own `loading.tsx` and/or `error.tsx`:
+
+```
+app/dashboard/
+├── layout.tsx
+├── page.tsx
+└── @analytics/
+    ├── page.tsx
+    ├── loading.tsx   # shown while this slot's deferred data streams in
+    └── error.tsx     # shown if this slot's loader or render throws
+```
+
+- **`error.tsx`** isolates a slot: if that group's loader rejects or its component throws, only that slot renders its `error.tsx` (it receives the `error` as a prop) — sibling slots and the page render normally. The route is streamed (`renderToStream`) so the error hydrates consistently.
+- **`loading.tsx`** is the `<Suspense>` fallback for a group whose loader is [deferred](./data-loading.md#deferred-loaders-streaming): the slot shows it until the data streams in. The group page reads its loader data as an accessor, exactly like a deferred page loader.
+
+A group with neither boundary nor a deferred loader behaves as before (its loader is awaited and the slot renders synchronously with the rest of the page).
+
 ## Related
 
 - [Data Loading](./data-loading.md) — load data per page/layout.

@@ -38,6 +38,8 @@ export type RoutePageHandler = {
             manifestPath: string;
             page: Import;
             loader?: Import;
+            loadingPage?: Import;
+            errorPage?: Import;
         };
     };
 };

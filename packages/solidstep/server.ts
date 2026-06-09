@@ -12,7 +12,7 @@ import {
     renderToStream,
     createComponent,
 } from 'solid-js/web';
-import { Suspense } from 'solid-js';
+import { Suspense, ErrorBoundary } from 'solid-js';
 import { createDeferredResource } from './utils/deferred';
 import type { Meta } from './utils/meta';
 import fileRoutes, { type RouteModule } from 'vinxi/routes';
@@ -193,10 +193,18 @@ const createRouteManifest = async () => {
                         .filter((s) => !s.startsWith('('))
                         .at(-1);
                     if (!groupName) continue;
+                    // A `loading.tsx`/`error.tsx` inside the @group dir was
+                    // recognized as a normal loading/error route; look it up by
+                    // the group's normalized path and attach it to the slot.
+                    const groupNormPath = getNormalizedPath(group.path);
+                    const groupLoading = loadingPagesMap.get(groupNormPath);
+                    const groupError = errorPagesMap.get(groupNormPath);
                     groups[groupName] = {
                         manifestPath: group.path,
                         page: group.$component,
                         loader: group.$loader,
+                        loadingPage: groupLoading?.$component,
+                        errorPage: groupError?.$component,
                     };
                 }
             }
@@ -429,6 +437,9 @@ const render = async ({
         }),
     );
     const hasDeferred = deferredLoaderData.size > 0;
+    // Set by the group loop below when a group has a loading/error boundary or a
+    // deferred loader — such routes also take the streaming path.
+    let hasStreamingGroup = false;
 
     const compose = entry.layouts.reduceRight(
         (children, layout, index) => async () => {
@@ -469,6 +480,7 @@ const render = async ({
                 for (const [groupName, group] of Object.entries(groups)) {
                     slotPromises.push(
                         (async () => {
+                            const slotName = groupName.replace('@', '');
                             const moduleSrc = `${group.page.src}&pick=$css`;
                             const moduleAssets =
                                 await clientManifest.inputs[moduleSrc].assets();
@@ -482,21 +494,124 @@ const render = async ({
                                       group.loader,
                                   )
                                 : { loader: null };
-                            let data: any = {};
+
+                            const groupDeferred =
+                                groupLoader?.options?.type === 'defer';
+                            const needsWrap =
+                                !!group.loadingPage ||
+                                !!group.errorPage ||
+                                groupDeferred;
+
+                            // Plain group (no boundary): await its loader and
+                            // pass the data directly, exactly as before.
+                            if (!needsWrap) {
+                                let data: any = {};
+                                if (groupLoader) {
+                                    data = await getCachedLoaderData(
+                                        groupLoader,
+                                        group.manifestPath,
+                                        req,
+                                    );
+                                    loaderData[group.manifestPath] = data;
+                                }
+                                slots[slotName] = () =>
+                                    groupPage({
+                                        routeParams,
+                                        searchParams,
+                                        loaderData: data,
+                                    });
+                                return;
+                            }
+
+                            // Boundary group: render via <Suspense>/<ErrorBoundary>
+                            // so its loading.tsx/error.tsx isolate this slot.
+                            hasStreamingGroup = true;
+                            let GroupLoading: any = null;
+                            let GroupError: any = null;
+                            if (group.loadingPage) {
+                                const src = `${group.loadingPage.src}&pick=$css`;
+                                assets.push(
+                                    ...(await clientManifest.inputs[
+                                        src
+                                    ].assets()),
+                                );
+                                GroupLoading = (
+                                    await getCachedModule<{ default: any }>(
+                                        group.loadingPage,
+                                    )
+                                ).default;
+                            }
+                            if (group.errorPage) {
+                                const src = `${group.errorPage.src}&pick=$css`;
+                                assets.push(
+                                    ...(await clientManifest.inputs[
+                                        src
+                                    ].assets()),
+                                );
+                                GroupError = (
+                                    await getCachedModule<{ default: any }>(
+                                        group.errorPage,
+                                    )
+                                ).default;
+                            }
+                            // A boundary group with a loader streams its data in
+                            // as a resource (so loader errors reach the
+                            // ErrorBoundary and hydrate consistently).
+                            let pending: Promise<any> | null = null;
                             if (groupLoader) {
-                                data = await getCachedLoaderData(
+                                pending = getCachedLoaderData(
                                     groupLoader,
                                     group.manifestPath,
                                     req,
                                 );
-                                loaderData[group.manifestPath] = data;
+                                pending.catch(() => undefined);
+                                deferredLoaderData.set(
+                                    group.manifestPath,
+                                    pending,
+                                );
                             }
-                            slots[groupName.replace('@', '')] = () =>
-                                groupPage({
-                                    routeParams,
-                                    searchParams,
-                                    loaderData: data,
-                                });
+                            slots[slotName] = () => {
+                                const inner = () => {
+                                    if (!pending) {
+                                        return groupPage({
+                                            routeParams,
+                                            searchParams,
+                                            loaderData: {},
+                                        });
+                                    }
+                                    const resource =
+                                        createDeferredResource(pending);
+                                    return createComponent(Suspense, {
+                                        fallback: GroupLoading
+                                            ? createComponent(GroupLoading, {
+                                                  routeParams,
+                                                  searchParams,
+                                              })
+                                            : undefined,
+                                        get children() {
+                                            return groupPage({
+                                                routeParams,
+                                                searchParams,
+                                                loaderData: resource,
+                                            });
+                                        },
+                                    });
+                                };
+                                if (GroupError) {
+                                    return createComponent(ErrorBoundary, {
+                                        fallback: (err: any) =>
+                                            createComponent(GroupError, {
+                                                error: err,
+                                                routeParams,
+                                                searchParams,
+                                            }),
+                                        get children() {
+                                            return inner();
+                                        },
+                                    });
+                                }
+                                return inner();
+                            };
                         })(),
                     );
                 }
@@ -599,7 +714,7 @@ const render = async ({
     // `renderToStream` (the page suspends on its deferred resource). Streamed
     // responses are not page-cached. `meta`/`assets` are fully populated by the
     // awaited `compose()` above, so the caller can emit the <head> first.
-    if (hasDeferred && toRender === 'main') {
+    if ((hasDeferred || hasStreamingGroup) && toRender === 'main') {
         return {
             deferred: true as const,
             composed,
@@ -634,17 +749,29 @@ const render = async ({
     };
 };
 
-// Whether a matched page route uses a deferred loader (page loader only, for
-// now). The loader module is cached, so this import is cheap.
-const hasDeferredLoaders = async (
+// Whether a matched page route needs the streaming (renderToStream) path: the
+// page loader is deferred, or any parallel-route group has a loading/error
+// boundary or a deferred loader. Loader modules are cached, so imports are cheap.
+const routeNeedsStreaming = async (
     entry: RoutePageHandler,
 ): Promise<boolean> => {
-    const loaderRef = entry.mainPage.loader;
-    if (!loaderRef) return false;
-    const { loader: loaderFn } = await getCachedModule<{ loader: any }>(
-        loaderRef as Import,
-    );
-    return loaderFn?.options?.type === 'defer';
+    const pageLoader = entry.mainPage.loader;
+    if (pageLoader) {
+        const { loader: loaderFn } = await getCachedModule<{ loader: any }>(
+            pageLoader as Import,
+        );
+        if (loaderFn?.options?.type === 'defer') return true;
+    }
+    for (const group of Object.values(entry.groups || {})) {
+        if (group.loadingPage || group.errorPage) return true;
+        if (group.loader) {
+            const { loader: loaderFn } = await getCachedModule<{ loader: any }>(
+                group.loader as Import,
+            );
+            if (loaderFn?.options?.type === 'defer') return true;
+        }
+    }
+    return false;
 };
 
 let routeManifest: RouteNode | null = null;
@@ -931,7 +1058,7 @@ const handler = eventHandler(async (event) => {
                             // renderToStream + Suspense. Non-deferred routes fall
                             // through to the unchanged renderToString path below.
                             if (
-                                await hasDeferredLoaders(
+                                await routeNeedsStreaming(
                                     matched as RoutePageHandler,
                                 )
                             ) {
