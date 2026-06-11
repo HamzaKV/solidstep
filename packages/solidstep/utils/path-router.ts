@@ -11,6 +11,7 @@ export type RoutePageHandler = {
         loader?: Import;
         generateMeta?: Import;
         options?: Import;
+        generateStaticParams?: Import;
     };
     loadingPage?: {
         manifestPath: string;

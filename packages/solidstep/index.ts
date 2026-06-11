@@ -4,9 +4,10 @@ import solid from 'vite-plugin-solid';
 // @ts-expect-error
 import { serverFunctions } from '@vinxi/server-functions/plugin';
 import { ServerRouter, ClientRouter } from './utils/router.js';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cpSync, mkdirSync, existsSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { normalize } from 'vinxi/lib/path';
 import type { LoggerOptions } from 'pino';
 import type { CustomizableConfig } from 'vinxi/dist/types/lib/vite-dev';
@@ -255,7 +256,10 @@ export const defineConfig = (
     app.hooks.afterEach((event) => {
         if (event.name === 'app:build:nitro:end') {
             const [{ nitro }] = event.args;
-            const serverDir = nitro.options.output.serverDir;
+            const serverDir = nitro.options.output.serverDir as string;
+            const publicDir =
+                (nitro.options.output.publicDir as string | undefined) ??
+                join(dirname(serverDir), 'public');
             writeFileSync(
                 `${serverDir}/.config.json`,
                 JSON.stringify(sharedConfig),
@@ -274,6 +278,25 @@ export const defineConfig = (
                 );
             } else {
                 console.log(`ℹ No server assets to copy from ${fromDir}`);
+            }
+
+            // SSG/ISR: run the prerender crawler synchronously (spawnSync blocks)
+            // so the build waits for it. This `afterEach` callback is invoked
+            // synchronously by hookable and its returned promise is NOT awaited,
+            // so the crawl must not be async here — hence a blocking child.
+            const crawlScript = fileURLToPath(
+                new URL('./prerender-crawl.js', import.meta.url),
+            );
+            const result = spawnSync(
+                process.execPath,
+                [crawlScript, serverDir, publicDir],
+                { stdio: 'inherit' },
+            );
+            if (result.error) {
+                console.warn(
+                    'ℹ Prerender step failed (non-fatal):',
+                    result.error,
+                );
             }
         }
     });

@@ -112,6 +112,10 @@ export class ServerRouter extends BaseFileSystemRouter {
                     src: filePath,
                     pick: ['options'],
                 },
+                $generateStaticParams: {
+                    src: filePath,
+                    pick: ['generateStaticParams'],
+                },
             };
         }
 

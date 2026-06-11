@@ -94,6 +94,10 @@
             "types": "./utils/options.d.ts",
             "default": "./utils/options.js"
         },
+        "./utils/prerender": {
+            "types": "./utils/prerender.d.ts",
+            "default": "./utils/prerender.js"
+        },
         "./utils/redirect": {
             "types": "./utils/redirect.d.ts",
             "default": "./utils/redirect.js"

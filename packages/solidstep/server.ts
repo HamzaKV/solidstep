@@ -17,10 +17,24 @@ import { createDeferredResource } from './utils/deferred';
 import type { Meta } from './utils/meta';
 import fileRoutes, { type RouteModule } from 'vinxi/routes';
 import { RedirectError } from './utils/redirect';
-import { getCache, setCacheWithOptions, setCacheStore } from './utils/cache';
+import {
+    getCache,
+    getCacheEntry,
+    setCacheWithOptions,
+    setCacheStore,
+} from './utils/cache';
 import { MemoryCacheStore, FilesystemCacheStore } from './utils/cache-store';
+import { singleFlight } from './utils/single-flight';
+import fetchServer from './utils/fetch.server';
 import { getCachedLoaderData } from './utils/loader-cache';
 import { runSequentialLoader } from './utils/loader-error';
+import {
+    expandRoute,
+    type PatternSegment,
+    type PrerenderTarget,
+    type PrerenderOptions,
+    type GenerateStaticParams,
+} from './utils/prerender';
 import { handleServerFunction } from './utils/server-action.server';
 import { readFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
@@ -73,6 +87,7 @@ type FileRoute = RouteModule & {
     $generateMeta?: Import;
     $handler?: Import;
     $options?: Import;
+    $generateStaticParams?: Import;
     parent?: string; // for groups
     metaName?: string; // for metadata files (robots/sitemap/manifest/llms)
 };
@@ -245,6 +260,7 @@ const createRouteManifest = async () => {
                     loader: fileRoute.$loader,
                     generateMeta: fileRoute.$generateMeta,
                     options: fileRoute.$options,
+                    generateStaticParams: fileRoute.$generateStaticParams,
                 },
                 loadingPage: loadingPage
                     ? {
@@ -286,6 +302,195 @@ const createRouteManifest = async () => {
     }
 
     return { rootNode, metadataMap };
+};
+
+// Header a self-fetch sets so the handler renders an ISR page fresh instead of
+// serving (or recursing into) the ISR cache. Also set by the build-time crawler.
+const ISR_BYPASS_HEADER = 'x-solidstep-isr-bypass';
+// Internal, env-gated endpoint the build crawler hits to learn what to prerender.
+const PRERENDER_ENDPOINT = '/__solidstep_prerender';
+
+// Walk the route trie, reconstructing each page route's pattern segments so a
+// concrete pathname can be built from generateStaticParams.
+const walkPageRoutes = (
+    node: RouteNode,
+    segments: PatternSegment[] = [],
+): { handler: RoutePageHandler; segments: PatternSegment[] }[] => {
+    const out: { handler: RoutePageHandler; segments: PatternSegment[] }[] = [];
+    if (node.handler && node.handler.type === 'page') {
+        out.push({ handler: node.handler, segments });
+    }
+    for (const [value, child] of node.staticChildren) {
+        out.push(...walkPageRoutes(child, [...segments, { kind: 'static', value }]));
+    }
+    if (node.paramChild) {
+        out.push(
+            ...walkPageRoutes(node.paramChild.node, [
+                ...segments,
+                { kind: 'param', name: node.paramChild.name },
+            ]),
+        );
+    }
+    if (node.catchAllChild) {
+        out.push(
+            ...walkPageRoutes(node.catchAllChild.node, [
+                ...segments,
+                {
+                    kind: 'catchAll',
+                    name: node.catchAllChild.name,
+                    optional: node.catchAllChild.optional,
+                },
+            ]),
+        );
+    }
+    return out;
+};
+
+/**
+ * Enumerate every concrete page to prerender (SSG/ISR). For each page route
+ * with `options.render` of `'static'`/`'isr'`, this loads its `options` and (for
+ * dynamic routes) `generateStaticParams`, then expands the pattern into concrete
+ * {@link PrerenderTarget}s. Used by the build-time crawler.
+ */
+const collectPrerenderTargets = async (): Promise<PrerenderTarget[]> => {
+    if (!routeManifest) {
+        const manifest = await createRouteManifest();
+        routeManifest = manifest.rootNode;
+        metadataManifest = manifest.metadataMap;
+    }
+    const targets: PrerenderTarget[] = [];
+    for (const { handler, segments } of walkPageRoutes(routeManifest)) {
+        const optionsImport = handler.mainPage.options;
+        const options = optionsImport
+            ? (await getCachedModule<{ options?: PrerenderOptions }>(optionsImport))
+                  .options
+            : undefined;
+        if (options?.render !== 'static' && options?.render !== 'isr') continue;
+
+        let staticParams:
+            | Array<Record<string, string | string[]>>
+            | undefined;
+        const gspImport = handler.mainPage.generateStaticParams;
+        if (gspImport) {
+            const mod = await getCachedModule<{
+                generateStaticParams?: GenerateStaticParams;
+            }>(gspImport);
+            if (typeof mod.generateStaticParams === 'function') {
+                staticParams = await mod.generateStaticParams();
+            }
+        }
+
+        const expanded = expandRoute(segments, options, staticParams);
+        if (expanded.length === 0 && segments.some((s) => s.kind !== 'static')) {
+            console.warn(
+                `[solidstep] Skipping prerender for dynamic route "/${segments
+                    .map((s) => (s.kind === 'static' ? s.value : `[${s.name}]`))
+                    .join('/')}" — render: '${options.render}' requires generateStaticParams.`,
+            );
+        }
+        targets.push(...expanded);
+    }
+    return targets;
+};
+
+// ISR entries never hard-expire (~10y) so a stale artifact is always served
+// while it regenerates in the background.
+const ISR_SWR_MAX = 1000 * 60 * 60 * 24 * 365 * 10;
+
+// Regenerate an ISR page by self-fetching it with the bypass header (so the
+// handler renders it fresh), then refresh the cached artifact.
+const regenerateIsr = async (
+    origin: string,
+    pathname: string,
+    revalidate: number,
+    tags?: string[],
+): Promise<string> => {
+    const res = await fetchServer(
+        origin + pathname,
+        {
+            method: 'GET',
+            headers: { [ISR_BYPASS_HEADER]: '1' },
+            MAX_FETCH_TIME: 30_000,
+        },
+        false,
+    );
+    const html = await res.text();
+    await setCacheWithOptions(`isr:${pathname}`, html, {
+        ttl: revalidate * 1000,
+        swr: ISR_SWR_MAX,
+        tags,
+    });
+    return html;
+};
+
+/**
+ * Serve an ISR page's cached full-HTML artifact with stale-while-revalidate:
+ * fresh hits return immediately; stale hits return the stale artifact and kick
+ * off one coalesced background regeneration; a cold miss renders on demand.
+ */
+const serveIsr = async (
+    origin: string,
+    pathname: string,
+    revalidate: number,
+    tags?: string[],
+): Promise<string> => {
+    const key = `isr:${pathname}`;
+    const entry = await getCacheEntry<string>(key);
+    if (entry) {
+        if (entry.staleAt === null || Date.now() < entry.staleAt) {
+            return entry.value;
+        }
+        singleFlight(key, () =>
+            regenerateIsr(origin, pathname, revalidate, tags),
+        ).catch(() => undefined);
+        return entry.value;
+    }
+    return singleFlight(key, () =>
+        regenerateIsr(origin, pathname, revalidate, tags),
+    );
+};
+
+// Shape of `prerender-manifest.json` written by the build crawler into the
+// server output directory.
+type PrerenderManifest = {
+    isr?: {
+        pathname: string;
+        revalidate: number;
+        tags?: string[];
+        file: string;
+    }[];
+};
+
+// Seed prerendered ISR artifacts into the cache so the first request after a
+// (re)start serves the build-time HTML, then revalidates per its interval.
+const seedIsrFromManifest = async (serverDir: string): Promise<void> => {
+    let raw: string;
+    try {
+        raw = await readFile(`${serverDir}/prerender-manifest.json`, 'utf-8');
+    } catch {
+        return; // no ISR pages were prerendered
+    }
+    let manifest: PrerenderManifest;
+    try {
+        manifest = JSON.parse(raw);
+    } catch {
+        return;
+    }
+    for (const entry of manifest.isr ?? []) {
+        try {
+            const html = await readFile(
+                `${serverDir}/${entry.file}`,
+                'utf-8',
+            );
+            await setCacheWithOptions(`isr:${entry.pathname}`, html, {
+                ttl: (entry.revalidate || 60) * 1000,
+                swr: ISR_SWR_MAX,
+                tags: entry.tags,
+            });
+        } catch {
+            // Skip a missing/unreadable artifact.
+        }
+    }
 };
 
 const template = `
@@ -347,12 +552,19 @@ const render = async ({
 }) => {
     const url = new URL(req.url);
     const path = url.pathname;
-    const cachedEntry = await getCache<{
-        rendered: string;
-        documentMeta: Meta;
-        documentAssets: any[];
-        loaderData: Record<string, any>;
-    }>(path);
+    // SSG (`static`) and ISR pages have their own artifact/ISR cache, so they
+    // must bypass the generic per-pathname page-render cache — otherwise a fresh
+    // ISR regeneration would be served the frozen page-cache entry.
+    const usePageCache =
+        pageOptions?.render !== 'static' && pageOptions?.render !== 'isr';
+    const cachedEntry = usePageCache
+        ? await getCache<{
+              rendered: string;
+              documentMeta: Meta;
+              documentAssets: any[];
+              loaderData: Record<string, any>;
+          }>(path)
+        : null;
 
     if (cachedEntry && toRender === 'main') {
         return {
@@ -743,7 +955,7 @@ const render = async ({
 
     const rendered = await renderToString(() => composed());
 
-    if (toRender === 'main') {
+    if (toRender === 'main' && usePageCache) {
         const options = pageOptions?.cache as CacheOptions | undefined;
         await setCacheWithOptions(
             path,
@@ -811,15 +1023,24 @@ const hydrationScript = ({
 };
 
 const onStart = async () => {
+    // The built server's `import.meta.url` is not always a usable absolute file
+    // URL (notably on Windows in the Nitro bundle), so derive the server output
+    // directory from the entry path (`node .output/server/index.mjs`). This is
+    // where `.config.json` and `prerender-manifest.json` are written at build.
+    let serverDir: string;
+    try {
+        serverDir = dirname(process.argv[1] || fileURLToPath(import.meta.url));
+    } catch {
+        serverDir = process.cwd();
+    }
     try {
         const manifest = await createRouteManifest();
         routeManifest = manifest.rootNode;
         metadataManifest = manifest.metadataMap;
         let sharedConfig = (globalThis as any).__SOLIDSTEP_CONFIG__;
         if (!sharedConfig) {
-            const __dirname = dirname(fileURLToPath(import.meta.url));
             const configContent = await readFile(
-                `${__dirname}/.config.json`,
+                `${serverDir}/.config.json`,
                 'utf-8',
             );
             sharedConfig = JSON.parse(configContent);
@@ -850,6 +1071,11 @@ const onStart = async () => {
     if (instrumentation?.register) {
         await safeExecuteHook('register', instrumentation.register);
     }
+
+    // Seed ISR artifacts (written by the build-time crawler) into the active
+    // cache store so the first request is warm. Done after register() so a
+    // user-provided store is the one being seeded.
+    await seedIsrFromManifest(serverDir);
 };
 
 instrumentationReady = onStart();
@@ -873,6 +1099,17 @@ const handler = eventHandler(async (event) => {
             return handleServerFunction(event);
         }
 
+        // Build-time prerender discovery. Only answered when the process was
+        // started in prerender mode (the build crawler sets this env var), so it
+        // is never reachable in a normal production server.
+        if (
+            process.env.SOLIDSTEP_PRERENDER === '1' &&
+            new URL(req.url).pathname === PRERENDER_ENDPOINT
+        ) {
+            setHeader('Content-Type', 'application/json');
+            return JSON.stringify(await collectPrerenderTargets());
+        }
+
         if (!routeManifest) {
             const manifest = await createRouteManifest();
             routeManifest = manifest.rootNode;
@@ -888,6 +1125,7 @@ const handler = eventHandler(async (event) => {
         const urlObj = new URL(req.url);
         const pathnamePart = urlObj.pathname;
         const searchParams = Object.fromEntries(urlObj.searchParams);
+        const isrBypass = req.headers.get(ISR_BYPASS_HEADER) === '1';
 
         // Dynamic metadata files (robots.txt / sitemap.xml / manifest / llms.txt).
         // A matching static file in public/ is served by the static router first.
@@ -972,6 +1210,51 @@ const handler = eventHandler(async (event) => {
             searchParams,
         });
         await safeExecuteHook('onRequest', inst?.onRequest, req, reqCtx);
+
+        // ISR: serve a cached full-HTML artifact with stale-while-revalidate.
+        // Skipped in dev and for self-fetch/crawler requests (bypass header), so
+        // those render fresh through the normal path below.
+        if (
+            matched &&
+            matched.type === 'page' &&
+            !import.meta.env.DEV &&
+            !isrBypass
+        ) {
+            const optionsImport = (matched as RoutePageHandler).mainPage.options;
+            const pageOptions = optionsImport
+                ? (
+                      await getCachedModule<{ options?: PrerenderOptions }>(
+                          optionsImport,
+                      )
+                  ).options
+                : undefined;
+            if (pageOptions?.render === 'isr') {
+                const revalidate =
+                    pageOptions.revalidate && pageOptions.revalidate > 0
+                        ? pageOptions.revalidate
+                        : 60;
+                const isrHtml = await serveIsr(
+                    urlObj.origin,
+                    pathnamePart,
+                    revalidate,
+                    pageOptions.cache?.tags,
+                );
+                setHeader('Content-Type', 'text/html');
+                setHeader(
+                    'Cache-Control',
+                    `public, max-age=0, s-maxage=${revalidate}, stale-while-revalidate`,
+                );
+                setResponseStatus(200);
+                const respCtx = createResponseContext(reqCtx, 200);
+                await safeExecuteHook(
+                    'onResponseEnd',
+                    inst?.onResponseEnd,
+                    req,
+                    respCtx,
+                );
+                return isrHtml;
+            }
+        }
 
         let loading = false;
         let html: string | undefined = undefined;

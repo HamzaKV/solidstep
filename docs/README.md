@@ -9,6 +9,7 @@ This is the documentation index. Pages are grouped into **Guides**, **Reference*
 - [Getting Started](./getting-started.md) — create a project, special files, configuration, project structure.
 - [Routing](./routing.md) — pages, layouts, group routes, dynamic routes, parallel routes.
 - [Data Loading](./data-loading.md) — `defineLoader` and typed loader data.
+- [Rendering Strategies](./rendering.md) — SSG / ISR / dynamic via `render`, `generateStaticParams`.
 - [Server Actions & Forms](./server-actions-and-forms.md) — server functions, `<Form>`, `useActionState`, `useFormStatus`, progressive enhancement.
 - [Metadata](./metadata.md) — SEO metadata with `generateMeta` / `meta()`.
 - [Metadata Files](./metadata-files.md) — dynamic `robots.txt`, `sitemap.xml`, `manifest`, `llms.txt`.

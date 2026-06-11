@@ -33,7 +33,8 @@
     "utils/**/*",
     "index.ts",
     "client.ts",
-    "server.ts"
+    "server.ts",
+    "prerender-crawl.ts"
   ],
   "exclude": [
     "node_modules",

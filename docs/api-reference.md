@@ -35,6 +35,7 @@ Every public import from the `solidstep` package, mapped to a one-line descripti
 | `solidstep/utils/instrumentation` | `defineInstrumentation` — server-wide observability/telemetry hooks. | [Instrumentation](./instrumentation.md) |
 | `solidstep/utils/cache` | `invalidateCache`, `invalidateTag`, `revalidatePath` for cache invalidation, and `setCacheStore` to plug in a backend. | [Caching](./caching.md) |
 | `solidstep/utils/cache-store` | `CacheStore`/`CacheEntry` types and the `MemoryCacheStore`/`FilesystemCacheStore` adapters. | [Caching](./caching.md#pluggable-cache-stores) |
+| `solidstep/utils/prerender` | `GenerateStaticParams` type for `generateStaticParams` exports (SSG/ISR). | [Rendering](./rendering.md) |
 | `solidstep/utils/redirect` | `redirect()` — redirect from loaders, actions, or the client. | [Security](./security.md#redirects) |
 | `solidstep/utils/error-handler` | `createErrorFactory` — define and handle typed error collections. | [Security](./security.md#error-handling) |
 
