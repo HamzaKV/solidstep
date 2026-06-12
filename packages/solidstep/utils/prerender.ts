@@ -26,9 +26,13 @@ export type PatternSegment =
 export type PrerenderTarget = {
     /** The concrete URL pathname (e.g. `/blog/hello-world`). */
     pathname: string;
-    /** Whether the page is fully static (SSG) or incrementally regenerated (ISR). */
-    render: 'static' | 'isr';
-    /** ISR revalidation interval in seconds (omitted for `static`). */
+    /**
+     * The page's rendering strategy: fully static (SSG), incrementally
+     * regenerated (ISR), or a partially-prerendered shell (PPR). `static` and
+     * `ppr` are both written as `.html` artifacts (a PPR artifact is the shell).
+     */
+    render: 'static' | 'isr' | 'ppr';
+    /** ISR revalidation interval in seconds (omitted for `static`/`ppr`). */
     revalidate?: number;
     /** Cache tags carried from the page's `options.cache.tags`. */
     tags?: string[];
@@ -36,7 +40,7 @@ export type PrerenderTarget = {
 
 /** Page `options` fields consulted during prerendering. */
 export type PrerenderOptions = {
-    render?: 'static' | 'isr' | 'dynamic';
+    render?: 'static' | 'isr' | 'dynamic' | 'ppr';
     revalidate?: number;
     cache?: { tags?: string[] };
 };
@@ -106,7 +110,7 @@ export const expandRoute = (
     staticParams: Array<Record<string, string | string[]>> | undefined,
 ): PrerenderTarget[] => {
     const render = options?.render;
-    if (render !== 'static' && render !== 'isr') return [];
+    if (render !== 'static' && render !== 'isr' && render !== 'ppr') return [];
 
     const tags = options?.cache?.tags;
     const revalidate =

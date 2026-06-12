@@ -309,6 +309,10 @@ const createRouteManifest = async () => {
 const ISR_BYPASS_HEADER = 'x-solidstep-isr-bypass';
 // Internal, env-gated endpoint the build crawler hits to learn what to prerender.
 const PRERENDER_ENDPOINT = '/__solidstep_prerender';
+// Internal endpoint the client calls to fill a PPR page's dynamic holes: it runs
+// a deferred loader (identified by its manifest path, validated against the
+// matched route) and returns its data as JSON.
+const LOADER_ENDPOINT = '/__solidstep_loader';
 
 // Walk the route trie, reconstructing each page route's pattern segments so a
 // concrete pathname can be built from generateStaticParams.
@@ -365,7 +369,12 @@ const collectPrerenderTargets = async (): Promise<PrerenderTarget[]> => {
             ? (await getCachedModule<{ options?: PrerenderOptions }>(optionsImport))
                   .options
             : undefined;
-        if (options?.render !== 'static' && options?.render !== 'isr') continue;
+        if (
+            options?.render !== 'static' &&
+            options?.render !== 'isr' &&
+            options?.render !== 'ppr'
+        )
+            continue;
 
         let staticParams:
             | Array<Record<string, string | string[]>>
@@ -391,6 +400,56 @@ const collectPrerenderTargets = async (): Promise<PrerenderTarget[]> => {
         targets.push(...expanded);
     }
     return targets;
+};
+
+/**
+ * Run a single deferred loader for a PPR page's hole and return its data as
+ * JSON. `manifest` identifies the page/layout/group node; it is validated
+ * against the route matched for `url` so only loaders on that route can run.
+ * Returns `null` (→ 400) on a bad/unknown request.
+ */
+const serveHoleData = async (req: Request): Promise<string | null> => {
+    const reqUrl = new URL(req.url);
+    const manifest = reqUrl.searchParams.get('manifest');
+    const target = reqUrl.searchParams.get('url');
+    if (!manifest || !target) return null;
+
+    if (!routeManifest) {
+        const m = await createRouteManifest();
+        routeManifest = m.rootNode;
+        metadataManifest = m.metadataMap;
+    }
+
+    const targetUrl = new URL(target, reqUrl.origin);
+    const match = matchRoute(routeManifest, targetUrl.pathname);
+    if (!match || match.handler.type !== 'page') return null;
+    const page = match.handler as RoutePageHandler;
+
+    // Find the loader import for `manifest`, but only among nodes that belong to
+    // this matched route (page, its layouts, its groups).
+    let loaderImport: Import | undefined;
+    if (page.mainPage.manifestPath === manifest) {
+        loaderImport = page.mainPage.loader as Import | undefined;
+    } else {
+        for (const l of page.layouts) {
+            if (l.manifestPath === manifest) loaderImport = l.loader as Import;
+        }
+        for (const g of Object.values(page.groups || {})) {
+            if (g.manifestPath === manifest) loaderImport = g.loader as Import;
+        }
+    }
+    if (!loaderImport) return null;
+
+    const { loader: loaderFn } = await getCachedModule<{ loader: any }>(
+        loaderImport,
+    );
+    if (!loaderFn) return null;
+
+    // Run the loader against the original page URL so its params/search (and
+    // loader cache key) are correct.
+    const pageReq = new Request(targetUrl.toString(), { headers: req.headers });
+    const data = await getCachedLoaderData(loaderFn, manifest, pageReq);
+    return JSON.stringify({ data });
 };
 
 // ISR entries never hard-expire (~10y) so a stale artifact is always served
@@ -552,11 +611,13 @@ const render = async ({
 }) => {
     const url = new URL(req.url);
     const path = url.pathname;
-    // SSG (`static`) and ISR pages have their own artifact/ISR cache, so they
-    // must bypass the generic per-pathname page-render cache — otherwise a fresh
-    // ISR regeneration would be served the frozen page-cache entry.
+    // SSG (`static`), ISR, and PPR pages have their own artifact/ISR cache (or a
+    // shell artifact), so they bypass the generic per-pathname page-render cache.
+    const isPPR = pageOptions?.render === 'ppr';
     const usePageCache =
-        pageOptions?.render !== 'static' && pageOptions?.render !== 'isr';
+        pageOptions?.render !== 'static' &&
+        pageOptions?.render !== 'isr' &&
+        !isPPR;
     const cachedEntry = usePageCache
         ? await getCache<{
               rendered: string;
@@ -637,6 +698,16 @@ const render = async ({
                 loaderFn.options?.type === 'defer' &&
                 manifestPath === pageToRender?.manifestPath;
             if (isDeferred) {
+                // PPR: don't run the loader at build/shell time — leave the hole
+                // pending so `renderToString` emits its fallback. The client
+                // fetches the data and fills it in.
+                if (isPPR) {
+                    deferredLoaderData.set(
+                        manifestPath,
+                        new Promise<any>(() => undefined),
+                    );
+                    return;
+                }
                 const pending = getCachedLoaderData(
                     loaderFn,
                     manifestPath,
@@ -787,12 +858,18 @@ const render = async ({
                             // ErrorBoundary and hydrate consistently).
                             let pending: Promise<any> | null = null;
                             if (groupLoader) {
-                                pending = getCachedLoaderData(
-                                    groupLoader,
-                                    group.manifestPath,
-                                    req,
-                                );
-                                pending.catch(() => undefined);
+                                if (isPPR && groupDeferred) {
+                                    // PPR hole: leave pending so the shell shows
+                                    // the fallback; the client fetches it.
+                                    pending = new Promise<any>(() => undefined);
+                                } else {
+                                    pending = getCachedLoaderData(
+                                        groupLoader,
+                                        group.manifestPath,
+                                        req,
+                                    );
+                                    pending.catch(() => undefined);
+                                }
                                 deferredLoaderData.set(
                                     group.manifestPath,
                                     pending,
@@ -942,7 +1019,9 @@ const render = async ({
     // `renderToStream` (the page suspends on its deferred resource). Streamed
     // responses are not page-cached. `meta`/`assets` are fully populated by the
     // awaited `compose()` above, so the caller can emit the <head> first.
-    if ((hasDeferred || hasStreamingGroup) && toRender === 'main') {
+    // PPR renders a synchronous shell (holes stay pending → fallback) via
+    // renderToString below; it does NOT stream. Other deferred routes stream.
+    if ((hasDeferred || hasStreamingGroup) && toRender === 'main' && !isPPR) {
         return {
             deferred: true as const,
             composed,
@@ -954,6 +1033,18 @@ const render = async ({
     }
 
     const rendered = await renderToString(() => composed());
+
+    // PPR shell: return the shell HTML plus the hole manifest paths so the
+    // handler can tell the client which holes to fetch and fill.
+    if (isPPR && toRender === 'main') {
+        return {
+            rendered,
+            documentMeta: meta,
+            documentAssets: assets,
+            loaderData,
+            pprHoles: [...deferredLoaderData.keys()],
+        };
+    }
 
     if (toRender === 'main' && usePageCache) {
         const options = pageOptions?.cache as CacheOptions | undefined;
@@ -1118,6 +1209,18 @@ const handler = eventHandler(async (event) => {
 
         if (!clientManifest) {
             clientManifest = getManifest('client');
+        }
+
+        // PPR hole data: the client fetches a deferred loader's data here to fill
+        // a partially-prerendered page's dynamic holes.
+        if (new URL(req.url).pathname === LOADER_ENDPOINT) {
+            const body = await serveHoleData(req);
+            if (body === null) {
+                setResponseStatus(400);
+                return 'Bad Request';
+            }
+            setHeader('Content-Type', 'application/json');
+            return body;
         }
 
         const cspNonce = (event as any).locals?.cspNonce as string | undefined;
@@ -1370,6 +1473,65 @@ const handler = eventHandler(async (event) => {
                                 )) {
                                     setHeader(key, value);
                                 }
+                            }
+
+                            // PPR: render and serve the static shell (deferred
+                            // holes left as their loading fallback). The client
+                            // fills the holes by fetching their loader data. The
+                            // build crawler captures this shell as a .html
+                            // artifact; dev and prod-fallback both render here.
+                            if (options?.render === 'ppr') {
+                                const result = (await render({
+                                    toRender: 'main',
+                                    entry: matched as RoutePageHandler,
+                                    routeParams: params,
+                                    searchParams,
+                                    req,
+                                    pageOptions: options,
+                                    cspNonce,
+                                })) as any;
+                                const assetsHtml = (
+                                    result.documentAssets as any[]
+                                )
+                                    .map((asset) => {
+                                        const attributeString = Object.entries(
+                                            asset.attrs,
+                                        )
+                                            .map(
+                                                ([key, value]) =>
+                                                    `${key}="${value}"`,
+                                            )
+                                            .join(' ');
+                                        if (asset.tag === 'script') {
+                                            return `<script ${attributeString} ${cspNonce ? `nonce="${cspNonce}"` : ''}></script>`;
+                                        }
+                                        if (asset.tag === 'link') {
+                                            return `<link ${attributeString}>`;
+                                        }
+                                        if (asset.tag === 'style') {
+                                            return `<style ${attributeString}>${asset.children || ''}</style>`;
+                                        }
+                                        return '';
+                                    })
+                                    .join('\n');
+                                const headHtml = `${generateHtmlHead({
+                                    ...meta,
+                                    ...result.documentMeta,
+                                })}\n${assetsHtml}\n${hydrationScript({ nonce: cspNonce })}`;
+                                const entryPath =
+                                    clientManifest!.inputs[
+                                        clientManifest!.handler
+                                    ].output.path;
+                                // Trailing `true` flags PPR so the client fetches
+                                // each hole's loader data instead of waiting for
+                                // streamed hydration.
+                                const mainScript = `<script type="module" ${cspNonce ? `nonce="${cspNonce}"` : ''}>import main from '${entryPath}';main('${(matched as RoutePageHandler).mainPage.manifestPath}',${JSON.stringify(params)},${JSON.stringify(searchParams)},${JSON.stringify(result.loaderData)},${JSON.stringify(result.pprHoles)},true);</script>`;
+                                setResponseStatus(200);
+                                push(
+                                    `<!doctype html><html lang="en"><head>${headHtml}</head>${result.rendered}${manifestHtml}${mainScript}</html>`,
+                                );
+                                controller.close();
+                                return;
                             }
 
                             // Deferred route: stream the shell immediately and

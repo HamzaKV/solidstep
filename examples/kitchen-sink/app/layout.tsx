@@ -27,6 +27,7 @@ const RootLayout: Component<{ children: () => JSX.Element }> = (props) => {
                 <a href='/cache-tags'>Cache Tags</a>
                 <a href='/ssg'>SSG</a>
                 <a href='/isr'>ISR</a>
+                <a href='/ppr'>PPR</a>
             </nav>
             <main>{props.children()}</main>
         </body>

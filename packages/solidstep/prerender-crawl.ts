@@ -21,7 +21,7 @@ const ISR_BYPASS_HEADER = 'x-solidstep-isr-bypass';
 
 type Target = {
     pathname: string;
-    render: 'static' | 'isr';
+    render: 'static' | 'isr' | 'ppr';
     revalidate?: number;
     tags?: string[];
 };
@@ -91,7 +91,10 @@ const main = async () => {
             });
             const html = await res.text();
 
-            if (t.render === 'static') {
+            // `static` and `ppr` are both served as .html artifacts from the
+            // public dir (a `ppr` artifact is the static shell; its holes are
+            // filled on the client).
+            if (t.render === 'static' || t.render === 'ppr') {
                 const outFile =
                     t.pathname === '/'
                         ? join(publicDir, 'index.html')

@@ -10,11 +10,15 @@ export type Options = {
      *   directly by the static layer with no per-request rendering.
      * - `'isr'` — prerender at build time, then incrementally regenerate in the
      *   background after `revalidate` seconds (artifact + stale-while-revalidate).
+     * - `'ppr'` — partial prerendering: prerender a static shell (with each
+     *   deferred loader's `loading.tsx` fallback baked in) at build time; the
+     *   dynamic "holes" are filled on the client per request by fetching their
+     *   loader data. Mark holes with deferred loaders (`type: 'defer'`).
      *
-     * Dynamic routes (`[id]`, `[...slug]`) using `'static'`/`'isr'` must export
-     * `generateStaticParams` to enumerate the paths to prerender.
+     * Dynamic routes (`[id]`, `[...slug]`) using `'static'`/`'isr'`/`'ppr'` must
+     * export `generateStaticParams` to enumerate the paths to prerender.
      */
-    render?: 'static' | 'isr' | 'dynamic';
+    render?: 'static' | 'isr' | 'dynamic' | 'ppr';
     /**
      * ISR revalidation interval in **seconds**. After this long the cached
      * render is served stale while it regenerates in the background. Only used

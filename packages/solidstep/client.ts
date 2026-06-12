@@ -54,12 +54,29 @@ const importModule = async (routeModule: any) => {
     return await routeModule.import();
 };
 
+/**
+ * Fetch a PPR hole's loader data from the server. `manifest` identifies the
+ * page/group node; the current URL gives the loader its params/search.
+ */
+const fetchHole = (manifest: string): Promise<any> =>
+    fetch(
+        `/__solidstep_loader?manifest=${encodeURIComponent(
+            manifest,
+        )}&url=${encodeURIComponent(location.pathname + location.search)}`,
+    )
+        .then((r) => r.json())
+        .then((j) => j.data);
+
 export const main = async (
     modulePath: string,
     routeParams: Record<string, string> = {},
     searchParams: Record<string, string> = {},
     loaderDataManifest: Record<string, any> = {},
     deferred: string[] = [],
+    // PPR: when true, deferred holes were served as static fallbacks; fetch their
+    // data from the server and fill them in (instead of waiting for streamed
+    // hydration data, which a static shell does not carry).
+    ppr = false,
 ) => {
     // find the route that matches the path
     const pageModule = fileRoutes.find((route) => route.path === modulePath);
@@ -162,7 +179,9 @@ export const main = async (
                                                 ] || {},
                                         });
                                     }
-                                    const resource = createDeferredResource();
+                                    const resource = createDeferredResource(
+                                        ppr ? fetchHole(group.path) : undefined,
+                                    );
                                     return createComponent(Suspense, {
                                         fallback: GroupLoading
                                             ? createComponent(GroupLoading, {
@@ -215,7 +234,9 @@ export const main = async (
             // `_$HY` instead of re-running (the fetcher never resolves here).
             if (deferred.includes(modulePath)) {
                 return () => {
-                    const resource = createDeferredResource();
+                    const resource = createDeferredResource(
+                        ppr ? fetchHole(modulePath) : undefined,
+                    );
                     return createComponent(Suspense, {
                         get children() {
                             return page({

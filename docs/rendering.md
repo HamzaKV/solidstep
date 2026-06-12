@@ -1,18 +1,36 @@
-# Rendering Strategies (SSG / ISR / Dynamic)
+# Rendering Strategies (Dynamic / SSG / ISR / PPR)
 
 [← Back to docs index](./README.md)
 
 Every page chooses how it is rendered via the `render` field of its exported
 `options`. The default is dynamic server rendering; opt into static generation
-(SSG) or incremental static regeneration (ISR) per route.
+(SSG), incremental static regeneration (ISR), or partial prerendering (PPR) per
+route.
 
 ```tsx
 import { options as defineOptions } from 'solidstep/utils/options';
 
 export const options = defineOptions({
-  render: 'static', // 'static' | 'isr' | 'dynamic'  (default: 'dynamic')
+  render: 'static', // 'static' | 'isr' | 'dynamic' | 'ppr'  (default: 'dynamic')
 });
 ```
+
+## Choosing a strategy
+
+| Strategy | Rendered | Dynamic content | In initial HTML? (SEO) | Best for |
+|---|---|---|---|---|
+| `dynamic` | every request | server-rendered inline | ✅ yes | always-fresh pages |
+| `dynamic` + `defer` loaders | every request (streamed) | **server-streamed holes** | ✅ yes (streamed) | fresh pages with slow parts you want crawlable |
+| `static` | build time | none (fully static) | ✅ yes | content that rarely changes |
+| `isr` | build time + background revalidate | none (refreshed on a timer) | ✅ yes | static-ish content with periodic updates |
+| `ppr` | build-time shell + client-filled holes | **client-fetched islands** | ❌ holes not in initial HTML | a CDN-cacheable shell with personalized/dynamic islands |
+
+The two ways to mix static and dynamic are deliberate opposites: **`defer`
+loaders stream hole content into the HTML** (crawlable, one round-trip, server
+re-renders the shell each request), while **`ppr` serves a build-time static
+shell** (CDN-cacheable, zero per-request shell render) and **fills holes on the
+client** (an extra fetch, not in the initial HTML). See
+[SEO and dynamic holes](#seo-and-dynamic-holes).
 
 ## `dynamic` (default)
 
@@ -83,11 +101,67 @@ server in a prerender mode, discovers which routes are `static`/`isr` (evaluatin
 artifacts. The step is best-effort: a failure logs a warning but never fails the
 build.
 
-## Coming next: PPR
+## `ppr` (Partial Prerendering)
 
-Partial prerendering — a static shell served instantly with dynamic "holes"
-streamed in — is the planned next step, built on the existing deferred-loader
-streaming (`type: 'defer'` + `<Suspense>`). Not yet available.
+A PPR page serves a **static prerendered shell** instantly (like SSG) with
+**dynamic "holes"** that stay fresh per visit. Mark the holes with deferred
+loaders (`type: 'defer'`) — on the page itself and/or on parallel-route groups.
+
+```tsx
+export const options = defineOptions({ render: 'ppr' });
+```
+
+At build time the page is prerendered to a shell with each hole showing its
+`loading.tsx` Suspense fallback (written to `.output/public/<route>/index.html`).
+On the client, each hole fetches its loader data from a per-request endpoint and
+fills in — so the shell is static/CDN-cacheable while the holes are dynamic.
+
+```tsx
+// app/feed/page.tsx — static shell
+export const options = defineOptions({ render: 'ppr' });
+export default function Feed() {
+  return <h1>Latest</h1>; // static
+}
+
+// app/feed/@live/page.tsx — a dynamic hole (deferred loader)
+export const loader = defineLoader(async () => getLiveItems(), { type: 'defer' });
+export default function Live(props: { loaderData: () => Item[] | undefined }) {
+  return <ul>{/* props.loaderData() — filled on the client */}</ul>;
+}
+// app/feed/@live/loading.tsx — the fallback baked into the prerendered shell
+```
+
+**Tradeoff vs. `defer` streaming:** PPR serves a build-time static shell and
+fills holes **on the client**, so hole content is *not* in the initial HTML — the
+right tradeoff for personalized/frequently-changing holes whose shell you want
+served statically. If the hole content must be crawlable, use `defer` streaming
+instead (see [SEO and dynamic holes](#seo-and-dynamic-holes)). Dynamic PPR routes
+(`[id]`) use `generateStaticParams` to prerender one shell per path; holes read
+the real params from the URL at request time.
+
+## SEO and dynamic holes
+
+If a page mixes static and dynamic content and the **dynamic part must be
+crawlable**, prefer `defer` streaming over `ppr`:
+
+- **`defer` streaming** (`render: 'dynamic'` + a `type: 'defer'` loader)
+  server-renders the shell and **streams the resolved hole content into the same
+  HTML response** — Solid emits each hole as a `<template>` plus a `$df(...)` swap
+  script. The content is in the initial response (one round-trip) and JS-executing
+  crawlers (e.g. Googlebot) render it. The cost is that the shell is re-rendered
+  per request. Working demo: `examples/kitchen-sink/app/deferred`
+  (`tests/deferred.spec.ts`). (An `isr` page with a `defer` loader is also
+  crawlable, but its holes are resolved when the artifact is regenerated and
+  served from cache between revalidations — not streamed fresh per request.)
+- **`ppr`** keeps the shell static/CDN-cacheable but fills holes with a **client
+  fetch after load**, so hole content is not in the initial HTML. Demo:
+  `examples/kitchen-sink/app/ppr`.
+
+There is no "static CDN shell **and** server-streamed holes" mode: Solid must
+append streamed hole chunks before `</html>`, so such a page can't be served as a
+static file and would re-render the full tree per request anyway — i.e. it would
+be `defer` streaming with extra steps. Choose based on whether you need a
+CDN-static shell (`ppr`) or crawlable holes (`defer`).
 
 ## Related
 

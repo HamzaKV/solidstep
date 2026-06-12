@@ -103,6 +103,28 @@ describe('expandRoute', () => {
         expect(target.revalidate).toBe(10);
     });
 
+    it('treats a non-dynamic ppr route like static (shell artifact, no revalidate)', () => {
+        expect(expandRoute([s('feed')], { render: 'ppr' }, undefined)).toEqual([
+            {
+                pathname: '/feed',
+                render: 'ppr',
+                revalidate: undefined,
+                tags: undefined,
+            },
+        ]);
+    });
+
+    it('expands a dynamic ppr route across its static params', () => {
+        const targets = expandRoute([s('u'), p('id')], { render: 'ppr' }, [
+            { id: 'a' },
+            { id: 'b' },
+        ]);
+        expect(targets.map((t) => `${t.render}:${t.pathname}`)).toEqual([
+            'ppr:/u/a',
+            'ppr:/u/b',
+        ]);
+    });
+
     it('expands a dynamic route across its static params', () => {
         const targets = expandRoute(
             [s('blog'), p('slug')],
