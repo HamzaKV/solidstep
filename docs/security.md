@@ -72,6 +72,30 @@ event.response.headers.set('Content-Security-Policy', serializePolicy(cspPolicy)
 
 The CSP nonce is exposed to pages, layouts, and [metadata](./metadata.md) functions via `cspNonce`.
 
+> **Strict CSP requires the nonce.** SolidStep emits several inline scripts per
+> response (the hydration entry, the client manifest, and the loader-data
+> payload). Each one is automatically stamped with the `cspNonce` set on the
+> request (`event.locals.cspNonce`). If you serve a strict `script-src` policy
+> **without** establishing a nonce in middleware, those inline scripts are
+> blocked and the page will not hydrate. Always generate a nonce per request and
+> add it to the policy with `withNonce(...)` (as above) when locking down
+> `script-src`.
+>
+> Note: the client build manifest is currently exposed on `window.manifest` via
+> an inline script. It contains only public asset metadata (no secrets), but
+> moving it out of an inline global is a planned hardening.
+
+### Output escaping
+
+Loader data, route params, and metadata are **escaped** before being written
+into the HTML response: attribute values and text are HTML-escaped, and any data
+embedded inside an inline `<script>` (loader data, params) is escaped so it
+cannot break out of the script (e.g. a value containing `</script>`). Loader
+data is serialized with [seroval](https://github.com/lxsmnsyc/seroval) — the
+same transport used by server actions — so `Date`, `Map`, `Set`, and `BigInt`
+round-trip to the client intact. You do not need to escape values you return
+from a loader or `generateMeta`.
+
 ## CSRF Protection
 
 ```tsx

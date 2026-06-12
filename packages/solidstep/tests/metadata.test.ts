@@ -40,8 +40,10 @@ describe('sitemap', () => {
 
     it('escapes XML-significant characters in the url', () => {
         const xml = sitemap([{ url: 'https://example.com/?a=1&b=2<>"\'' }]);
+        // The apostrophe is encoded as the numeric reference `&#39;` (valid in
+        // both XML and HTML) since the escape helper is now shared with HTML.
         expect(xml).toContain(
-            '<loc>https://example.com/?a=1&amp;b=2&lt;&gt;&quot;&apos;</loc>',
+            '<loc>https://example.com/?a=1&amp;b=2&lt;&gt;&quot;&#39;</loc>',
         );
     });
 });

@@ -36,6 +36,10 @@ import {
     type GenerateStaticParams,
 } from './utils/prerender';
 import { handleServerFunction } from './utils/server-action.server';
+import { escapeHtml, escapeScript } from './utils/escape';
+import { shouldCachePage, pageCacheKey } from './utils/page-cache';
+import { SEROVAL_PLUGINS } from './utils/serialize';
+import { serialize } from 'seroval';
 import { readFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -325,7 +329,9 @@ const walkPageRoutes = (
         out.push({ handler: node.handler, segments });
     }
     for (const [value, child] of node.staticChildren) {
-        out.push(...walkPageRoutes(child, [...segments, { kind: 'static', value }]));
+        out.push(
+            ...walkPageRoutes(child, [...segments, { kind: 'static', value }]),
+        );
     }
     if (node.paramChild) {
         out.push(
@@ -366,8 +372,11 @@ const collectPrerenderTargets = async (): Promise<PrerenderTarget[]> => {
     for (const { handler, segments } of walkPageRoutes(routeManifest)) {
         const optionsImport = handler.mainPage.options;
         const options = optionsImport
-            ? (await getCachedModule<{ options?: PrerenderOptions }>(optionsImport))
-                  .options
+            ? (
+                  await getCachedModule<{ options?: PrerenderOptions }>(
+                      optionsImport,
+                  )
+              ).options
             : undefined;
         if (
             options?.render !== 'static' &&
@@ -376,9 +385,7 @@ const collectPrerenderTargets = async (): Promise<PrerenderTarget[]> => {
         )
             continue;
 
-        let staticParams:
-            | Array<Record<string, string | string[]>>
-            | undefined;
+        let staticParams: Array<Record<string, string | string[]>> | undefined;
         const gspImport = handler.mainPage.generateStaticParams;
         if (gspImport) {
             const mod = await getCachedModule<{
@@ -390,11 +397,16 @@ const collectPrerenderTargets = async (): Promise<PrerenderTarget[]> => {
         }
 
         const expanded = expandRoute(segments, options, staticParams);
-        if (expanded.length === 0 && segments.some((s) => s.kind !== 'static')) {
+        if (
+            expanded.length === 0 &&
+            segments.some((s) => s.kind !== 'static')
+        ) {
             console.warn(
                 `[solidstep] Skipping prerender for dynamic route "/${segments
                     .map((s) => (s.kind === 'static' ? s.value : `[${s.name}]`))
-                    .join('/')}" — render: '${options.render}' requires generateStaticParams.`,
+                    .join(
+                        '/',
+                    )}" — render: '${options.render}' requires generateStaticParams.`,
             );
         }
         targets.push(...expanded);
@@ -537,10 +549,7 @@ const seedIsrFromManifest = async (serverDir: string): Promise<void> => {
     }
     for (const entry of manifest.isr ?? []) {
         try {
-            const html = await readFile(
-                `${serverDir}/${entry.file}`,
-                'utf-8',
-            );
+            const html = await readFile(`${serverDir}/${entry.file}`, 'utf-8');
             await setCacheWithOptions(`isr:${entry.pathname}`, html, {
                 ttl: (entry.revalidate || 60) * 1000,
                 swr: ISR_SWR_MAX,
@@ -560,18 +569,25 @@ const template = `
     </html>
 `;
 
+// Serialize an attribute bag to a `key="value"` string with HTML-escaped values
+// so an attribute value can never break out of its quotes.
+const serializeAttributes = (attributes: Record<string, unknown>): string =>
+    Object.entries(attributes)
+        .map(
+            ([attrKey, attrValue]) =>
+                `${attrKey}="${escapeHtml(String(attrValue))}"`,
+        )
+        .join(' ');
+
 const generateHtmlHead = (meta: Meta) => {
     const head = Object.entries(meta)
         .map(([key, value]) => {
             if (value.type === 'title') {
-                return `<title>${value.content}</title>`;
+                return `<title>${escapeHtml(String(value.content ?? ''))}</title>`;
             }
 
             if (value.type === 'meta') {
-                const attrs = Object.entries(value.attributes)
-                    .map(([attrKey, attrValue]) => `${attrKey}="${attrValue}"`)
-                    .join(' ');
-                return `<meta ${attrs}>`;
+                return `<meta ${serializeAttributes(value.attributes)}>`;
             }
 
             if (
@@ -579,16 +595,62 @@ const generateHtmlHead = (meta: Meta) => {
                 value.type === 'style' ||
                 value.type === 'script'
             ) {
-                const attrs = Object.entries(value.attributes)
-                    .map(([attrKey, attrValue]) => `${attrKey}="${attrValue}"`)
-                    .join(' ');
-                return `<${value.type} ${attrs}></${value.type}>`;
+                return `<${value.type} ${serializeAttributes(value.attributes)}></${value.type}>`;
             }
             return '';
         })
         .join('\n');
     return head;
 };
+
+// Render the per-module client asset list (collected from the Vite manifest)
+// into `<script>`/`<link>`/`<style>` tags. Attribute values and inline style
+// content are HTML-escaped, and script tags carry the CSP nonce when present.
+// Replaces five near-identical inline blocks that previously did this unescaped.
+const renderAssetsToHtml = (
+    assets: {
+        tag: string;
+        attrs: Record<string, unknown>;
+        children?: string;
+    }[],
+    cspNonce?: string,
+    // The loading head-swap re-appends existing <script> elements itself, so it
+    // asks for link/style only to avoid duplicating scripts.
+    includeScripts = true,
+): string =>
+    assets
+        .map((asset) => {
+            const attributeString = serializeAttributes(asset.attrs);
+            if (asset.tag === 'script') {
+                return includeScripts
+                    ? `<script ${attributeString} ${cspNonce ? `nonce="${cspNonce}"` : ''}></script>`
+                    : '';
+            }
+            if (asset.tag === 'link') {
+                return `<link ${attributeString}>`;
+            }
+            if (asset.tag === 'style') {
+                return `<style ${attributeString}>${escapeHtml(asset.children || '')}</style>`;
+            }
+            return '';
+        })
+        .join('\n');
+
+// Serialize a fully-resolved value (loader data) into a self-contained JS
+// expression for embedding inside an inline `<script>`. seroval reconstructs
+// non-JSON values (Date/Map/Set/BigInt) on the client — matching the
+// server-action transport — and already escapes `<` (to `\x3C`) plus the JS
+// line terminators inside its string literals, so its output is script-safe as
+// emitted. It must NOT be passed through `escapeScript`: the expression
+// contains operators (e.g. an arrow-function wrapper) outside string literals
+// that escaping would corrupt.
+const serializeForScript = (value: unknown): string =>
+    serialize(value, { plugins: SEROVAL_PLUGINS });
+
+// Plain JSON payload (params/searchParams are always strings) escaped for safe
+// inline-script embedding.
+const jsonForScript = (value: unknown): string =>
+    escapeScript(JSON.stringify(value));
 
 const render = async ({
     toRender,
@@ -610,21 +672,20 @@ const render = async ({
     error?: Error;
 }) => {
     const url = new URL(req.url);
-    const path = url.pathname;
     // SSG (`static`), ISR, and PPR pages have their own artifact/ISR cache (or a
-    // shell artifact), so they bypass the generic per-pathname page-render cache.
+    // shell artifact); plain dynamic pages are cached only when they opt in with
+    // a positive `cache.ttl`. The key includes the query string so `?q=a` and
+    // `?q=b` don't collide. See `utils/page-cache`.
     const isPPR = pageOptions?.render === 'ppr';
-    const usePageCache =
-        pageOptions?.render !== 'static' &&
-        pageOptions?.render !== 'isr' &&
-        !isPPR;
-    const cachedEntry = usePageCache
+    const shouldCache = shouldCachePage(pageOptions);
+    const cacheKey = pageCacheKey(url);
+    const cachedEntry = shouldCache
         ? await getCache<{
               rendered: string;
               documentMeta: Meta;
               documentAssets: any[];
               loaderData: Record<string, any>;
-          }>(path)
+          }>(cacheKey)
         : null;
 
     if (cachedEntry && toRender === 'main') {
@@ -1046,10 +1107,10 @@ const render = async ({
         };
     }
 
-    if (toRender === 'main' && usePageCache) {
+    if (toRender === 'main' && shouldCache) {
         const options = pageOptions?.cache as CacheOptions | undefined;
         await setCacheWithOptions(
-            path,
+            cacheKey,
             {
                 rendered: rendered,
                 documentMeta: meta,
@@ -1323,7 +1384,8 @@ const handler = eventHandler(async (event) => {
             !import.meta.env.DEV &&
             !isrBypass
         ) {
-            const optionsImport = (matched as RoutePageHandler).mainPage.options;
+            const optionsImport = (matched as RoutePageHandler).mainPage
+                .options;
             const pageOptions = optionsImport
                 ? (
                       await getCachedModule<{ options?: PrerenderOptions }>(
@@ -1392,7 +1454,7 @@ const handler = eventHandler(async (event) => {
         };
         const assets =
             await clientManifest.inputs[clientManifest.handler].assets();
-        const manifestHtml = `<script ${cspNonce ? `nonce="${cspNonce}"` : ''}>window.manifest=${JSON.stringify(await clientManifest.json())}</script>`;
+        const manifestHtml = `<script ${cspNonce ? `nonce="${cspNonce}"` : ''}>window.manifest=${escapeScript(JSON.stringify(await clientManifest.json()))}</script>`;
 
         let clientHydrationScript: string | undefined = undefined;
 
@@ -1438,7 +1500,7 @@ const handler = eventHandler(async (event) => {
                                 clientHydrationScript = `
                                 <script type="module" ${cspNonce ? `nonce="${cspNonce}"` : ''}>
                                 import main from '${clientManifest!.inputs[clientManifest!.handler].output.path}';
-                                main('/not-found/',${JSON.stringify(params)},${JSON.stringify(searchParams)}, ${JSON.stringify(loaderData)});
+                                main('/not-found/',${jsonForScript(params)},${jsonForScript(searchParams)}, ${serializeForScript(loaderData)});
                                 </script>
                             `;
                                 html = rendered;
@@ -1490,30 +1552,10 @@ const handler = eventHandler(async (event) => {
                                     pageOptions: options,
                                     cspNonce,
                                 })) as any;
-                                const assetsHtml = (
-                                    result.documentAssets as any[]
-                                )
-                                    .map((asset) => {
-                                        const attributeString = Object.entries(
-                                            asset.attrs,
-                                        )
-                                            .map(
-                                                ([key, value]) =>
-                                                    `${key}="${value}"`,
-                                            )
-                                            .join(' ');
-                                        if (asset.tag === 'script') {
-                                            return `<script ${attributeString} ${cspNonce ? `nonce="${cspNonce}"` : ''}></script>`;
-                                        }
-                                        if (asset.tag === 'link') {
-                                            return `<link ${attributeString}>`;
-                                        }
-                                        if (asset.tag === 'style') {
-                                            return `<style ${attributeString}>${asset.children || ''}</style>`;
-                                        }
-                                        return '';
-                                    })
-                                    .join('\n');
+                                const assetsHtml = renderAssetsToHtml(
+                                    result.documentAssets as any[],
+                                    cspNonce,
+                                );
                                 const headHtml = `${generateHtmlHead({
                                     ...meta,
                                     ...result.documentMeta,
@@ -1525,7 +1567,7 @@ const handler = eventHandler(async (event) => {
                                 // Trailing `true` flags PPR so the client fetches
                                 // each hole's loader data instead of waiting for
                                 // streamed hydration.
-                                const mainScript = `<script type="module" ${cspNonce ? `nonce="${cspNonce}"` : ''}>import main from '${entryPath}';main('${(matched as RoutePageHandler).mainPage.manifestPath}',${JSON.stringify(params)},${JSON.stringify(searchParams)},${JSON.stringify(result.loaderData)},${JSON.stringify(result.pprHoles)},true);</script>`;
+                                const mainScript = `<script type="module" ${cspNonce ? `nonce="${cspNonce}"` : ''}>import main from '${entryPath}';main(${jsonForScript((matched as RoutePageHandler).mainPage.manifestPath)},${jsonForScript(params)},${jsonForScript(searchParams)},${serializeForScript(result.loaderData)},${jsonForScript(result.pprHoles)},true);</script>`;
                                 setResponseStatus(200);
                                 push(
                                     `<!doctype html><html lang="en"><head>${headHtml}</head>${result.rendered}${manifestHtml}${mainScript}</html>`,
@@ -1552,30 +1594,10 @@ const handler = eventHandler(async (event) => {
                                     pageOptions: options,
                                     cspNonce,
                                 })) as any;
-                                const assetsHtml = (
-                                    result.documentAssets as any[]
-                                )
-                                    .map((asset) => {
-                                        const attributeString = Object.entries(
-                                            asset.attrs,
-                                        )
-                                            .map(
-                                                ([key, value]) =>
-                                                    `${key}="${value}"`,
-                                            )
-                                            .join(' ');
-                                        if (asset.tag === 'script') {
-                                            return `<script ${attributeString} ${cspNonce ? `nonce="${cspNonce}"` : ''}></script>`;
-                                        }
-                                        if (asset.tag === 'link') {
-                                            return `<link ${attributeString}>`;
-                                        }
-                                        if (asset.tag === 'style') {
-                                            return `<style ${attributeString}>${asset.children || ''}</style>`;
-                                        }
-                                        return '';
-                                    })
-                                    .join('\n');
+                                const assetsHtml = renderAssetsToHtml(
+                                    result.documentAssets as any[],
+                                    cspNonce,
+                                );
                                 const headHtml = `${generateHtmlHead({
                                     ...meta,
                                     ...result.documentMeta,
@@ -1584,7 +1606,7 @@ const handler = eventHandler(async (event) => {
                                     clientManifest!.inputs[
                                         clientManifest!.handler
                                     ].output.path;
-                                const mainScript = `<script type="module" ${cspNonce ? `nonce="${cspNonce}"` : ''}>import main from '${entryPath}';main('${(matched as RoutePageHandler).mainPage.manifestPath}',${JSON.stringify(params)},${JSON.stringify(searchParams)},${JSON.stringify(result.loaderData)},${JSON.stringify(result.deferredKeys)});</script>`;
+                                const mainScript = `<script type="module" ${cspNonce ? `nonce="${cspNonce}"` : ''}>import main from '${entryPath}';main(${jsonForScript((matched as RoutePageHandler).mainPage.manifestPath)},${jsonForScript(params)},${jsonForScript(searchParams)},${serializeForScript(result.loaderData)},${jsonForScript(result.deferredKeys)});</script>`;
                                 setResponseStatus(200);
                                 push(
                                     `<!doctype html><html lang="en"><head>${headHtml}</head>`,
@@ -1640,28 +1662,10 @@ const handler = eventHandler(async (event) => {
                                     pageOptions: options,
                                     cspNonce,
                                 });
-                                const assetsHtml = assets
-                                    .concat(documentAssets)
-                                    .map((asset) => {
-                                        const attributeString = Object.entries(
-                                            asset.attrs,
-                                        )
-                                            .map(
-                                                ([key, value]) =>
-                                                    `${key}="${value}"`,
-                                            )
-                                            .join(' ');
-                                        if (asset.tag === 'script') {
-                                            return `<script ${attributeString}></script>`;
-                                        }
-                                        if (asset.tag === 'link') {
-                                            return `<link ${attributeString}>`;
-                                        }
-                                        if (asset.tag === 'style') {
-                                            return `<style ${attributeString}>${asset.children || ''}</style>`;
-                                        }
-                                    })
-                                    .join('\n');
+                                const assetsHtml = renderAssetsToHtml(
+                                    assets.concat(documentAssets),
+                                    cspNonce,
+                                );
                                 const html = `
                                 <!doctype html>
                                 <html lang="en">
@@ -1683,7 +1687,7 @@ const handler = eventHandler(async (event) => {
                                 push(`
                             <script type="module" data-hydration="loading" ${cspNonce ? `nonce="${cspNonce}"` : ''}>
                                 import main from '${clientManifest!.inputs[clientManifest!.handler].output.path}';
-                                main('${(matched as RoutePageHandler).loadingPage?.manifestPath}',${JSON.stringify(params)},${JSON.stringify(searchParams)}, ${JSON.stringify(loaderData)});
+                                main(${jsonForScript((matched as RoutePageHandler).loadingPage?.manifestPath)},${jsonForScript(params)},${jsonForScript(searchParams)}, ${serializeForScript(loaderData)});
                             </script>
                             `);
                                 loading = true;
@@ -1709,7 +1713,7 @@ const handler = eventHandler(async (event) => {
                             clientHydrationScript = `
                             <script type="module" ${cspNonce ? `nonce="${cspNonce}"` : ''}>
                             import main from '${clientManifest!.inputs[clientManifest!.handler].output.path}';
-                            main('${(matched as RoutePageHandler).mainPage.manifestPath}',${JSON.stringify(params)},${JSON.stringify(searchParams)}, ${JSON.stringify(loaderData)});
+                            main(${jsonForScript((matched as RoutePageHandler).mainPage.manifestPath)},${jsonForScript(params)},${jsonForScript(searchParams)}, ${serializeForScript(loaderData)});
                             </script>
                         `;
                             html = rendered;
@@ -1758,7 +1762,7 @@ const handler = eventHandler(async (event) => {
                             clientHydrationScript = `
                             <script type="module" ${cspNonce ? `nonce="${cspNonce}"` : ''}>
                             import main from '${clientManifest!.inputs[clientManifest!.handler].output.path}';
-                            main('${errorPage.manifestPath}',${JSON.stringify(params)},${JSON.stringify(searchParams)}, ${JSON.stringify(loaderData)});
+                            main(${jsonForScript(errorPage.manifestPath)},${jsonForScript(params)},${jsonForScript(searchParams)}, ${serializeForScript(loaderData)});
                             </script>
                         `;
                             html = rendered;
@@ -1774,28 +1778,17 @@ const handler = eventHandler(async (event) => {
                     }
 
                     if (loading) {
-                        const assetsHtml = assets
-                            .map((asset) => {
-                                const attributeString = Object.entries(
-                                    asset.attrs,
-                                )
-                                    .map(([key, value]) => `${key}="${value}"`)
-                                    .join(' ');
-                                if (asset.tag === 'link') {
-                                    return `<link ${attributeString}>`;
-                                }
-                                if (asset.tag === 'style') {
-                                    return `<style ${attributeString}>${asset.children || ''}</style>`;
-                                }
-                                return '';
-                            })
-                            .join('\n');
+                        const assetsHtml = renderAssetsToHtml(
+                            assets,
+                            cspNonce,
+                            false,
+                        );
                         push(`<template id="__page_html__">${html}</template>`);
                         push(`
                         <script ${cspNonce ? `nonce="${cspNonce}"` : ''}>
                         const head = document.querySelector('head');
                         const scripts = Array.from(head.querySelectorAll('script'));
-                        head.innerHTML = ${JSON.stringify(generateHtmlHead(meta) + assetsHtml)};
+                        head.innerHTML = ${escapeScript(JSON.stringify(generateHtmlHead(meta) + assetsHtml))};
                         scripts.forEach(script => {
                             head.appendChild(script);
                         });
@@ -1811,22 +1804,7 @@ const handler = eventHandler(async (event) => {
                         controller.close();
                         return;
                     }
-                    const assetsHtml = assets
-                        .map((asset) => {
-                            const attributeString = Object.entries(asset.attrs)
-                                .map(([key, value]) => `${key}="${value}"`)
-                                .join(' ');
-                            if (asset.tag === 'script') {
-                                return `<script ${attributeString} ${cspNonce ? `nonce="${cspNonce}"` : ''}></script>`;
-                            }
-                            if (asset.tag === 'link') {
-                                return `<link ${attributeString}>`;
-                            }
-                            if (asset.tag === 'style') {
-                                return `<style ${attributeString}>${asset.children || ''}</style>`;
-                            }
-                        })
-                        .join('\n');
+                    const assetsHtml = renderAssetsToHtml(assets, cspNonce);
                     const transformHtml = template
                         .replace(
                             '<!--app-head-->',
