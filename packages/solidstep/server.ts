@@ -6,12 +6,7 @@ import {
     setResponseStatus,
 } from 'vinxi/http';
 import { getManifest } from 'vinxi/manifest';
-import {
-    generateHydrationScript,
-    renderToString,
-    renderToStream,
-    createComponent,
-} from 'solid-js/web';
+import { renderToString, renderToStream, createComponent } from 'solid-js/web';
 import { Suspense, ErrorBoundary } from 'solid-js';
 import { createDeferredResource } from './utils/deferred';
 import type { Meta } from './utils/meta';
@@ -36,7 +31,15 @@ import {
     type GenerateStaticParams,
 } from './utils/prerender';
 import { handleServerFunction } from './utils/server-action.server';
-import { escapeHtml, escapeScript } from './utils/escape';
+import { escapeScript } from './utils/escape';
+import {
+    generateHtmlHead,
+    renderAssetsToHtml,
+    jsonForScript,
+    buildHydrationScript,
+    buildHeadHtml,
+    createBaseMeta,
+} from './utils/html';
 import { shouldCachePage, pageCacheKey } from './utils/page-cache';
 import { SEROVAL_PLUGINS } from './utils/serialize';
 import { serialize } from 'seroval';
@@ -748,89 +751,6 @@ const template = `
     </html>
 `;
 
-// Serialize an attribute bag to a `key="value"` string with HTML-escaped values
-// so an attribute value can never break out of its quotes.
-const serializeAttributes = (attributes: Record<string, unknown>): string =>
-    Object.entries(attributes)
-        .map(
-            ([attrKey, attrValue]) =>
-                `${attrKey}="${escapeHtml(String(attrValue))}"`,
-        )
-        .join(' ');
-
-const generateHtmlHead = (meta: Meta) => {
-    const head = Object.entries(meta)
-        .map(([key, value]) => {
-            if (value.type === 'title') {
-                return `<title>${escapeHtml(String(value.content ?? ''))}</title>`;
-            }
-
-            if (value.type === 'meta') {
-                return `<meta ${serializeAttributes(value.attributes)}>`;
-            }
-
-            if (
-                value.type === 'link' ||
-                value.type === 'style' ||
-                value.type === 'script'
-            ) {
-                return `<${value.type} ${serializeAttributes(value.attributes)}></${value.type}>`;
-            }
-            return '';
-        })
-        .join('\n');
-    return head;
-};
-
-// Render the per-module client asset list (collected from the Vite manifest)
-// into `<script>`/`<link>`/`<style>` tags. Attribute values and inline style
-// content are HTML-escaped, and script tags carry the CSP nonce when present.
-// Replaces five near-identical inline blocks that previously did this unescaped.
-const renderAssetsToHtml = (
-    assets: {
-        tag: string;
-        attrs: Record<string, unknown>;
-        children?: string;
-    }[],
-    cspNonce?: string,
-    // The loading head-swap re-appends existing <script> elements itself, so it
-    // asks for link/style only to avoid duplicating scripts.
-    includeScripts = true,
-): string =>
-    assets
-        .map((asset) => {
-            const attributeString = serializeAttributes(asset.attrs);
-            if (asset.tag === 'script') {
-                return includeScripts
-                    ? `<script ${attributeString} ${cspNonce ? `nonce="${cspNonce}"` : ''}></script>`
-                    : '';
-            }
-            if (asset.tag === 'link') {
-                return `<link ${attributeString}>`;
-            }
-            if (asset.tag === 'style') {
-                return `<style ${attributeString}>${escapeHtml(asset.children || '')}</style>`;
-            }
-            return '';
-        })
-        .join('\n');
-
-// Serialize a fully-resolved value (loader data) into a self-contained JS
-// expression for embedding inside an inline `<script>`. seroval reconstructs
-// non-JSON values (Date/Map/Set/BigInt) on the client — matching the
-// server-action transport — and already escapes `<` (to `\x3C`) plus the JS
-// line terminators inside its string literals, so its output is script-safe as
-// emitted. It must NOT be passed through `escapeScript`: the expression
-// contains operators (e.g. an arrow-function wrapper) outside string literals
-// that escaping would corrupt.
-const serializeForScript = (value: unknown): string =>
-    serialize(value, { plugins: SEROVAL_PLUGINS });
-
-// Plain JSON payload (params/searchParams are always strings) escaped for safe
-// inline-script embedding.
-const jsonForScript = (value: unknown): string =>
-    escapeScript(JSON.stringify(value));
-
 const render = async ({
     toRender,
     entry,
@@ -1342,17 +1262,6 @@ let metadataManifest: Map<string, MetadataRoute> | null = null;
 type Manifest = ReturnType<typeof getManifest>;
 let clientManifest: Manifest | null = null;
 
-const hydrationScript = ({
-    nonce,
-}: {
-    nonce?: string;
-}) => {
-    const script = generateHydrationScript();
-    return nonce
-        ? script.replace('<script', `<script nonce="${nonce}"`)
-        : script;
-};
-
 const onStart = async () => {
     // The built server's `import.meta.url` is not always a usable absolute file
     // URL (notably on Windows in the Nitro bundle), so derive the server output
@@ -1410,6 +1319,68 @@ const onStart = async () => {
 };
 
 instrumentationReady = onStart();
+
+/**
+ * Handle a matched API route (`route.ts`): dispatch to the export matching the
+ * request method and run the request/response/error instrumentation hooks.
+ */
+const handleApiRoute = async (
+    event: any,
+    req: Request,
+    matched: any,
+    params: Record<string, string | string[]>,
+    searchParams: Record<string, string>,
+) => {
+    const inst = getInstrumentation();
+    const reqCtx = createRequestContext(req, {
+        routePath: matched.routePath || 'unknown',
+        routeType: 'api',
+        params,
+        searchParams,
+    });
+    await safeExecuteHook('onRequest', inst?.onRequest, req, reqCtx);
+
+    try {
+        const routeModule = await getCachedModule<Record<string, any>>(
+            matched.handler,
+        );
+        const reqMethod = req.method?.toUpperCase();
+        if (reqMethod) {
+            const methodHandler = routeModule[reqMethod];
+            if (typeof methodHandler === 'function') {
+                const result = await methodHandler(req, {
+                    params: params,
+                    searchParams: searchParams,
+                });
+                const respCtx = createResponseContext(
+                    reqCtx,
+                    getResponseStatus(event) || 200,
+                );
+                await safeExecuteHook(
+                    'onResponseEnd',
+                    inst?.onResponseEnd,
+                    req,
+                    respCtx,
+                );
+                return result;
+            }
+
+            throw new Error(
+                `Method ${reqMethod} not implemented in ${matched.handler.src}`,
+            );
+        }
+        throw new Error(`Unsupported request method: ${reqMethod}`);
+    } catch (error) {
+        await safeExecuteHook(
+            'onRequestError',
+            inst?.onRequestError as any,
+            error,
+            req,
+            reqCtx,
+        );
+        throw error;
+    }
+};
 
 const handler = eventHandler(async (event) => {
     if (instrumentationReady) await instrumentationReady;
@@ -1507,367 +1478,319 @@ const handler = eventHandler(async (event) => {
         const params = match?.params || {};
 
         if (matched && matched.type === 'route') {
+            return handleApiRoute(event, req, matched, params, searchParams);
+        }
+
+        // Page (or not-found) render: instrumentation → ISR short-circuit →
+        // streamed SSR. Scoped in a local function so the handler above reads as
+        // a thin request router.
+        const renderPage = async () => {
             const inst = getInstrumentation();
             const reqCtx = createRequestContext(req, {
-                routePath: (matched as any).routePath || 'unknown',
-                routeType: 'api',
+                routePath: matched ? pathnamePart : '/not-found',
+                routeType: matched ? 'page' : 'not-found',
                 params,
                 searchParams,
             });
             await safeExecuteHook('onRequest', inst?.onRequest, req, reqCtx);
 
-            try {
-                const routeModule = await getCachedModule<Record<string, any>>(
-                    matched.handler,
-                );
-                const reqMethod = req.method?.toUpperCase();
-                if (reqMethod) {
-                    const handler = routeModule[reqMethod];
-                    if (typeof handler === 'function') {
-                        const result = await handler(req, {
-                            params: params,
-                            searchParams: searchParams,
-                        });
-                        const respCtx = createResponseContext(
-                            reqCtx,
-                            getResponseStatus(event) || 200,
-                        );
-                        await safeExecuteHook(
-                            'onResponseEnd',
-                            inst?.onResponseEnd,
-                            req,
-                            respCtx,
-                        );
-                        return result;
-                    }
-
-                    throw new Error(
-                        `Method ${reqMethod} not implemented in ${matched.handler.src}`,
+            // ISR: serve a cached full-HTML artifact with stale-while-revalidate.
+            // Skipped in dev and for self-fetch/crawler requests (bypass header), so
+            // those render fresh through the normal path below.
+            if (
+                matched &&
+                matched.type === 'page' &&
+                !import.meta.env.DEV &&
+                !isrBypass
+            ) {
+                const optionsImport = (matched as RoutePageHandler).mainPage
+                    .options;
+                const pageOptions = optionsImport
+                    ? (
+                          await getCachedModule<{ options?: PrerenderOptions }>(
+                              optionsImport,
+                          )
+                      ).options
+                    : undefined;
+                if (pageOptions?.render === 'isr') {
+                    const revalidate =
+                        pageOptions.revalidate && pageOptions.revalidate > 0
+                            ? pageOptions.revalidate
+                            : 60;
+                    const isrHtml = await serveIsr(
+                        urlObj.origin,
+                        pathnamePart,
+                        revalidate,
+                        pageOptions.cache?.tags,
                     );
+                    setHeader('Content-Type', 'text/html');
+                    setHeader(
+                        'Cache-Control',
+                        `public, max-age=0, s-maxage=${revalidate}, stale-while-revalidate`,
+                    );
+                    setResponseStatus(200);
+                    const respCtx = createResponseContext(reqCtx, 200);
+                    await safeExecuteHook(
+                        'onResponseEnd',
+                        inst?.onResponseEnd,
+                        req,
+                        respCtx,
+                    );
+                    return isrHtml;
                 }
-                throw new Error(`Unsupported request method: ${reqMethod}`);
-            } catch (error) {
-                await safeExecuteHook(
-                    'onRequestError',
-                    inst?.onRequestError as any,
-                    error,
-                    req,
-                    reqCtx,
-                );
-                throw error;
             }
-        }
 
-        const inst = getInstrumentation();
-        const reqCtx = createRequestContext(req, {
-            routePath: matched ? pathnamePart : '/not-found',
-            routeType: matched ? 'page' : 'not-found',
-            params,
-            searchParams,
-        });
-        await safeExecuteHook('onRequest', inst?.onRequest, req, reqCtx);
+            let loading = false;
+            let html: string | undefined = undefined;
+            let meta: Meta = createBaseMeta();
+            const assets =
+                await clientManifest!.inputs[clientManifest!.handler].assets();
+            const entryPath =
+                clientManifest!.inputs[clientManifest!.handler].output.path;
+            const manifestHtml = `<script ${cspNonce ? `nonce="${cspNonce}"` : ''}>window.manifest=${escapeScript(JSON.stringify(await clientManifest!.json()))}</script>`;
 
-        // ISR: serve a cached full-HTML artifact with stale-while-revalidate.
-        // Skipped in dev and for self-fetch/crawler requests (bypass header), so
-        // those render fresh through the normal path below.
-        if (
-            matched &&
-            matched.type === 'page' &&
-            !import.meta.env.DEV &&
-            !isrBypass
-        ) {
-            const optionsImport = (matched as RoutePageHandler).mainPage
-                .options;
-            const pageOptions = optionsImport
-                ? (
-                      await getCachedModule<{ options?: PrerenderOptions }>(
-                          optionsImport,
-                      )
-                  ).options
-                : undefined;
-            if (pageOptions?.render === 'isr') {
-                const revalidate =
-                    pageOptions.revalidate && pageOptions.revalidate > 0
-                        ? pageOptions.revalidate
-                        : 60;
-                const isrHtml = await serveIsr(
-                    urlObj.origin,
-                    pathnamePart,
-                    revalidate,
-                    pageOptions.cache?.tags,
-                );
-                setHeader('Content-Type', 'text/html');
-                setHeader(
-                    'Cache-Control',
-                    `public, max-age=0, s-maxage=${revalidate}, stale-while-revalidate`,
-                );
-                setResponseStatus(200);
-                const respCtx = createResponseContext(reqCtx, 200);
-                await safeExecuteHook(
-                    'onResponseEnd',
-                    inst?.onResponseEnd,
-                    req,
-                    respCtx,
-                );
-                return isrHtml;
-            }
-        }
+            let clientHydrationScript: string | undefined = undefined;
 
-        let loading = false;
-        let html: string | undefined = undefined;
-        let meta: Meta = {
-            charset: {
-                type: 'meta',
-                attributes: {
-                    charset: 'UTF-8',
-                },
-            },
-            viewport: {
-                type: 'meta',
-                attributes: {
-                    name: 'viewport',
-                    content: 'width=device-width, initial-scale=1.0',
-                },
-            },
-            title: {
-                type: 'title',
-                attributes: {},
-                content: 'SolidStep',
-            },
-            build_time: {
-                type: 'meta',
-                attributes: {
-                    name: 'x-build-time',
-                    content: Date.now().toString(),
-                    description:
-                        'IMPORTANT: This tag indicates the build time of the application and should not be removed.',
-                },
-            },
-        };
-        const assets =
-            await clientManifest.inputs[clientManifest.handler].assets();
-        const manifestHtml = `<script ${cspNonce ? `nonce="${cspNonce}"` : ''}>window.manifest=${escapeScript(JSON.stringify(await clientManifest.json()))}</script>`;
+            setHeader('Content-Type', 'text/html');
+            setHeader('Cache-Control', 'no-cache');
 
-        let clientHydrationScript: string | undefined = undefined;
+            const stream = new ReadableStream({
+                async start(controller) {
+                    const encoder = new TextEncoder();
+                    const push = (text: string) =>
+                        controller.enqueue(encoder.encode(text));
+                    let streamError: unknown = null;
 
-        setHeader('Content-Type', 'text/html');
-        setHeader('Cache-Control', 'no-cache');
-
-        const stream = new ReadableStream({
-            async start(controller) {
-                const encoder = new TextEncoder();
-                const push = (text: string) =>
-                    controller.enqueue(encoder.encode(text));
-                let streamError: unknown = null;
-
-                try {
                     try {
-                        if (!matched) {
-                            try {
-                                const match = matchRoute(
-                                    routeManifest as any,
-                                    '/',
-                                ) as any;
-                                const notFoundEntry = match.handler;
-                                if (!notFoundEntry) {
-                                    throw new Error(
-                                        'No not-found page configured',
-                                    );
-                                }
-                                const {
-                                    rendered,
-                                    documentMeta,
-                                    documentAssets,
-                                    loaderData,
-                                } = await render({
-                                    toRender: 'not-found',
-                                    entry: notFoundEntry as RoutePageHandler,
-                                    routeParams: {},
-                                    searchParams: {},
-                                    req: req,
-                                    pageOptions: {},
-                                    cspNonce,
-                                });
-                                assets.push(...documentAssets);
-                                clientHydrationScript = `
-                                <script type="module" ${cspNonce ? `nonce="${cspNonce}"` : ''}>
-                                import main from '${clientManifest!.inputs[clientManifest!.handler].output.path}';
-                                main('/not-found/',${jsonForScript(params)},${jsonForScript(searchParams)}, ${serializeForScript(loaderData)});
-                                </script>
-                            `;
-                                html = rendered;
-                                meta = {
-                                    ...meta,
-                                    ...documentMeta,
-                                };
-                                setResponseStatus(404);
-                            } catch (e) {
-                                console.error('404 module not found:', e);
-                                setResponseStatus(404);
-                                push('Not Found');
-                                controller.close();
-                                return;
-                            }
-                        } else {
-                            const { options } = (matched as RoutePageHandler)
-                                .mainPage.options
-                                ? await getCachedModule<{ options: any }>(
-                                      (matched as RoutePageHandler).mainPage
-                                          .options as Import,
-                                  )
-                                : { options: {} };
-                            if (options?.responseHeaders) {
-                                const headers =
-                                    options.responseHeaders as Record<
-                                        string,
-                                        string
-                                    >;
-                                for (const [key, value] of Object.entries(
-                                    headers,
-                                )) {
-                                    setHeader(key, value);
-                                }
-                            }
-
-                            // PPR: render and serve the static shell (deferred
-                            // holes left as their loading fallback). The client
-                            // fills the holes by fetching their loader data. The
-                            // build crawler captures this shell as a .html
-                            // artifact; dev and prod-fallback both render here.
-                            if (options?.render === 'ppr') {
-                                const result = (await render({
-                                    toRender: 'main',
-                                    entry: matched as RoutePageHandler,
-                                    routeParams: params,
-                                    searchParams,
-                                    req,
-                                    pageOptions: options,
-                                    cspNonce,
-                                })) as any;
-                                const assetsHtml = renderAssetsToHtml(
-                                    result.documentAssets as any[],
-                                    cspNonce,
-                                );
-                                const headHtml = `${generateHtmlHead({
-                                    ...meta,
-                                    ...result.documentMeta,
-                                })}\n${assetsHtml}\n${hydrationScript({ nonce: cspNonce })}`;
-                                const entryPath =
-                                    clientManifest!.inputs[
-                                        clientManifest!.handler
-                                    ].output.path;
-                                // Trailing `true` flags PPR so the client fetches
-                                // each hole's loader data instead of waiting for
-                                // streamed hydration.
-                                const mainScript = `<script type="module" ${cspNonce ? `nonce="${cspNonce}"` : ''}>import main from '${entryPath}';main(${jsonForScript((matched as RoutePageHandler).mainPage.manifestPath)},${jsonForScript(params)},${jsonForScript(searchParams)},${serializeForScript(result.loaderData)},${jsonForScript(result.pprHoles)},true);</script>`;
-                                setResponseStatus(200);
-                                push(
-                                    `<!doctype html><html lang="en"><head>${headHtml}</head>${result.rendered}${manifestHtml}${mainScript}</html>`,
-                                );
-                                controller.close();
-                                return;
-                            }
-
-                            // Deferred route: stream the shell immediately and
-                            // stream deferred loader data in afterwards via Solid's
-                            // renderToStream + Suspense. Non-deferred routes fall
-                            // through to the unchanged renderToString path below.
-                            if (
-                                await routeNeedsStreaming(
-                                    matched as RoutePageHandler,
-                                )
-                            ) {
-                                const result = (await render({
-                                    toRender: 'main',
-                                    entry: matched as RoutePageHandler,
-                                    routeParams: params,
-                                    searchParams,
-                                    req,
-                                    pageOptions: options,
-                                    cspNonce,
-                                })) as any;
-                                const assetsHtml = renderAssetsToHtml(
-                                    result.documentAssets as any[],
-                                    cspNonce,
-                                );
-                                const headHtml = `${generateHtmlHead({
-                                    ...meta,
-                                    ...result.documentMeta,
-                                })}\n${assetsHtml}\n${hydrationScript({ nonce: cspNonce })}`;
-                                const entryPath =
-                                    clientManifest!.inputs[
-                                        clientManifest!.handler
-                                    ].output.path;
-                                const mainScript = `<script type="module" ${cspNonce ? `nonce="${cspNonce}"` : ''}>import main from '${entryPath}';main(${jsonForScript((matched as RoutePageHandler).mainPage.manifestPath)},${jsonForScript(params)},${jsonForScript(searchParams)},${serializeForScript(result.loaderData)},${jsonForScript(result.deferredKeys)});</script>`;
-                                setResponseStatus(200);
-                                push(
-                                    `<!doctype html><html lang="en"><head>${headHtml}</head>`,
-                                );
-                                await new Promise<void>((resolve) => {
-                                    // The runtime `pipe(writable)` calls
-                                    // `writable.write()` for chunks and
-                                    // `writable.end()` on completion, and the
-                                    // options accept `onError` — both wider than
-                                    // the published types, hence the casts.
-                                    const { pipe } = renderToStream(
-                                        () => result.composed(),
-                                        {
+                        try {
+                            if (!matched) {
+                                try {
+                                    const match = matchRoute(
+                                        routeManifest as any,
+                                        '/',
+                                    ) as any;
+                                    const notFoundEntry = match.handler;
+                                    if (!notFoundEntry) {
+                                        throw new Error(
+                                            'No not-found page configured',
+                                        );
+                                    }
+                                    const {
+                                        rendered,
+                                        documentMeta,
+                                        documentAssets,
+                                        loaderData,
+                                    } = await render({
+                                        toRender: 'not-found',
+                                        entry: notFoundEntry as RoutePageHandler,
+                                        routeParams: {},
+                                        searchParams: {},
+                                        req: req,
+                                        pageOptions: {},
+                                        cspNonce,
+                                    });
+                                    assets.push(...documentAssets);
+                                    clientHydrationScript =
+                                        buildHydrationScript({
+                                            entryPath,
+                                            manifestPath: '/not-found/',
+                                            params,
+                                            searchParams,
+                                            loaderData,
                                             nonce: cspNonce,
-                                            onError(e: any) {
-                                                streamError = e;
-                                                if (import.meta.env.DEV) {
-                                                    console.error(e);
-                                                }
-                                            },
-                                        } as any,
-                                    );
-                                    pipe({
-                                        write: (v: string) => push(v),
-                                        end: () => {
-                                            push(manifestHtml);
-                                            push(mainScript);
-                                            push('</html>');
-                                            resolve();
-                                        },
-                                    } as any);
-                                });
-                                controller.close();
-                                return;
-                            }
-                            try {
-                                if (
-                                    !(matched as RoutePageHandler).loadingPage
-                                ) {
-                                    throw new Error('No loading page');
+                                        });
+                                    html = rendered;
+                                    meta = {
+                                        ...meta,
+                                        ...documentMeta,
+                                    };
+                                    setResponseStatus(404);
+                                } catch (e) {
+                                    console.error('404 module not found:', e);
+                                    setResponseStatus(404);
+                                    push('Not Found');
+                                    controller.close();
+                                    return;
                                 }
-                                const {
-                                    rendered,
-                                    documentMeta,
-                                    documentAssets,
-                                    loaderData,
-                                } = await render({
-                                    toRender: 'loading',
-                                    entry: matched as RoutePageHandler,
-                                    routeParams: params,
-                                    searchParams,
-                                    req: req,
-                                    pageOptions: options,
-                                    cspNonce,
-                                });
-                                const assetsHtml = renderAssetsToHtml(
-                                    assets.concat(documentAssets),
-                                    cspNonce,
-                                );
-                                const html = `
+                            } else {
+                                const { options } = (
+                                    matched as RoutePageHandler
+                                ).mainPage.options
+                                    ? await getCachedModule<{ options: any }>(
+                                          (matched as RoutePageHandler).mainPage
+                                              .options as Import,
+                                      )
+                                    : { options: {} };
+                                if (options?.responseHeaders) {
+                                    const headers =
+                                        options.responseHeaders as Record<
+                                            string,
+                                            string
+                                        >;
+                                    for (const [key, value] of Object.entries(
+                                        headers,
+                                    )) {
+                                        setHeader(key, value);
+                                    }
+                                }
+
+                                // PPR: render and serve the static shell (deferred
+                                // holes left as their loading fallback). The client
+                                // fills the holes by fetching their loader data. The
+                                // build crawler captures this shell as a .html
+                                // artifact; dev and prod-fallback both render here.
+                                if (options?.render === 'ppr') {
+                                    const result = (await render({
+                                        toRender: 'main',
+                                        entry: matched as RoutePageHandler,
+                                        routeParams: params,
+                                        searchParams,
+                                        req,
+                                        pageOptions: options,
+                                        cspNonce,
+                                    })) as any;
+                                    const assetsHtml = renderAssetsToHtml(
+                                        result.documentAssets as any[],
+                                        cspNonce,
+                                    );
+                                    const headHtml = buildHeadHtml(
+                                        { ...meta, ...result.documentMeta },
+                                        assetsHtml,
+                                        cspNonce,
+                                    );
+                                    // Trailing `true` flags PPR so the client fetches
+                                    // each hole's loader data instead of waiting for
+                                    // streamed hydration.
+                                    const mainScript = buildHydrationScript({
+                                        entryPath,
+                                        manifestPath: (
+                                            matched as RoutePageHandler
+                                        ).mainPage.manifestPath,
+                                        params,
+                                        searchParams,
+                                        loaderData: result.loaderData,
+                                        extraArgs: [
+                                            jsonForScript(result.pprHoles),
+                                            'true',
+                                        ],
+                                        nonce: cspNonce,
+                                    });
+                                    setResponseStatus(200);
+                                    push(
+                                        `<!doctype html><html lang="en"><head>${headHtml}</head>${result.rendered}${manifestHtml}${mainScript}</html>`,
+                                    );
+                                    controller.close();
+                                    return;
+                                }
+
+                                // Deferred route: stream the shell immediately and
+                                // stream deferred loader data in afterwards via Solid's
+                                // renderToStream + Suspense. Non-deferred routes fall
+                                // through to the unchanged renderToString path below.
+                                if (
+                                    await routeNeedsStreaming(
+                                        matched as RoutePageHandler,
+                                    )
+                                ) {
+                                    const result = (await render({
+                                        toRender: 'main',
+                                        entry: matched as RoutePageHandler,
+                                        routeParams: params,
+                                        searchParams,
+                                        req,
+                                        pageOptions: options,
+                                        cspNonce,
+                                    })) as any;
+                                    const assetsHtml = renderAssetsToHtml(
+                                        result.documentAssets as any[],
+                                        cspNonce,
+                                    );
+                                    const headHtml = buildHeadHtml(
+                                        { ...meta, ...result.documentMeta },
+                                        assetsHtml,
+                                        cspNonce,
+                                    );
+                                    const mainScript = buildHydrationScript({
+                                        entryPath,
+                                        manifestPath: (
+                                            matched as RoutePageHandler
+                                        ).mainPage.manifestPath,
+                                        params,
+                                        searchParams,
+                                        loaderData: result.loaderData,
+                                        extraArgs: [
+                                            jsonForScript(result.deferredKeys),
+                                        ],
+                                        nonce: cspNonce,
+                                    });
+                                    setResponseStatus(200);
+                                    push(
+                                        `<!doctype html><html lang="en"><head>${headHtml}</head>`,
+                                    );
+                                    await new Promise<void>((resolve) => {
+                                        // The runtime `pipe(writable)` calls
+                                        // `writable.write()` for chunks and
+                                        // `writable.end()` on completion, and the
+                                        // options accept `onError` — both wider than
+                                        // the published types, hence the casts.
+                                        const { pipe } = renderToStream(
+                                            () => result.composed(),
+                                            {
+                                                nonce: cspNonce,
+                                                onError(e: any) {
+                                                    streamError = e;
+                                                    if (import.meta.env.DEV) {
+                                                        console.error(e);
+                                                    }
+                                                },
+                                            } as any,
+                                        );
+                                        pipe({
+                                            write: (v: string) => push(v),
+                                            end: () => {
+                                                push(manifestHtml);
+                                                push(mainScript);
+                                                push('</html>');
+                                                resolve();
+                                            },
+                                        } as any);
+                                    });
+                                    controller.close();
+                                    return;
+                                }
+                                try {
+                                    if (
+                                        !(matched as RoutePageHandler)
+                                            .loadingPage
+                                    ) {
+                                        throw new Error('No loading page');
+                                    }
+                                    const {
+                                        rendered,
+                                        documentMeta,
+                                        documentAssets,
+                                    } = await render({
+                                        toRender: 'loading',
+                                        entry: matched as RoutePageHandler,
+                                        routeParams: params,
+                                        searchParams,
+                                        req: req,
+                                        pageOptions: options,
+                                        cspNonce,
+                                    });
+                                    const assetsHtml = renderAssetsToHtml(
+                                        assets.concat(documentAssets),
+                                        cspNonce,
+                                    );
+                                    const html = `
                                 <!doctype html>
                                 <html lang="en">
                                     <head>
-                                        ${generateHtmlHead({
-                                            ...meta,
-                                            ...documentMeta,
-                                        })}
-                                        ${assetsHtml}
-                                        ${hydrationScript({ nonce: cspNonce })}
+                                        ${buildHeadHtml(
+                                            { ...meta, ...documentMeta },
+                                            assetsHtml,
+                                            cspNonce,
+                                        )}
                                     </head>
                                     <noscript>
                                         Please enable JavaScript to view the content.<br/>
@@ -1875,108 +1798,115 @@ const handler = eventHandler(async (event) => {
                                     ${rendered}
                                 </html>
                                 `;
-                                push(html);
-                                push(`
-                            <script type="module" data-hydration="loading" ${cspNonce ? `nonce="${cspNonce}"` : ''}>
-                                import main from '${clientManifest!.inputs[clientManifest!.handler].output.path}';
-                                main(${jsonForScript((matched as RoutePageHandler).loadingPage?.manifestPath)},${jsonForScript(params)},${jsonForScript(searchParams)}, ${serializeForScript(loaderData)});
-                            </script>
-                            `);
-                                loading = true;
-                            } catch (e) {
-                                // skip
-                            }
+                                    push(html);
+                                    // The loading boundary is a transient,
+                                    // server-rendered placeholder shown until the
+                                    // main content streams in and replaces it; it
+                                    // is intentionally NOT hydrated. (Hydrating it
+                                    // would render the real page with no loader
+                                    // data and race the main hydration below.)
+                                    loading = true;
+                                } catch (e) {
+                                    // skip
+                                }
 
-                            const {
-                                rendered,
-                                documentMeta,
-                                documentAssets,
-                                loaderData,
-                            } = await render({
-                                toRender: 'main',
-                                entry: matched as RoutePageHandler,
-                                routeParams: params,
-                                searchParams,
-                                req: req,
-                                pageOptions: options,
-                                cspNonce,
-                            });
-                            assets.push(...documentAssets);
-                            clientHydrationScript = `
-                            <script type="module" ${cspNonce ? `nonce="${cspNonce}"` : ''}>
-                            import main from '${clientManifest!.inputs[clientManifest!.handler].output.path}';
-                            main(${jsonForScript((matched as RoutePageHandler).mainPage.manifestPath)},${jsonForScript(params)},${jsonForScript(searchParams)}, ${serializeForScript(loaderData)});
-                            </script>
-                        `;
-                            html = rendered;
-                            meta = {
-                                ...meta,
-                                ...documentMeta,
-                            };
-                            setResponseStatus(200);
-                        }
-                    } catch (e1: any) {
-                        streamError = e1;
-                        if (
-                            e1 instanceof RedirectError ||
-                            e1.name === 'RedirectError'
-                        ) {
-                            setHeader('Location', e1.message);
-                            setResponseStatus(302);
-                            controller.close();
-                            return;
-                        }
-                        if (import.meta.env.DEV) {
-                            console.error(e1);
-                        }
-                        try {
-                            const errorPage = (matched as RoutePageHandler)
-                                .errorPage;
-                            if (!errorPage) {
+                                const {
+                                    rendered,
+                                    documentMeta,
+                                    documentAssets,
+                                    loaderData,
+                                } = await render({
+                                    toRender: 'main',
+                                    entry: matched as RoutePageHandler,
+                                    routeParams: params,
+                                    searchParams,
+                                    req: req,
+                                    pageOptions: options,
+                                    cspNonce,
+                                });
+                                assets.push(...documentAssets);
+                                clientHydrationScript = buildHydrationScript({
+                                    entryPath,
+                                    manifestPath: (matched as RoutePageHandler)
+                                        .mainPage.manifestPath,
+                                    params,
+                                    searchParams,
+                                    loaderData,
+                                    nonce: cspNonce,
+                                });
+                                html = rendered;
+                                meta = {
+                                    ...meta,
+                                    ...documentMeta,
+                                };
+                                setResponseStatus(200);
+                            }
+                        } catch (e1: any) {
+                            streamError = e1;
+                            if (
+                                e1 instanceof RedirectError ||
+                                e1.name === 'RedirectError'
+                            ) {
+                                setHeader('Location', e1.message);
+                                setResponseStatus(302);
+                                controller.close();
+                                return;
+                            }
+                            if (import.meta.env.DEV) {
+                                console.error(e1);
+                            }
+                            try {
+                                const errorPage = (matched as RoutePageHandler)
+                                    .errorPage;
+                                if (!errorPage) {
+                                    throw e1;
+                                }
+                                const {
+                                    rendered,
+                                    documentMeta,
+                                    documentAssets,
+                                    loaderData,
+                                } = await render({
+                                    toRender: 'error',
+                                    entry: matched as RoutePageHandler,
+                                    routeParams: params,
+                                    searchParams,
+                                    req: req,
+                                    pageOptions: {},
+                                    cspNonce,
+                                    error: e1,
+                                });
+                                assets.push(...documentAssets);
+                                clientHydrationScript = buildHydrationScript({
+                                    entryPath,
+                                    manifestPath: errorPage.manifestPath,
+                                    params,
+                                    searchParams,
+                                    loaderData,
+                                    nonce: cspNonce,
+                                });
+                                html = rendered;
+                                meta = {
+                                    ...meta,
+                                    ...documentMeta,
+                                };
+                                // statusCode = 500;
+                                setResponseStatus(500);
+                            } catch (e2) {
                                 throw e1;
                             }
-                            const {
-                                rendered,
-                                documentMeta,
-                                documentAssets,
-                                loaderData,
-                            } = await render({
-                                toRender: 'error',
-                                entry: matched as RoutePageHandler,
-                                routeParams: params,
-                                searchParams,
-                                req: req,
-                                pageOptions: {},
-                                cspNonce,
-                                error: e1,
-                            });
-                            assets.push(...documentAssets);
-                            clientHydrationScript = `
-                            <script type="module" ${cspNonce ? `nonce="${cspNonce}"` : ''}>
-                            import main from '${clientManifest!.inputs[clientManifest!.handler].output.path}';
-                            main(${jsonForScript(errorPage.manifestPath)},${jsonForScript(params)},${jsonForScript(searchParams)}, ${serializeForScript(loaderData)});
-                            </script>
-                        `;
-                            html = rendered;
-                            meta = {
-                                ...meta,
-                                ...documentMeta,
-                            };
-                            // statusCode = 500;
-                            setResponseStatus(500);
-                        } catch (e2) {
-                            throw e1;
                         }
-                    }
 
-                    if (loading) {
-                        const assetsHtml = renderAssetsToHtml(
-                            assets,
-                            cspNonce,
-                            false,
-                        );
-                        push(`<template id="__page_html__">${html}</template>`);
-                        push(`
+                        if (loading) {
+                            const assetsHtml = renderAssetsToHtml(
+                                assets,
+                                cspNonce,
+                                false,
+                            );
+                            push(
+                                `<template id="__page_html__">${html}</template>`,
+                            );
+                            push(`
                         <script ${cspNonce ? `nonce="${cspNonce}"` : ''}>
                         const head = document.querySelector('head');
                         const scripts = Array.from(head.querySelectorAll('script'));
@@ -1991,49 +1921,57 @@ const handler = eventHandler(async (event) => {
                         template.remove();
                         </script>
                     `);
-                        push(manifestHtml);
-                        push(clientHydrationScript);
+                            push(manifestHtml);
+                            push(clientHydrationScript);
+                            controller.close();
+                            return;
+                        }
+                        const assetsHtml = renderAssetsToHtml(assets, cspNonce);
+                        const transformHtml = template
+                            .replace(
+                                '<!--app-head-->',
+                                buildHeadHtml(meta, assetsHtml, cspNonce),
+                            )
+                            .replace(
+                                '<!--app-body-->',
+                                (html ?? '') +
+                                    manifestHtml +
+                                    clientHydrationScript,
+                            );
+                        push(transformHtml);
                         controller.close();
                         return;
-                    }
-                    const assetsHtml = renderAssetsToHtml(assets, cspNonce);
-                    const transformHtml = template
-                        .replace(
-                            '<!--app-head-->',
-                            `${generateHtmlHead(meta)}\n${assetsHtml}\n${hydrationScript({ nonce: cspNonce })}`,
-                        )
-                        .replace(
-                            '<!--app-body-->',
-                            (html ?? '') + manifestHtml + clientHydrationScript,
-                        );
-                    push(transformHtml);
-                    controller.close();
-                    return;
-                } catch (error) {
-                    streamError = streamError ?? error;
-                    throw error;
-                } finally {
-                    const statusCode = getResponseStatus(event) || 200;
-                    const respCtx = createResponseContext(reqCtx, statusCode);
-                    await safeExecuteHook(
-                        'onResponseEnd',
-                        inst?.onResponseEnd,
-                        req,
-                        respCtx,
-                    );
-                    if (streamError) {
-                        await safeExecuteHook(
-                            'onRequestError',
-                            inst?.onRequestError as any,
-                            streamError,
-                            req,
+                    } catch (error) {
+                        streamError = streamError ?? error;
+                        throw error;
+                    } finally {
+                        const statusCode = getResponseStatus(event) || 200;
+                        const respCtx = createResponseContext(
                             reqCtx,
+                            statusCode,
                         );
+                        await safeExecuteHook(
+                            'onResponseEnd',
+                            inst?.onResponseEnd,
+                            req,
+                            respCtx,
+                        );
+                        if (streamError) {
+                            await safeExecuteHook(
+                                'onRequestError',
+                                inst?.onRequestError as any,
+                                streamError,
+                                req,
+                                reqCtx,
+                            );
+                        }
                     }
-                }
-            },
-        });
-        return stream;
+                },
+            });
+            return stream;
+        };
+
+        return await renderPage();
     } catch (e: any) {
         if (e instanceof RedirectError || e.name === 'RedirectError') {
             return new Response('', {
