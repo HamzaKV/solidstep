@@ -470,18 +470,25 @@ const serveHoleData = async (req: Request): Promise<string | null> => {
 
 /**
  * Resolve everything the client needs to render a matched page route on a soft
- * navigation, WITHOUT building a Solid tree: every layout/page/group loader is
- * run (deferred ones are awaited here, since soft nav has no streaming shell)
- * and every node's `generateMeta` is merged in tree order.
+ * navigation, WITHOUT building a Solid tree: every non-deferred layout/page/group
+ * loader is run and every node's `generateMeta` is merged in tree order.
+ *
+ * **Deferred (`type: 'defer'`) loaders are NOT run here** — their manifestPaths
+ * are reported in `deferredKeys` and the client fills each hole from the
+ * `/__solidstep_loader` endpoint under `<Suspense fallback={loading.tsx}>`. This
+ * makes a deferred route's shell commit instantly on navigation (with its loader
+ * boundary showing) instead of blocking on the slow data, matching how `defer`
+ * behaves on first-load.
  *
  * This is a standalone pass that reuses the same per-node primitives as
  * `render()` (`runSequentialLoader`, `getCachedModule`) so caching, SWR, and
  * loader-error isolation match — but it deliberately does NOT touch `render()`'s
  * control flow (which interleaves loaders with tree-building).
  *
- * @returns `loaderData` keyed by manifestPath, the deferred manifestPaths, and
- *   merged `meta`. The page loader re-throws on failure (caller maps it to an
- *   error/redirect envelope); layout/group failures yield the usual sentinel.
+ * @returns `loaderData` keyed by manifestPath (non-deferred only), the deferred
+ *   manifestPaths, and merged `meta`. The page loader re-throws on failure
+ *   (caller maps it to an error/redirect envelope); layout/group failures yield
+ *   the usual sentinel.
  */
 const resolveRouteData = async (
     entry: RoutePageHandler,
@@ -526,13 +533,12 @@ const resolveRouteData = async (
                 loader,
             );
             if (!loaderFn) return;
+            // Deferred loaders are left unresolved: report the hole and let the
+            // client stream it in via `/__solidstep_loader` under <Suspense>.
             if (loaderFn.options?.type === 'defer') {
                 deferredKeys.push(manifestPath);
+                return;
             }
-            // Deferred loaders are resolved (awaited) here — a soft navigation
-            // has no streaming shell, so the client wants concrete data. The
-            // manifestPath is still reported in `deferredKeys` so the client
-            // wraps the node in <Suspense> consistently with first-load.
             loaderData[manifestPath] = await runSequentialLoader(
                 loaderFn,
                 manifestPath,

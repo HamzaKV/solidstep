@@ -1,4 +1,4 @@
-import { createSignal, startTransition } from 'solid-js';
+import { createSignal, batch } from 'solid-js';
 import { isServer } from 'solid-js/web';
 import { deserialize } from 'seroval';
 import { matchClientRoute } from './client-manifest';
@@ -232,8 +232,12 @@ export type NavigateOptions = { replace?: boolean; scroll?: boolean };
 
 const isModifiedHardNav = (url: URL): boolean => url.origin !== location.origin;
 
-const commit = (state: RouteState) =>
-    startTransition(() => setRouteFull(state));
+// Commit with `batch` (NOT a transition): a Solid transition would hold the old
+// UI until the new tree's resources settle, which would defeat the instant-shell
+// UX — we want a brand-new deferred boundary to show its loading.tsx fallback
+// immediately. `navigationPending` covers the envelope-fetch window; per-hole
+// loading is handled by <Suspense> once the shell is committed.
+const commit = (state: RouteState) => batch(() => setRouteFull(state));
 
 const stateFromEnvelope = (
     envelope: Extract<RouteEnvelope, { type: 'page' | 'error' }>,

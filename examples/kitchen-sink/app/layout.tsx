@@ -1,5 +1,6 @@
-import type { Component, JSX } from 'solid-js';
+import { type Component, type JSX, Show } from 'solid-js';
 import { Link } from 'solidstep/link';
+import { navigationPending } from 'solidstep/router';
 import './globals.css';
 
 export const generateMeta = () => ({
@@ -20,6 +21,10 @@ export const generateMeta = () => ({
 const RootLayout: Component<{ children: () => JSX.Element }> = (props) => {
     return (
         <body>
+            {/* Global navigation-pending indicator, driven by the router signal. */}
+            <Show when={navigationPending()}>
+                <div data-testid='nav-progress'>Navigating…</div>
+            </Show>
             <nav data-testid='nav'>
                 <Link href='/'>Home</Link>
                 <Link href='/about'>About</Link>
@@ -29,6 +34,8 @@ const RootLayout: Component<{ children: () => JSX.Element }> = (props) => {
                 <Link href='/ssg'>SSG</Link>
                 <Link href='/isr'>ISR</Link>
                 <Link href='/ppr'>PPR</Link>
+                <Link href='/slow'>Slow</Link>
+                <Link href='/deferred'>Deferred</Link>
             </nav>
             <main>{props.children()}</main>
         </body>

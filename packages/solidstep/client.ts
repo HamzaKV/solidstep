@@ -36,19 +36,14 @@ const comp = (imp: { src: string }) => getModule(imp.src)?.default;
 
 /**
  * Resolve the loader-data accessor a deferred node should receive.
- * - first load, PPR: fetch the hole from the server.
- * - first load, streamed: `undefined` → the Solid resource reads the streamed
- *   value from `_$HY` at the matching tree position.
- * - soft navigation: the envelope already carried resolved data.
+ * - first load, streamed (`!ppr`): `undefined` → the Solid resource reads the
+ *   streamed value from `_$HY` at the matching tree position.
+ * - first load PPR, and soft navigation: fetch the hole from the server via
+ *   `/__solidstep_loader`, so the `<Suspense fallback>` (loading.tsx) shows
+ *   until the data streams in.
  */
 const deferredResourceFor = (mp: string, st: RouteStructure) =>
-    createDeferredResource(
-        st.firstLoad
-            ? st.ppr
-                ? fetchHole(mp)
-                : undefined
-            : Promise.resolve(routeLoaderData()[mp]),
-    );
+    createDeferredResource(st.firstLoad && !st.ppr ? undefined : fetchHole(mp));
 
 /**
  * Build the parallel-route slot thunks for the last layout. Mirrors the
@@ -143,7 +138,19 @@ const renderLeaf = (handler: ClientPageHandler, st: RouteStructure) => {
     const mp = handler.mainPage.manifestPath;
     if (st.deferredKeys.includes(mp)) {
         const resource = deferredResourceFor(mp, st);
+        // The route's loading.tsx is the Suspense fallback for a deferred page
+        // (shown while the hole streams in on a navigation). On first load the
+        // resource resolves from `_$HY` without suspending, so it never flashes.
+        const Loading = handler.loadingPage
+            ? comp(handler.loadingPage.page)
+            : null;
         return createComponent(Suspense, {
+            fallback: Loading
+                ? createComponent(Loading, {
+                      routeParams: st.params,
+                      searchParams: st.searchParams,
+                  })
+                : undefined,
             get children() {
                 return Page({
                     routeParams: st.params,
