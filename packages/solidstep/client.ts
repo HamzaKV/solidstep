@@ -1,62 +1,26 @@
 import { hydrate, createComponent } from 'solid-js/web';
-import { Suspense, ErrorBoundary } from 'solid-js';
+import { Suspense, ErrorBoundary, untrack } from 'solid-js';
 import 'vinxi/client';
-import fileRoutes from 'vinxi/routes';
-import { getManifest } from 'vinxi/manifest';
-import { createDiffDOM } from './utils/diff-dom';
 import { createDeferredResource } from './utils/deferred';
-
-window.onpageshow = () => {
-    const state = window.history.state;
-    const key = `${window.location.pathname}:build-time`;
-    const buildTimeMeta = document.querySelector('meta[name="x-build-time"]');
-    const buildTime = buildTimeMeta
-        ? Number.parseInt(buildTimeMeta.getAttribute('content') || '0', 10)
-        : 0;
-    const lastBuildTime = Number.parseInt(
-        sessionStorage.getItem(key) || '0',
-        10,
-    );
-    const diffString = sessionStorage.getItem(window.location.pathname);
-
-    if (state?.revalidated && buildTime === lastBuildTime && diffString) {
-        // we need to re-apply the diff from session storage
-        const diff = JSON.parse(diffString);
-        const dd = createDiffDOM();
-        const didApply = dd.apply(document.body, diff);
-        if (didApply) {
-            const key = window.location.pathname;
-            sessionStorage.setItem(key, JSON.stringify(diff));
-            window.history.pushState(
-                { revalidated: true },
-                '',
-                window.location.href,
-            );
-        }
-        if (import.meta.env.DEV && !didApply) {
-            console.error(
-                'The mutation was not applied, this seems to be an edge case.',
-            );
-            console.error(
-                'Please raise an issue on GitHub describing your case.',
-            );
-            console.error('The diff calculated:', diff);
-        }
-    }
-    sessionStorage.setItem(key, buildTime.toString());
-};
-
-const importModule = async (routeModule: any) => {
-    const manifest = getManifest('client');
-    if ((import.meta as any).env.DEV) {
-        return await manifest.inputs[routeModule.src].import();
-    }
-    return await routeModule.import();
-};
+import {
+    matchClientRoute,
+    getNotFoundHandler,
+    type ClientPageHandler,
+} from './utils/client-manifest';
+import { getModule, preloadHandler } from './utils/client-modules';
+import {
+    routeStructure,
+    routeLoaderData,
+    initRouter,
+    type RouteState,
+    type RouteStructure,
+    type RouteKind,
+} from './utils/router-context';
 
 /**
- * Fetch a PPR hole's loader data from the server. `manifest` identifies the
- * page/group node; the current URL gives the loader its params/search.
+ * Fetch a PPR hole's loader data from the server (first-load only). `manifest`
+ * identifies the page/group node; the current URL gives the loader its
+ * params/search.
  */
 const fetchHole = (manifest: string): Promise<any> =>
     fetch(
@@ -67,199 +31,291 @@ const fetchHole = (manifest: string): Promise<any> =>
         .then((r) => r.json())
         .then((j) => j.data);
 
+/** Synchronously read a preloaded component's default export. */
+const comp = (imp: { src: string }) => getModule(imp.src)?.default;
+
+/**
+ * Resolve the loader-data accessor a deferred node should receive.
+ * - first load, PPR: fetch the hole from the server.
+ * - first load, streamed: `undefined` → the Solid resource reads the streamed
+ *   value from `_$HY` at the matching tree position.
+ * - soft navigation: the envelope already carried resolved data.
+ */
+const deferredResourceFor = (mp: string, st: RouteStructure) =>
+    createDeferredResource(
+        st.firstLoad
+            ? st.ppr
+                ? fetchHole(mp)
+                : undefined
+            : Promise.resolve(routeLoaderData()[mp]),
+    );
+
+/**
+ * Build the parallel-route slot thunks for the last layout. Mirrors the
+ * server's group rendering (`server.ts`) so hydration matches: plain groups are
+ * called directly; boundary/deferred groups are wrapped in
+ * `<Suspense>`/`<ErrorBoundary>`.
+ */
+const buildSlots = (handler: ClientPageHandler, st: RouteStructure) => {
+    const slots: Record<string, () => any> = {};
+    for (const [groupName, group] of Object.entries(handler.groups)) {
+        const slotName = groupName.replace('@', '');
+        const GroupComp = comp(group.page);
+        if (!GroupComp) continue;
+        const GroupLoading = group.loadingPage ? comp(group.loadingPage) : null;
+        const GroupError = group.errorPage ? comp(group.errorPage) : null;
+        const isDeferred = st.deferredKeys.includes(group.manifestPath);
+        slots[slotName] = () => {
+            const inner = () => {
+                if (!isDeferred) {
+                    return GroupComp({
+                        routeParams: st.params,
+                        searchParams: st.searchParams,
+                        get loaderData() {
+                            return routeLoaderData()[group.manifestPath] ?? {};
+                        },
+                    });
+                }
+                const resource = deferredResourceFor(group.manifestPath, st);
+                return createComponent(Suspense, {
+                    fallback: GroupLoading
+                        ? createComponent(GroupLoading, {
+                              routeParams: st.params,
+                              searchParams: st.searchParams,
+                          })
+                        : undefined,
+                    get children() {
+                        return GroupComp({
+                            routeParams: st.params,
+                            searchParams: st.searchParams,
+                            loaderData: resource,
+                        });
+                    },
+                });
+            };
+            if (GroupError) {
+                return createComponent(ErrorBoundary, {
+                    fallback: (err: any) =>
+                        createComponent(GroupError, {
+                            error: err,
+                            routeParams: st.params,
+                            searchParams: st.searchParams,
+                        }),
+                    get children() {
+                        return inner();
+                    },
+                });
+            }
+            return inner();
+        };
+    }
+    return slots;
+};
+
+/** Render the leaf (page / error / not-found) for the current route. */
+const renderLeaf = (handler: ClientPageHandler, st: RouteStructure) => {
+    if (st.kind === 'not-found') {
+        const nf = getNotFoundHandler();
+        const C = nf ? comp(nf.page) : undefined;
+        return C
+            ? C({
+                  routeParams: st.params,
+                  searchParams: st.searchParams,
+                  loaderData: {},
+              })
+            : undefined;
+    }
+    if (st.kind === 'error') {
+        const C = handler.errorPage ? comp(handler.errorPage.page) : undefined;
+        if (!C) return undefined;
+        const errorMp = handler.errorPage?.manifestPath;
+        return C({
+            error: st.errorMessage ? { message: st.errorMessage } : undefined,
+            routeParams: st.params,
+            searchParams: st.searchParams,
+            get loaderData() {
+                return errorMp ? (routeLoaderData()[errorMp] ?? {}) : {};
+            },
+        });
+    }
+    const Page = comp(handler.mainPage.page);
+    if (!Page) return undefined;
+    const mp = handler.mainPage.manifestPath;
+    if (st.deferredKeys.includes(mp)) {
+        const resource = deferredResourceFor(mp, st);
+        return createComponent(Suspense, {
+            get children() {
+                return Page({
+                    routeParams: st.params,
+                    searchParams: st.searchParams,
+                    loaderData: resource,
+                });
+            },
+        });
+    }
+    return Page({
+        routeParams: st.params,
+        searchParams: st.searchParams,
+        get loaderData() {
+            return routeLoaderData()[mp] ?? {};
+        },
+    });
+};
+
+/**
+ * Resolve the handler whose layout chain wraps the current leaf: the matched
+ * route for `page`/`error`, or the root route (for its layout) when rendering
+ * the not-found page.
+ */
+const handlerFor = (st: RouteStructure): ClientPageHandler | null => {
+    if (st.kind === 'not-found') {
+        return matchClientRoute('/')?.handler ?? null;
+    }
+    return matchClientRoute(st.pathname)?.handler ?? null;
+};
+
+/**
+ * Render the whole route tree from the current route. Reads the *structural*
+ * route signal at the top, so a navigation (structure change) re-runs it and
+ * re-renders the page tree (whole-page remount). Loader data is read through
+ * reactive getters, so a same-route revalidation updates the mounted components
+ * in place without remounting (preserving their local state).
+ *
+ * The FIRST run reproduces the server's direct-call structure exactly, so
+ * hydration matches: user layout/page/group components are called directly; only
+ * Suspense/ErrorBoundary use `createComponent`, as on the server.
+ */
+/**
+ * Compose `layouts[startIndex..]` around the leaf for `handler`, returning a
+ * thunk. Slots attach to the last layout. Components are called directly (matching
+ * the server) so hydration is consistent; loader data flows via reactive getters.
+ */
+const composeFrom = (
+    handler: ClientPageHandler,
+    st: RouteStructure,
+    startIndex: number,
+): (() => any) => {
+    let acc: () => any = () => renderLeaf(handler, st);
+    const layouts = handler.layouts;
+    for (let i = layouts.length - 1; i >= startIndex; i--) {
+        const layout = layouts[i];
+        const LayoutComp = comp(layout.layout);
+        const childThunk = acc;
+        const slots = i === layouts.length - 1 ? buildSlots(handler, st) : {};
+        acc = () => {
+            if (!LayoutComp) return childThunk();
+            return LayoutComp({
+                children: childThunk,
+                routeParams: st.params,
+                searchParams: st.searchParams,
+                slots,
+                get loaderData() {
+                    return routeLoaderData()[layout.manifestPath] ?? {};
+                },
+            });
+        };
+    }
+    return acc;
+};
+
+/**
+ * Render the route tree. The root layout (index 0) is invariant across
+ * navigations, so it is rendered ONCE — this is what hydrates against the
+ * server-rendered `<body>`/document. Its `children` is a reactive thunk
+ * (`belowRoot`) that re-derives everything below the root from the current
+ * route, so a navigation re-renders the sub-tree (the root layout — nav, etc. —
+ * stays mounted) while a same-route revalidation only updates loader data via
+ * the reactive getters. The first render reproduces the server's direct-call
+ * structure exactly, so hydration matches.
+ */
+const renderTree = () => {
+    const st0 = untrack(routeStructure);
+    const handler0 = handlerFor(st0);
+    if (!handler0) return undefined;
+
+    // Everything below the root layout, re-derived reactively from the route.
+    const belowRoot = () => {
+        const st = routeStructure();
+        const handler = handlerFor(st);
+        if (!handler) return undefined;
+        const start = handler.layouts.length > 0 ? 1 : 0;
+        return composeFrom(handler, st, start)();
+    };
+
+    const rootLayout = handler0.layouts[0];
+    const RootComp = rootLayout ? comp(rootLayout.layout) : undefined;
+    if (!rootLayout || !RootComp) return belowRoot();
+
+    // Slots attach to the root layout only when it is the route's *last* layout.
+    const rootSlots = () => {
+        const st = routeStructure();
+        const handler = handlerFor(st);
+        return handler && handler.layouts.length === 1
+            ? buildSlots(handler, st)
+            : {};
+    };
+
+    return RootComp({
+        children: belowRoot,
+        get routeParams() {
+            return routeStructure().params;
+        },
+        get searchParams() {
+            return routeStructure().searchParams;
+        },
+        get slots() {
+            return rootSlots();
+        },
+        get loaderData() {
+            return routeLoaderData()[rootLayout.manifestPath] ?? {};
+        },
+    });
+};
+
+/**
+ * Client entry. Called by the SSR-emitted hydration script with the server's
+ * route state. Seeds the reactive router, preloads the current route's
+ * component modules, and hydrates once. Subsequent navigations are driven by the
+ * reactive `route()` signal (see `utils/router-context`).
+ */
 export const main = async (
     modulePath: string,
     routeParams: Record<string, string> = {},
     searchParams: Record<string, string> = {},
     loaderDataManifest: Record<string, any> = {},
     deferred: string[] = [],
-    // PPR: when true, deferred holes were served as static fallbacks; fetch their
-    // data from the server and fill them in (instead of waiting for streamed
-    // hydration data, which a static shell does not carry).
     ppr = false,
 ) => {
-    // find the route that matches the path
-    const pageModule = fileRoutes.find((route) => route.path === modulePath);
-    if (!pageModule) {
-        console.error(`No route found for path: ${modulePath}`);
-        return;
-    }
-    const pageLoaderData = loaderDataManifest[modulePath];
+    const kind: RouteKind = modulePath.startsWith('/not-found')
+        ? 'not-found'
+        : modulePath.startsWith('/error')
+          ? 'error'
+          : 'page';
 
-    const segments = modulePath.split('/').slice(2);
-    if (segments.at(0)) {
-        segments.unshift('');
-    }
-    const layouts: any[] = [];
-    const layoutLoaderData: any[] = [];
-    const groups: Record<string, any> = {};
-    for (let i = 0; i < segments.length; i++) {
-        const path = `/${segments.slice(1, segments.length - i).join('/')}`;
-        const loaderData = loaderDataManifest[`/layout${path}`];
-        const layoutModule = fileRoutes.find((route) => {
-            const routePath = `/${route.path.split('/').slice(2).join('/')}`;
-            return routePath === path && (route as any).type === 'layout';
-        });
-        if (layoutModule) {
-            layouts.unshift(layoutModule);
-        }
-        if (loaderData) {
-            layoutLoaderData.unshift(loaderData);
-        }
-    }
-    const groupModules = fileRoutes.filter((route) => {
-        const parentPath = (route as any).parent || '';
-        return (
-            parentPath === segments.join('/') && (route as any).type === 'group'
-        );
-    });
-    const normalize = (p: string) => `/${p.split('/').slice(2).join('/')}`;
-    if (groupModules && groupModules.length > 0) {
-        for (const groupModule of groupModules) {
-            const groupName = groupModule.path
-                .split('/')
-                .at(-1)
-                ?.replace('@', '');
-            if (!groupName) continue;
-            // The group's loading.tsx/error.tsx are normal loading/error routes;
-            // match them by the group's normalized path.
-            const groupNorm = normalize(groupModule.path);
-            const loading = fileRoutes.find(
-                (r) =>
-                    (r as any).type === 'loading' &&
-                    normalize(r.path) === groupNorm,
-            );
-            const error = fileRoutes.find(
-                (r) =>
-                    (r as any).type === 'error' &&
-                    normalize(r.path) === groupNorm,
-            );
-            groups[groupName] = {
-                page: groupModule,
-                path: groupModule.path,
-                loading,
-                error,
-            };
-        }
-    }
-    const compose = layouts.reduceRight(
-        (children, layout, index) => async () => {
-            const { default: layoutModule } = await importModule(
-                layout.$component,
-            );
-            const loaderData = layoutLoaderData[index] || {};
-            const slots: Record<string, any> = {};
-            const slotPromises: Promise<any>[] = [children()];
-            if (index === layouts.length - 1) {
-                // last layout, we can render slots
-                for (const [groupName, group] of Object.entries(groups)) {
-                    slotPromises.push(
-                        (async () => {
-                            const { default: groupPage } = await importModule(
-                                group.page.$component,
-                            );
-                            const isDeferred = deferred.includes(group.path);
-                            const GroupLoading = group.loading
-                                ? (await importModule(group.loading.$component))
-                                      .default
-                                : null;
-                            const GroupError = group.error
-                                ? (await importModule(group.error.$component))
-                                      .default
-                                : null;
-                            slots[groupName] = () => {
-                                const inner = () => {
-                                    if (!isDeferred) {
-                                        return groupPage({
-                                            routeParams,
-                                            searchParams,
-                                            loaderData:
-                                                loaderDataManifest[
-                                                    group.path
-                                                ] || {},
-                                        });
-                                    }
-                                    const resource = createDeferredResource(
-                                        ppr ? fetchHole(group.path) : undefined,
-                                    );
-                                    return createComponent(Suspense, {
-                                        fallback: GroupLoading
-                                            ? createComponent(GroupLoading, {
-                                                  routeParams,
-                                                  searchParams,
-                                              })
-                                            : undefined,
-                                        get children() {
-                                            return groupPage({
-                                                routeParams,
-                                                searchParams,
-                                                loaderData: resource,
-                                            });
-                                        },
-                                    });
-                                };
-                                if (GroupError) {
-                                    return createComponent(ErrorBoundary, {
-                                        fallback: (err: any) =>
-                                            createComponent(GroupError, {
-                                                error: err,
-                                                routeParams,
-                                                searchParams,
-                                            }),
-                                        get children() {
-                                            return inner();
-                                        },
-                                    });
-                                }
-                                return inner();
-                            };
-                        })(),
-                    );
-                }
-            }
-            const [childrenRendered] = await Promise.all(slotPromises);
-            return () =>
-                layoutModule({
-                    children: childrenRendered,
-                    routeParams,
-                    searchParams,
-                    slots: slots,
-                    loaderData,
-                });
-        },
-        async () => {
-            const { default: page } = await importModule(pageModule.$component);
-            // Deferred page: mirror the server's resource + <Suspense> at the
-            // same tree position so hydration restores the streamed value from
-            // `_$HY` instead of re-running (the fetcher never resolves here).
-            if (deferred.includes(modulePath)) {
-                return () => {
-                    const resource = createDeferredResource(
-                        ppr ? fetchHole(modulePath) : undefined,
-                    );
-                    return createComponent(Suspense, {
-                        get children() {
-                            return page({
-                                routeParams,
-                                searchParams,
-                                loaderData: resource,
-                            });
-                        },
-                    });
-                };
-            }
-            return () =>
-                page({
-                    routeParams,
-                    searchParams,
-                    loaderData: pageLoaderData || {},
-                });
-        },
-    );
+    const initial: RouteState = {
+        pathname: location.pathname,
+        search: location.search,
+        params: routeParams,
+        searchParams,
+        manifestPath: kind === 'page' ? modulePath : '',
+        loaderData: loaderDataManifest,
+        deferredKeys: deferred,
+        kind,
+        errorPageManifest: kind === 'error' ? modulePath : undefined,
+        ppr,
+        firstLoad: true,
+    };
 
-    const composed = await compose();
+    // Preload every module the first render needs so `renderTree` is synchronous
+    // and hydration is clean.
+    const handler =
+        kind === 'not-found'
+            ? matchClientRoute('/')?.handler
+            : matchClientRoute(location.pathname)?.handler;
+    if (handler) await preloadHandler(handler);
 
-    hydrate(() => composed(), document);
+    initRouter(initial);
+    hydrate(() => renderTree(), document);
 };
 
 export default main;

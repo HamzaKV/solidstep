@@ -1,4 +1,5 @@
 import type { Component, JSX } from 'solid-js';
+import { Link } from 'solidstep/link';
 import './globals.css';
 
 export const generateMeta = () => ({
@@ -20,14 +21,14 @@ const RootLayout: Component<{ children: () => JSX.Element }> = (props) => {
     return (
         <body>
             <nav data-testid='nav'>
-                <a href='/'>Home</a>
-                <a href='/about'>About</a>
-                <a href='/counter'>Counter</a>
-                <a href='/dashboard'>Dashboard</a>
-                <a href='/cache-tags'>Cache Tags</a>
-                <a href='/ssg'>SSG</a>
-                <a href='/isr'>ISR</a>
-                <a href='/ppr'>PPR</a>
+                <Link href='/'>Home</Link>
+                <Link href='/about'>About</Link>
+                <Link href='/counter'>Counter</Link>
+                <Link href='/dashboard'>Dashboard</Link>
+                <Link href='/cache-tags'>Cache Tags</Link>
+                <Link href='/ssg'>SSG</Link>
+                <Link href='/isr'>ISR</Link>
+                <Link href='/ppr'>PPR</Link>
             </nav>
             <main>{props.children()}</main>
         </body>

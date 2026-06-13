@@ -22,8 +22,7 @@ import {
 import invariant from 'vinxi/lib/invariant';
 import { getManifest } from 'vinxi/manifest';
 import { RedirectError } from './redirect';
-import { createDiffDOM } from './diff-dom';
-import { getCache, invalidateCache } from './cache';
+import { invalidateCache } from './cache';
 import fetch from './fetch.server';
 import {
     createRequestContext,
@@ -257,48 +256,15 @@ export async function handleServerFunction(event: HTTPEvent) {
             }
         }
 
+        // If the action marked a path for revalidation, drop its cached render.
+        // The `X-Revalidate` header remains on the response; the client router
+        // re-fetches the route's loader data and re-renders reactively (no DOM
+        // diffing) — see `refreshRoute` in `utils/router-context`.
         const revalidatePath = getResponseHeader(event, 'X-Revalidate') as
             | string
             | undefined;
-
-        // Step 1: check if revalidation is needed
         if (revalidatePath) {
-            // Step 2: get generated html page from cache
-            const cacheValue = await getCache<any | null>(revalidatePath);
-            const oldHtml = cacheValue?.rendered;
-
-            // Step 3: invalidate cache for path
             await invalidateCache(revalidatePath);
-
-            let diff: any;
-
-            if (oldHtml) {
-                // Step 4: diff the cache with new html from server
-                const reqUrl = new URL(request.url);
-                const serverUrl = reqUrl.origin;
-                const response = await fetch(
-                    serverUrl + revalidatePath,
-                    {
-                        method: 'GET',
-                    },
-                    false,
-                );
-                await response.text(); // ensure the fetch is completed and cache is populated
-                const newCacheValue = await getCache<any | null>(revalidatePath);
-                const newHtml = newCacheValue?.rendered;
-                const dd = createDiffDOM({
-                    skipSelector: 'SCRIPT, STYLE, NOSCRIPT',
-                    skipMode: 'full',
-                });
-                const ddDiff = dd.diff(oldHtml, newHtml);
-                diff = structuredClone(ddDiff);
-            }
-
-            // Step 5: add the changed html as json to the result
-            result = {
-                result,
-                diff,
-            };
         }
 
         setHeader(event, 'content-type', 'text/javascript');

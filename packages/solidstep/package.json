@@ -26,6 +26,14 @@
             "types": "./utils/hooks/form-status.d.ts",
             "default": "./utils/hooks/form-status.js"
         },
+        "./link": {
+            "types": "./utils/components/link.d.ts",
+            "default": "./utils/components/link.js"
+        },
+        "./router": {
+            "types": "./utils/router-context.d.ts",
+            "default": "./utils/router-context.js"
+        },
         "./utils/cache": {
             "types": "./utils/cache.d.ts",
             "default": "./utils/cache.js"

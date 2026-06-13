@@ -25,7 +25,11 @@ export default defineConfig({
                 // server/client entry points tested implicitly via integration
                 'utils/server-action.server.ts',
                 'utils/server-action.client.ts',
-                'utils/diff-dom.ts',
+                // browser-coupled client router runtime (covered by e2e)
+                'utils/router-context.ts',
+                'utils/client-modules.ts',
+                'utils/client-manifest.ts',
+                'utils/components/link.ts',
                 'utils/fetch.client.ts',
                 'utils/fetch.server.ts',
                 'utils/logger.ts',

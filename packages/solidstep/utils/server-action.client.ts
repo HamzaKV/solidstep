@@ -1,7 +1,7 @@
 import fetch from './fetch.client';
 import { toJSONAsync } from 'seroval';
 import { SEROVAL_PLUGINS, SerovalChunkReader } from './serialize';
-import { createDiffDOM } from './diff-dom';
+import { refreshRoute } from './router-context';
 
 async function deserializeStream(id: string, response: Response) {
     if (!response.body) {
@@ -117,32 +117,13 @@ async function fetchServerFunction(
 
     if (response.headers.has('X-Revalidate')) {
         const revalidatePath = response.headers.get('X-Revalidate');
-        const { result: actualResult, diff } = result;
-        // run algo to update UI using diff (maybe use a worker?) if the revalidate page is current page
-        if (diff && revalidatePath === window.location.pathname) {
-            const dd = createDiffDOM();
-            const didApply = dd.apply(document.body, diff);
-            if (didApply) {
-                const key = window.location.pathname;
-                sessionStorage.setItem(key, JSON.stringify(diff));
-                window.history.pushState(
-                    { revalidated: true },
-                    '',
-                    window.location.href,
-                );
-            }
-            if (import.meta.env.DEV && !didApply) {
-                console.error(
-                    'The mutation was not applied, this seems to be an edge case.',
-                );
-                console.error(
-                    'Please raise an issue on GitHub describing your case.',
-                );
-                console.error('The diff calculated:', diff);
-            }
+        // Re-render the current route reactively if the action revalidated it.
+        // `refreshRoute` re-fetches the route's loader data + metadata and
+        // updates the router state in place (replacing the old DOM-diff path).
+        if (revalidatePath === window.location.pathname) {
+            await refreshRoute();
         }
-
-        return actualResult;
+        return result;
     }
 
     return result;

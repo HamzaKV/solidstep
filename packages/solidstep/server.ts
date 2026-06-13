@@ -317,6 +317,10 @@ const PRERENDER_ENDPOINT = '/__solidstep_prerender';
 // a deferred loader (identified by its manifest path, validated against the
 // matched route) and returns its data as JSON.
 const LOADER_ENDPOINT = '/__solidstep_loader';
+// Internal endpoint the client router calls on a soft navigation: it resolves
+// ALL of a route's loader data + metadata in one round-trip and returns a
+// seroval-serialized envelope the client deserializes (so Date/Map/etc. survive).
+const ROUTE_ENDPOINT = '/__solidstep_route';
 
 // Walk the route trie, reconstructing each page route's pattern segments so a
 // concrete pathname can be built from generateStaticParams.
@@ -462,6 +466,175 @@ const serveHoleData = async (req: Request): Promise<string | null> => {
     const pageReq = new Request(targetUrl.toString(), { headers: req.headers });
     const data = await getCachedLoaderData(loaderFn, manifest, pageReq);
     return JSON.stringify({ data });
+};
+
+/**
+ * Resolve everything the client needs to render a matched page route on a soft
+ * navigation, WITHOUT building a Solid tree: every layout/page/group loader is
+ * run (deferred ones are awaited here, since soft nav has no streaming shell)
+ * and every node's `generateMeta` is merged in tree order.
+ *
+ * This is a standalone pass that reuses the same per-node primitives as
+ * `render()` (`runSequentialLoader`, `getCachedModule`) so caching, SWR, and
+ * loader-error isolation match — but it deliberately does NOT touch `render()`'s
+ * control flow (which interleaves loaders with tree-building).
+ *
+ * @returns `loaderData` keyed by manifestPath, the deferred manifestPaths, and
+ *   merged `meta`. The page loader re-throws on failure (caller maps it to an
+ *   error/redirect envelope); layout/group failures yield the usual sentinel.
+ */
+const resolveRouteData = async (
+    entry: RoutePageHandler,
+    req: Request,
+    cspNonce?: string,
+): Promise<{
+    loaderData: Record<string, unknown>;
+    deferredKeys: string[];
+    meta: Meta;
+}> => {
+    const loaderData: Record<string, unknown> = {};
+    const deferredKeys: string[] = [];
+
+    // Loader targets: layouts + page + groups. `isPage` controls error
+    // isolation (the page loader re-throws; everything else yields a sentinel).
+    const loaderTargets: {
+        manifestPath: string;
+        loader?: Import;
+        isPage: boolean;
+    }[] = [
+        ...entry.layouts.map((l) => ({
+            manifestPath: l.manifestPath,
+            loader: l.loader as Import | undefined,
+            isPage: false,
+        })),
+        {
+            manifestPath: entry.mainPage.manifestPath,
+            loader: entry.mainPage.loader as Import | undefined,
+            isPage: true,
+        },
+        ...Object.values(entry.groups || {}).map((g) => ({
+            manifestPath: g.manifestPath,
+            loader: g.loader as Import | undefined,
+            isPage: false,
+        })),
+    ];
+
+    await Promise.all(
+        loaderTargets.map(async ({ manifestPath, loader, isPage }) => {
+            if (!loader) return;
+            const { loader: loaderFn } = await getCachedModule<{ loader: any }>(
+                loader,
+            );
+            if (!loaderFn) return;
+            if (loaderFn.options?.type === 'defer') {
+                deferredKeys.push(manifestPath);
+            }
+            // Deferred loaders are resolved (awaited) here — a soft navigation
+            // has no streaming shell, so the client wants concrete data. The
+            // manifestPath is still reported in `deferredKeys` so the client
+            // wraps the node in <Suspense> consistently with first-load.
+            loaderData[manifestPath] = await runSequentialLoader(
+                loaderFn,
+                manifestPath,
+                req,
+                isPage,
+            );
+        }),
+    );
+
+    // Merge metadata in tree order (root layout → leaf layout → page), so the
+    // page wins ties — matching `render()`'s precedence.
+    let meta: Meta = {};
+    const metaTargets: (Import | undefined)[] = [
+        ...entry.layouts.map((l) => l.generateMeta as Import | undefined),
+        entry.mainPage.generateMeta as Import | undefined,
+    ];
+    for (const generateMetaImport of metaTargets) {
+        if (!generateMetaImport) continue;
+        const { generateMeta } = await getCachedModule<{ generateMeta: any }>(
+            generateMetaImport,
+        );
+        if (typeof generateMeta === 'function') {
+            const metaData = await generateMeta({ req, cspNonce });
+            if (metaData) meta = { ...meta, ...metaData };
+        }
+    }
+
+    return { loaderData, deferredKeys, meta };
+};
+
+/**
+ * Soft-navigation data endpoint. Matches `?url=<pathname+search>` and returns a
+ * seroval-serialized **envelope** describing how the client should render that
+ * route. Redirects/errors/not-found are encoded in the envelope (not as HTTP
+ * status) so a client `fetch` doesn't transparently follow or fail. Returns
+ * `null` on a malformed request (→ 400).
+ */
+const serveRouteData = async (
+    req: Request,
+    cspNonce?: string,
+): Promise<string | null> => {
+    const reqUrl = new URL(req.url);
+    const target = reqUrl.searchParams.get('url');
+    if (!target) return null;
+
+    if (!routeManifest) {
+        const m = await createRouteManifest();
+        routeManifest = m.rootNode;
+        metadataManifest = m.metadataMap;
+    }
+
+    const targetUrl = new URL(target, reqUrl.origin);
+    const params = Object.fromEntries(targetUrl.searchParams);
+    const ser = (value: unknown) =>
+        serialize(value, { plugins: SEROVAL_PLUGINS });
+
+    const match = matchRoute(routeManifest, targetUrl.pathname);
+    if (!match) {
+        return ser({ type: 'not-found' });
+    }
+    if (match.handler.type !== 'page') {
+        // API route — the client must hard-navigate to it.
+        return ser({ type: 'route' });
+    }
+
+    const entry = match.handler as RoutePageHandler;
+    const routeParams = match.params || {};
+    // Run loaders against the target URL so params/search + cache keys are right.
+    const pageReq = new Request(targetUrl.toString(), { headers: req.headers });
+
+    try {
+        const { loaderData, deferredKeys, meta } = await resolveRouteData(
+            entry,
+            pageReq,
+            cspNonce,
+        );
+        return ser({
+            type: 'page',
+            manifestPath: entry.mainPage.manifestPath,
+            params: routeParams,
+            searchParams: params,
+            loaderData,
+            deferredKeys,
+            meta,
+        });
+    } catch (err: any) {
+        if (err instanceof RedirectError || err?.name === 'RedirectError') {
+            return ser({ type: 'redirect', location: err.message });
+        }
+        // The page loader threw: render the route's error boundary client-side
+        // if one exists, otherwise surface a not-found.
+        if (entry.errorPage) {
+            return ser({
+                type: 'error',
+                errorPageManifest: entry.errorPage.manifestPath,
+                params: routeParams,
+                searchParams: params,
+                message: err instanceof Error ? err.message : String(err),
+            });
+        }
+        return ser({ type: 'not-found' });
+    }
 };
 
 // ISR entries never hard-expire (~10y) so a stale artifact is always served
@@ -1285,6 +1458,19 @@ const handler = eventHandler(async (event) => {
         }
 
         const cspNonce = (event as any).locals?.cspNonce as string | undefined;
+
+        // Soft-navigation route data: the client router fetches a route's full
+        // loader data + metadata here as a seroval-serialized envelope.
+        if (new URL(req.url).pathname === ROUTE_ENDPOINT) {
+            const body = await serveRouteData(req, cspNonce);
+            if (body === null) {
+                setResponseStatus(400);
+                return 'Bad Request';
+            }
+            setHeader('Content-Type', 'text/plain; charset=utf-8');
+            setHeader('Cache-Control', 'no-store');
+            return body;
+        }
 
         const urlObj = new URL(req.url);
         const pathnamePart = urlObj.pathname;
