@@ -23,7 +23,7 @@ export default defineInstrumentation({
         );
     },
 
-    async onRequestError(error, request, context) {
+    async onRequestError(error, context) {
         // Called when an unhandled error occurs during request processing.
         console.error(
             `[instrumentation] Error in ${context.pathname}:`,

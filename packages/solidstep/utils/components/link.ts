@@ -7,7 +7,7 @@ import {
     onCleanup,
 } from 'solid-js';
 import { Dynamic, isServer } from 'solid-js/web';
-import { navigate, prefetchRoute } from '../router-context';
+import { navigate, prefetchRoute, type Href } from '../router-context';
 
 /**
  * Props for {@link Link}. Extends the native anchor attributes with router
@@ -18,7 +18,8 @@ export type LinkProps = Omit<
     JSX.AnchorHTMLAttributes<HTMLAnchorElement>,
     'href'
 > & {
-    href: string;
+    /** Target route. Type-checked against the app's routes when typed routes are generated. */
+    href: Href;
     /** Replace the current history entry instead of pushing a new one. */
     replace?: boolean;
     /**

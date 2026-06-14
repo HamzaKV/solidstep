@@ -33,6 +33,10 @@ import {
 import { handleServerFunction } from './utils/server-action.server';
 import { escapeScript } from './utils/escape';
 import {
+    renderDevOverlayDocument,
+    devOverlayClientScript,
+} from './utils/dev-overlay';
+import {
     generateHtmlHead,
     renderAssetsToHtml,
     jsonForScript,
@@ -1547,7 +1551,9 @@ const handler = eventHandler(async (event) => {
                 await clientManifest!.inputs[clientManifest!.handler].assets();
             const entryPath =
                 clientManifest!.inputs[clientManifest!.handler].output.path;
-            const manifestHtml = `<script ${cspNonce ? `nonce="${cspNonce}"` : ''}>window.manifest=${escapeScript(JSON.stringify(await clientManifest!.json()))}</script>`;
+            // The dev-only suffix injects the client error-overlay runtime into
+            // every page (tree-shaken from prod, where `import.meta.env.DEV` is false).
+            const manifestHtml = `<script ${cspNonce ? `nonce="${cspNonce}"` : ''}>window.manifest=${escapeScript(JSON.stringify(await clientManifest!.json()))}</script>${import.meta.env.DEV ? devOverlayClientScript(cspNonce) : ''}`;
 
             let clientHydrationScript: string | undefined = undefined;
 
@@ -1859,6 +1865,20 @@ const handler = eventHandler(async (event) => {
                                 const errorPage = (matched as RoutePageHandler)
                                     .errorPage;
                                 if (!errorPage) {
+                                    // Dev: show the error overlay for an
+                                    // unhandled render error (no error.tsx).
+                                    // Prod: rethrow → the outer 500.
+                                    if (import.meta.env.DEV) {
+                                        setResponseStatus(500);
+                                        push(
+                                            renderDevOverlayDocument(e1, {
+                                                method: req.method,
+                                                url: req.url,
+                                            }),
+                                        );
+                                        controller.close();
+                                        return;
+                                    }
                                     throw e1;
                                 }
                                 const {
@@ -1980,6 +2000,18 @@ const handler = eventHandler(async (event) => {
             });
         }
         console.error(e);
+        if (import.meta.env.DEV) {
+            return new Response(
+                renderDevOverlayDocument(e, {
+                    method: req.method,
+                    url: req.url,
+                }),
+                {
+                    status: 500,
+                    headers: { 'Content-Type': 'text/html' },
+                },
+            );
+        }
         return new Response('Internal Server Error', { status: 500 });
     }
 });

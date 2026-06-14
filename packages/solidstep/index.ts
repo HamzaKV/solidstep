@@ -14,6 +14,7 @@ import type { CustomizableConfig } from 'vinxi/dist/types/lib/vite-dev';
 // @ts-ignore
 import type { InlineConfig } from 'vite';
 import { config as viteConfigPlugin } from 'vinxi/plugins/config';
+import { routeTypegen } from './utils/typegen.js';
 
 type VinxiViteServerOptions = Omit<
     InlineConfig['server'],
@@ -191,6 +192,8 @@ export const defineConfig = (
                             (p) => p.type === 'server' || p.type === 'both',
                         )
                         .map((p) => p.plugin) || []),
+                    // Typed-routes codegen: emits `solidstep-env.d.ts` in dev + build.
+                    routeTypegen(),
                     serverFunctions.server(),
                     solid({ ssr: true }),
                     viteConfigPlugin(

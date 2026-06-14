@@ -112,6 +112,15 @@ async function fetchServerFunction(
         if (result.name === 'RedirectError') {
             window.location.href = result.message;
         }
+        // Dev: surface the server-action error in the in-browser overlay (the
+        // mounter is installed by the dev-only client script on the page).
+        if (import.meta.env.DEV) {
+            (
+                window as unknown as {
+                    __solidstepDevOverlay?: (err: unknown) => void;
+                }
+            ).__solidstepDevOverlay?.(result);
+        }
         throw result;
     }
 

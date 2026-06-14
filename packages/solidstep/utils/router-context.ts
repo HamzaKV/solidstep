@@ -19,6 +19,69 @@ import { preloadHandler } from './client-modules';
 /** Endpoint that returns a route's full loader data + metadata envelope. */
 const ROUTE_ENDPOINT = '/__solidstep_route';
 
+/**
+ * Typed-routes registry. The build/dev typegen plugin (`utils/typegen`) emits a
+ * `solidstep-env.d.ts` that declaration-merges this interface with the app's
+ * actual routes:
+ *
+ * ```ts
+ * declare module 'solidstep/router' {
+ *   interface Register {
+ *     routes: '/' | '/blog/[slug]';
+ *     hrefs: '/' | `/blog/${string}`;
+ *     params: { '/': {}; '/blog/[slug]': { slug: string } };
+ *   }
+ * }
+ * ```
+ *
+ * When present, `<Link href>` / {@link navigate} / {@link RouteParams} become
+ * route-aware. When absent (no typegen run yet), the helpers below fall back to
+ * accepting any string, so projects always compile.
+ */
+// biome-ignore lint/suspicious/noEmptyInterface: augmented via declaration merging
+export interface Register {}
+
+type _RegisteredHref = Register extends { hrefs: infer H extends string }
+    ? H
+    : never;
+
+/**
+ * A valid app route href. Resolves to the union of the app's route href patterns
+ * (with optional `?query`/`#hash` suffixes) when typed routes are generated, or
+ * any string otherwise.
+ */
+export type Href = [_RegisteredHref] extends [never]
+    ? string & {}
+    :
+          | _RegisteredHref
+          | `${_RegisteredHref}?${string}`
+          | `${_RegisteredHref}#${string}`;
+
+/** The union of the app's route ids (e.g. `'/blog/[slug]'`), or `string`. */
+export type RouteId = Register extends { routes: infer R extends string }
+    ? R
+    : string;
+
+/** The route params for a given route id (e.g. `{ slug: string }`). */
+export type RouteParams<P extends RouteId = RouteId> = Register extends {
+    params: infer M;
+}
+    ? P extends keyof M
+        ? M[P]
+        : Record<string, string | string[]>
+    : Record<string, string | string[]>;
+
+/**
+ * Props a page/layout component receives for a given route id. `L` is the
+ * loader's return type (pass it explicitly, e.g.
+ * `PageProps<'/blog/[slug]', LoaderData>`).
+ */
+export type PageProps<P extends RouteId = RouteId, L = unknown> = {
+    routeParams: RouteParams<P>;
+    searchParams: Record<string, string>;
+    loaderData: L;
+};
+
 /** The leaf variant the tree should render for the current route. */
 export type RouteKind = 'page' | 'not-found' | 'error';
 
@@ -396,8 +459,11 @@ export const refreshRoute = async (): Promise<void> => {
 // Public hooks
 // ---------------------------------------------------------------------------
 
+/** A route-aware navigation function (accepts a typed {@link Href}). */
+export type NavigateFn = (to: Href, opts?: NavigateOptions) => Promise<void>;
+
 /** Returns the imperative `navigate(to, opts)` function. */
-export const useNavigate = () => navigate;
+export const useNavigate = (): NavigateFn => navigate;
 /** Reactive accessor for the current pathname. */
 export const usePathname = () => () => route().pathname;
 /** Reactive accessor for the current search params. */

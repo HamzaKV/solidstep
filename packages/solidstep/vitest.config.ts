@@ -30,6 +30,8 @@ export default defineConfig({
                 'utils/client-modules.ts',
                 'utils/client-manifest.ts',
                 'utils/components/link.ts',
+                // build/dev Vite-plugin wrapper (fs/watcher); pure logic is unit-tested
+                'utils/typegen.ts',
                 'utils/fetch.client.ts',
                 'utils/fetch.server.ts',
                 'utils/logger.ts',

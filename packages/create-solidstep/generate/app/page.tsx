@@ -3,44 +3,33 @@ import {
     type LoaderDataFromFunction,
 } from 'solidstep/utils/loader';
 
+// Loaders run on the server only; their data is passed to the page as a prop.
+// Non-JSON values (Date/Map/Set/BigInt) survive to the client too.
 export const loader = defineLoader(async () => {
-    const response = await fetch(
-        'https://jsonplaceholder.typicode.com/todos/2',
-    );
-    if (!response.ok) {
-        throw new Error('Failed to fetch data');
-    }
-    const data = (await response.json()) as {
-        userId: number;
-        id: number;
-        title: string;
-        completed: boolean;
-    };
-    return data;
+    return { framework: 'SolidStep', renderedAt: new Date() };
 });
 
 export const generateMeta = () => ({
     title: {
         type: 'title',
         attributes: {},
-        content: 'SolidStep Main Page',
+        content: 'Home · SolidStep',
     },
 });
 
 type LoaderData = LoaderDataFromFunction<typeof loader>;
 
-const Page = (props: { loaderData: LoaderData }) => {
+export default function Home(props: { loaderData: LoaderData }) {
     return (
-        <main>
-            <h1>Welcome to SolidStep</h1>
+        <section>
+            <h1>Welcome to {props.loaderData.framework}</h1>
             <p>
                 Edit <code>app/page.tsx</code> to get started.
             </p>
             <p>
-                Loaded todo #{props.loaderData.id}: {props.loaderData.title}
+                Server-rendered at{' '}
+                <time>{props.loaderData.renderedAt.toLocaleTimeString()}</time>.
             </p>
-        </main>
+        </section>
     );
-};
-
-export default Page;
+}
