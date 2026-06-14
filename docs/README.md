@@ -23,13 +23,15 @@ This is the documentation index. Pages are grouped into **Guides**, **Reference*
 
 ## Reference
 
-- [Architecture](./architecture.md) — request lifecycle, manifest, streaming SSR, hydration, server-action serialization.
+- [Architecture](./architecture.md) — request lifecycle, manifest, render strategies, streaming/deferred/PPR, soft navigation, hydration, server-action serialization.
 - [API Reference](./api-reference.md) — every public `solidstep/...` import mapped to a description and docs page.
+- [Testing](./testing.md) — unit testing with Vitest, testing loaders/actions/components, and end-to-end testing with Playwright.
 - [Troubleshooting](./troubleshooting.md) — common issues and fixes.
 
 ## Operations
 
 - [Deployment](./deployment.md) — building, Nitro presets, env vars, Docker, Node requirements.
+- [Roadmap](./roadmap.md) — planned features and direction.
 
 ## Links
 

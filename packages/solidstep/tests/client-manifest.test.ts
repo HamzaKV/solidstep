@@ -126,4 +126,21 @@ describe('client manifest matching', () => {
     it('exposes the root not-found handler', () => {
         expect(getNotFoundInManifest(trie)?.manifestPath).toBe('/not-found');
     });
+
+    it('returns undefined when the trie has no root page', () => {
+        expect(getNotFoundInManifest(buildManifest([]))).toBeUndefined();
+    });
+
+    it('attaches a parentless group to the root and skips an unnamed group', () => {
+        const t = buildManifest([
+            { path: '/route', type: 'route', $component: cmp('home') },
+            // No `parent` → falls back to the root path ('/').
+            { path: '/group/@side', type: 'group', $component: cmp('side') },
+            // Trailing slash → empty group name → skipped.
+            { path: '/group/', type: 'group', $component: cmp('noname') },
+        ]);
+        const m = matchInManifest(t, '/');
+        expect(m?.handler.groups?.['@side']?.page.src).toBe('side');
+        expect(Object.keys(m?.handler.groups ?? {})).toEqual(['@side']);
+    });
 });

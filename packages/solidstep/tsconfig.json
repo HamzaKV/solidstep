@@ -34,6 +34,7 @@
     "index.ts",
     "client.ts",
     "server.ts",
+    "server/**/*",
     "prerender-crawl.ts"
   ],
   "exclude": [

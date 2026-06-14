@@ -5,33 +5,14 @@ import {
     setHeader,
     setResponseStatus,
 } from 'vinxi/http';
-import { getManifest } from 'vinxi/manifest';
-import { renderToString, renderToStream, createComponent } from 'solid-js/web';
-import { Suspense, ErrorBoundary } from 'solid-js';
-import { createDeferredResource } from './utils/deferred';
+import { renderToStream } from 'solid-js/web';
 import type { Meta } from './utils/meta';
-import fileRoutes, { type RouteModule } from 'vinxi/routes';
 import { RedirectError } from './utils/redirect';
-import {
-    getCache,
-    getCacheEntry,
-    setCacheWithOptions,
-    setCacheStore,
-} from './utils/cache';
+import { setCacheStore } from './utils/cache';
 import { MemoryCacheStore, FilesystemCacheStore } from './utils/cache-store';
-import { singleFlight } from './utils/single-flight';
-import fetchServer from './utils/fetch.server';
-import { getCachedLoaderData } from './utils/loader-cache';
-import { runSequentialLoader } from './utils/loader-error';
-import {
-    expandRoute,
-    type PatternSegment,
-    type PrerenderTarget,
-    type PrerenderOptions,
-    type GenerateStaticParams,
-} from './utils/prerender';
 import { handleServerFunction } from './utils/server-action.server';
 import { escapeScript } from './utils/escape';
+import { logger } from './utils/logger';
 import {
     renderDevOverlayDocument,
     devOverlayClientScript,
@@ -44,19 +25,14 @@ import {
     buildHeadHtml,
     createBaseMeta,
 } from './utils/html';
-import { shouldCachePage, pageCacheKey } from './utils/page-cache';
-import { SEROVAL_PLUGINS } from './utils/serialize';
-import { serialize } from 'seroval';
 import { readFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-    createNode,
-    insertRoute,
     matchRoute,
     type Import,
+    type RouteHandler,
     type RoutePageHandler,
-    type RouteNode,
 } from './utils/path-router';
 import {
     loadInstrumentation,
@@ -65,1206 +41,43 @@ import {
     createRequestContext,
     createResponseContext,
 } from './utils/instrumentation';
+import {
+    createRouteManifest,
+    collectPrerenderTargets,
+    ensureRouteManifest,
+    setRouteManifest,
+    getMetadataManifest,
+    ensureClientManifest,
+    getCachedModule,
+} from './server/route-manifest';
+import { serveHoleData, serveRouteData } from './server/data-endpoints';
+import { serveIsr, seedIsrFromManifest } from './server/isr';
+import { render, routeNeedsStreaming, template } from './server/render';
+import type {
+    OptionsModule,
+    RenderDeferredResult,
+    RenderPlainResult,
+    RenderPprResult,
+    RouteApiModule,
+    RouteMethodHandler,
+} from './server/types';
+import {
+    ISR_BYPASS_HEADER,
+    PRERENDER_ENDPOINT,
+    LOADER_ENDPOINT,
+    ROUTE_ENDPOINT,
+} from './server/constants';
+
+/**
+ * The API-route variant of a matched {@link RouteHandler} (`route.ts`). The
+ * manifest also attaches a `routePath` (used for instrumentation), which the
+ * shared `RouteHandler` type does not declare, so it is added here.
+ */
+type ApiRouteHandler = Extract<RouteHandler, { type: 'route' }> & {
+    routePath?: string;
+};
 
 let instrumentationReady: Promise<void> | null = null;
-
-// Module cache for dynamically imported modules — skipped in dev so HMR invalidations are respected
-const moduleCache = new Map<string, any>();
-
-const getCachedModule = async <T>(importFn: Import): Promise<T> => {
-    if (import.meta.env.DEV) {
-        return importFn.import() as Promise<T>;
-    }
-    const key = importFn.src;
-    if (moduleCache.has(key)) {
-        return moduleCache.get(key);
-    }
-    const module = await importFn.import();
-    moduleCache.set(key, module);
-    return module;
-};
-
-type FileRoute = RouteModule & {
-    type:
-        | 'route'
-        | 'loading'
-        | 'error'
-        | 'not-found'
-        | 'layout'
-        | 'group'
-        | 'metadata';
-    $component: Import;
-    $loader?: Import;
-    $generateMeta?: Import;
-    $handler?: Import;
-    $options?: Import;
-    $generateStaticParams?: Import;
-    parent?: string; // for groups
-    metaName?: string; // for metadata files (robots/sitemap/manifest/llms)
-};
-
-// Maps a metadata convention file to its served URL + Content-Type.
-const METADATA_FILES: Record<string, { url: string; contentType: string }> = {
-    robots: { url: '/robots.txt', contentType: 'text/plain; charset=utf-8' },
-    sitemap: {
-        url: '/sitemap.xml',
-        contentType: 'application/xml; charset=utf-8',
-    },
-    manifest: {
-        url: '/manifest.webmanifest',
-        contentType: 'application/manifest+json; charset=utf-8',
-    },
-    llms: { url: '/llms.txt', contentType: 'text/plain; charset=utf-8' },
-};
-
-type MetadataRoute = { url: string; contentType: string; handler: Import };
-
-const isPageFile = (file: string) =>
-    file.endsWith('page.tsx') ||
-    file.endsWith('page.jsx') ||
-    file.endsWith('page.ts') ||
-    file.endsWith('page.js');
-
-const isRouteFile = (file: string) =>
-    file.endsWith('route.ts') || file.endsWith('route.js');
-
-const getNormalizedPath = (path: string, clean?: boolean) => {
-    const segments = path.split('/').slice(2);
-    if (clean)
-        return `/${segments.filter((s) => !s.startsWith('(')).join('/')}`;
-
-    return `/${segments.join('/')}`;
-};
-
-const createRouteManifest = async () => {
-    const rootNode = createNode();
-
-    const allRoutes: FileRoute[] = [];
-    const layoutsMap = new Map<string, FileRoute>();
-    const loadingPagesMap = new Map<string, FileRoute>();
-    const errorPagesMap = new Map<string, FileRoute>();
-    const groupsMap = new Map<string, FileRoute[]>();
-    const metadataMap = new Map<string, MetadataRoute>();
-    let notFoundPage: FileRoute | undefined;
-
-    for (const fileRoute of fileRoutes as FileRoute[]) {
-        if (fileRoute.type === 'route') {
-            allRoutes.push(fileRoute);
-        }
-
-        if (
-            fileRoute.type === 'metadata' &&
-            fileRoute.metaName &&
-            fileRoute.$handler
-        ) {
-            const def = METADATA_FILES[fileRoute.metaName];
-            if (def) {
-                metadataMap.set(def.url, {
-                    url: def.url,
-                    contentType: def.contentType,
-                    handler: fileRoute.$handler,
-                });
-            }
-        }
-
-        if (fileRoute.type === 'layout') {
-            const path = getNormalizedPath(fileRoute.path);
-            layoutsMap.set(path, fileRoute);
-        }
-
-        if (fileRoute.type === 'not-found') {
-            notFoundPage = fileRoute;
-        }
-
-        if (fileRoute.type === 'loading') {
-            const path = getNormalizedPath(fileRoute.path);
-            loadingPagesMap.set(path, fileRoute);
-        }
-
-        if (fileRoute.type === 'error') {
-            const path = getNormalizedPath(fileRoute.path);
-            errorPagesMap.set(path, fileRoute);
-        }
-
-        if (fileRoute.type === 'group') {
-            // `fileRoute.parent` is already a clean route path (e.g. '/dashboard'
-            // or '' for the root), so it must NOT go through getNormalizedPath,
-            // which strips a leading prefix. Normalize it the same way page
-            // routePaths are (drop '(group)' segments, ensure a leading slash) so
-            // nested parallel routes attach to their parent route.
-            const parentPath = `/${(fileRoute.parent || '')
-                .split('/')
-                .filter((s) => s && !s.startsWith('('))
-                .join('/')}`;
-            const existing = groupsMap.get(parentPath) || [];
-            existing.push(fileRoute);
-            groupsMap.set(parentPath, existing);
-        }
-    }
-
-    const regex = /\?(?:pick=.*)*/g;
-
-    for (const fileRoute of allRoutes) {
-        const routePath = getNormalizedPath(fileRoute.path, true);
-        const routeMatcherPath = getNormalizedPath(fileRoute.path);
-        const src = fileRoute.$handler?.src.replace(regex, '');
-
-        if (src && isPageFile(src)) {
-            const loadingPage = loadingPagesMap.get(routeMatcherPath);
-            const matchedGroups = groupsMap.get(routePath);
-
-            const groups: RoutePageHandler['groups'] = {};
-            if (matchedGroups && matchedGroups.length > 0) {
-                for (const group of matchedGroups) {
-                    const groupName = group.path
-                        .split('/')
-                        .filter((s) => !s.startsWith('('))
-                        .at(-1);
-                    if (!groupName) continue;
-                    // A `loading.tsx`/`error.tsx` inside the @group dir was
-                    // recognized as a normal loading/error route; look it up by
-                    // the group's normalized path and attach it to the slot.
-                    const groupNormPath = getNormalizedPath(group.path);
-                    const groupLoading = loadingPagesMap.get(groupNormPath);
-                    const groupError = errorPagesMap.get(groupNormPath);
-                    groups[groupName] = {
-                        manifestPath: group.path,
-                        page: group.$component,
-                        loader: group.$loader,
-                        loadingPage: groupLoading?.$component,
-                        errorPage: groupError?.$component,
-                    };
-                }
-            }
-
-            const segments = routeMatcherPath.split('/').filter(Boolean);
-            let errorPage: FileRoute | undefined;
-            const layouts: RoutePageHandler['layouts'] = [];
-
-            // We need to traverse from root to leaf to build layouts order correctly?
-            // Original code: i = segments.length down to 0. unshift matches.
-            // i=length: /a/b/c. i=0: /.
-
-            for (let i = segments.length; i >= 0; i--) {
-                const path =
-                    i === 0 ? '/' : `/${segments.slice(0, i).join('/')}`;
-
-                if (!errorPage) {
-                    errorPage = errorPagesMap.get(path);
-                }
-                const layout = layoutsMap.get(path);
-                if (layout) {
-                    layouts.unshift({
-                        manifestPath: layout.path,
-                        layout: layout.$component,
-                        loader: layout.$loader,
-                        generateMeta: layout.$generateMeta,
-                    });
-                }
-            }
-
-            const entry: RoutePageHandler = {
-                type: 'page',
-                mainPage: {
-                    manifestPath: fileRoute.path,
-                    page: fileRoute.$component,
-                    loader: fileRoute.$loader,
-                    generateMeta: fileRoute.$generateMeta,
-                    options: fileRoute.$options,
-                    generateStaticParams: fileRoute.$generateStaticParams,
-                },
-                loadingPage: loadingPage
-                    ? {
-                          page: loadingPage.$component,
-                          generateMeta: loadingPage.$generateMeta,
-                          manifestPath: loadingPage.path,
-                      }
-                    : undefined,
-                errorPage: errorPage
-                    ? {
-                          page: errorPage.$component,
-                          generateMeta: errorPage.$generateMeta,
-                          manifestPath: errorPage.path,
-                      }
-                    : undefined,
-                notFoundPage:
-                    routePath === '/' && notFoundPage
-                        ? {
-                              page: notFoundPage.$component,
-                              generateMeta: notFoundPage.$generateMeta,
-                              manifestPath: notFoundPage.path,
-                          }
-                        : undefined,
-                layouts: layouts,
-                groups: groups,
-            };
-
-            insertRoute(rootNode, routePath, entry);
-        } else if (src && isRouteFile(src)) {
-            const entry = {
-                type: 'route' as const,
-                routePath,
-                handler: fileRoute.$handler as Import,
-                manifestPath: fileRoute.path,
-            };
-
-            insertRoute(rootNode, routePath, entry);
-        }
-    }
-
-    return { rootNode, metadataMap };
-};
-
-// Header a self-fetch sets so the handler renders an ISR page fresh instead of
-// serving (or recursing into) the ISR cache. Also set by the build-time crawler.
-const ISR_BYPASS_HEADER = 'x-solidstep-isr-bypass';
-// Internal, env-gated endpoint the build crawler hits to learn what to prerender.
-const PRERENDER_ENDPOINT = '/__solidstep_prerender';
-// Internal endpoint the client calls to fill a PPR page's dynamic holes: it runs
-// a deferred loader (identified by its manifest path, validated against the
-// matched route) and returns its data as JSON.
-const LOADER_ENDPOINT = '/__solidstep_loader';
-// Internal endpoint the client router calls on a soft navigation: it resolves
-// ALL of a route's loader data + metadata in one round-trip and returns a
-// seroval-serialized envelope the client deserializes (so Date/Map/etc. survive).
-const ROUTE_ENDPOINT = '/__solidstep_route';
-
-// Walk the route trie, reconstructing each page route's pattern segments so a
-// concrete pathname can be built from generateStaticParams.
-const walkPageRoutes = (
-    node: RouteNode,
-    segments: PatternSegment[] = [],
-): { handler: RoutePageHandler; segments: PatternSegment[] }[] => {
-    const out: { handler: RoutePageHandler; segments: PatternSegment[] }[] = [];
-    if (node.handler && node.handler.type === 'page') {
-        out.push({ handler: node.handler, segments });
-    }
-    for (const [value, child] of node.staticChildren) {
-        out.push(
-            ...walkPageRoutes(child, [...segments, { kind: 'static', value }]),
-        );
-    }
-    if (node.paramChild) {
-        out.push(
-            ...walkPageRoutes(node.paramChild.node, [
-                ...segments,
-                { kind: 'param', name: node.paramChild.name },
-            ]),
-        );
-    }
-    if (node.catchAllChild) {
-        out.push(
-            ...walkPageRoutes(node.catchAllChild.node, [
-                ...segments,
-                {
-                    kind: 'catchAll',
-                    name: node.catchAllChild.name,
-                    optional: node.catchAllChild.optional,
-                },
-            ]),
-        );
-    }
-    return out;
-};
-
-/**
- * Enumerate every concrete page to prerender (SSG/ISR). For each page route
- * with `options.render` of `'static'`/`'isr'`, this loads its `options` and (for
- * dynamic routes) `generateStaticParams`, then expands the pattern into concrete
- * {@link PrerenderTarget}s. Used by the build-time crawler.
- */
-const collectPrerenderTargets = async (): Promise<PrerenderTarget[]> => {
-    if (!routeManifest) {
-        const manifest = await createRouteManifest();
-        routeManifest = manifest.rootNode;
-        metadataManifest = manifest.metadataMap;
-    }
-    const targets: PrerenderTarget[] = [];
-    for (const { handler, segments } of walkPageRoutes(routeManifest)) {
-        const optionsImport = handler.mainPage.options;
-        const options = optionsImport
-            ? (
-                  await getCachedModule<{ options?: PrerenderOptions }>(
-                      optionsImport,
-                  )
-              ).options
-            : undefined;
-        if (
-            options?.render !== 'static' &&
-            options?.render !== 'isr' &&
-            options?.render !== 'ppr'
-        )
-            continue;
-
-        let staticParams: Array<Record<string, string | string[]>> | undefined;
-        const gspImport = handler.mainPage.generateStaticParams;
-        if (gspImport) {
-            const mod = await getCachedModule<{
-                generateStaticParams?: GenerateStaticParams;
-            }>(gspImport);
-            if (typeof mod.generateStaticParams === 'function') {
-                staticParams = await mod.generateStaticParams();
-            }
-        }
-
-        const expanded = expandRoute(segments, options, staticParams);
-        if (
-            expanded.length === 0 &&
-            segments.some((s) => s.kind !== 'static')
-        ) {
-            console.warn(
-                `[solidstep] Skipping prerender for dynamic route "/${segments
-                    .map((s) => (s.kind === 'static' ? s.value : `[${s.name}]`))
-                    .join(
-                        '/',
-                    )}" — render: '${options.render}' requires generateStaticParams.`,
-            );
-        }
-        targets.push(...expanded);
-    }
-    return targets;
-};
-
-/**
- * Run a single deferred loader for a PPR page's hole and return its data as
- * JSON. `manifest` identifies the page/layout/group node; it is validated
- * against the route matched for `url` so only loaders on that route can run.
- * Returns `null` (→ 400) on a bad/unknown request.
- */
-const serveHoleData = async (req: Request): Promise<string | null> => {
-    const reqUrl = new URL(req.url);
-    const manifest = reqUrl.searchParams.get('manifest');
-    const target = reqUrl.searchParams.get('url');
-    if (!manifest || !target) return null;
-
-    if (!routeManifest) {
-        const m = await createRouteManifest();
-        routeManifest = m.rootNode;
-        metadataManifest = m.metadataMap;
-    }
-
-    const targetUrl = new URL(target, reqUrl.origin);
-    const match = matchRoute(routeManifest, targetUrl.pathname);
-    if (!match || match.handler.type !== 'page') return null;
-    const page = match.handler as RoutePageHandler;
-
-    // Find the loader import for `manifest`, but only among nodes that belong to
-    // this matched route (page, its layouts, its groups).
-    let loaderImport: Import | undefined;
-    if (page.mainPage.manifestPath === manifest) {
-        loaderImport = page.mainPage.loader as Import | undefined;
-    } else {
-        for (const l of page.layouts) {
-            if (l.manifestPath === manifest) loaderImport = l.loader as Import;
-        }
-        for (const g of Object.values(page.groups || {})) {
-            if (g.manifestPath === manifest) loaderImport = g.loader as Import;
-        }
-    }
-    if (!loaderImport) return null;
-
-    const { loader: loaderFn } = await getCachedModule<{ loader: any }>(
-        loaderImport,
-    );
-    if (!loaderFn) return null;
-
-    // Run the loader against the original page URL so its params/search (and
-    // loader cache key) are correct.
-    const pageReq = new Request(targetUrl.toString(), { headers: req.headers });
-    const data = await getCachedLoaderData(loaderFn, manifest, pageReq);
-    return JSON.stringify({ data });
-};
-
-/**
- * Resolve everything the client needs to render a matched page route on a soft
- * navigation, WITHOUT building a Solid tree: every non-deferred layout/page/group
- * loader is run and every node's `generateMeta` is merged in tree order.
- *
- * **Deferred (`type: 'defer'`) loaders are NOT run here** — their manifestPaths
- * are reported in `deferredKeys` and the client fills each hole from the
- * `/__solidstep_loader` endpoint under `<Suspense fallback={loading.tsx}>`. This
- * makes a deferred route's shell commit instantly on navigation (with its loader
- * boundary showing) instead of blocking on the slow data, matching how `defer`
- * behaves on first-load.
- *
- * This is a standalone pass that reuses the same per-node primitives as
- * `render()` (`runSequentialLoader`, `getCachedModule`) so caching, SWR, and
- * loader-error isolation match — but it deliberately does NOT touch `render()`'s
- * control flow (which interleaves loaders with tree-building).
- *
- * @returns `loaderData` keyed by manifestPath (non-deferred only), the deferred
- *   manifestPaths, and merged `meta`. The page loader re-throws on failure
- *   (caller maps it to an error/redirect envelope); layout/group failures yield
- *   the usual sentinel.
- */
-const resolveRouteData = async (
-    entry: RoutePageHandler,
-    req: Request,
-    cspNonce?: string,
-): Promise<{
-    loaderData: Record<string, unknown>;
-    deferredKeys: string[];
-    meta: Meta;
-}> => {
-    const loaderData: Record<string, unknown> = {};
-    const deferredKeys: string[] = [];
-
-    // Loader targets: layouts + page + groups. `isPage` controls error
-    // isolation (the page loader re-throws; everything else yields a sentinel).
-    const loaderTargets: {
-        manifestPath: string;
-        loader?: Import;
-        isPage: boolean;
-    }[] = [
-        ...entry.layouts.map((l) => ({
-            manifestPath: l.manifestPath,
-            loader: l.loader as Import | undefined,
-            isPage: false,
-        })),
-        {
-            manifestPath: entry.mainPage.manifestPath,
-            loader: entry.mainPage.loader as Import | undefined,
-            isPage: true,
-        },
-        ...Object.values(entry.groups || {}).map((g) => ({
-            manifestPath: g.manifestPath,
-            loader: g.loader as Import | undefined,
-            isPage: false,
-        })),
-    ];
-
-    await Promise.all(
-        loaderTargets.map(async ({ manifestPath, loader, isPage }) => {
-            if (!loader) return;
-            const { loader: loaderFn } = await getCachedModule<{ loader: any }>(
-                loader,
-            );
-            if (!loaderFn) return;
-            // Deferred loaders are left unresolved: report the hole and let the
-            // client stream it in via `/__solidstep_loader` under <Suspense>.
-            if (loaderFn.options?.type === 'defer') {
-                deferredKeys.push(manifestPath);
-                return;
-            }
-            loaderData[manifestPath] = await runSequentialLoader(
-                loaderFn,
-                manifestPath,
-                req,
-                isPage,
-            );
-        }),
-    );
-
-    // Merge metadata in tree order (root layout → leaf layout → page), so the
-    // page wins ties — matching `render()`'s precedence.
-    let meta: Meta = {};
-    const metaTargets: (Import | undefined)[] = [
-        ...entry.layouts.map((l) => l.generateMeta as Import | undefined),
-        entry.mainPage.generateMeta as Import | undefined,
-    ];
-    for (const generateMetaImport of metaTargets) {
-        if (!generateMetaImport) continue;
-        const { generateMeta } = await getCachedModule<{ generateMeta: any }>(
-            generateMetaImport,
-        );
-        if (typeof generateMeta === 'function') {
-            const metaData = await generateMeta({ req, cspNonce });
-            if (metaData) meta = { ...meta, ...metaData };
-        }
-    }
-
-    return { loaderData, deferredKeys, meta };
-};
-
-/**
- * Soft-navigation data endpoint. Matches `?url=<pathname+search>` and returns a
- * seroval-serialized **envelope** describing how the client should render that
- * route. Redirects/errors/not-found are encoded in the envelope (not as HTTP
- * status) so a client `fetch` doesn't transparently follow or fail. Returns
- * `null` on a malformed request (→ 400).
- */
-const serveRouteData = async (
-    req: Request,
-    cspNonce?: string,
-): Promise<string | null> => {
-    const reqUrl = new URL(req.url);
-    const target = reqUrl.searchParams.get('url');
-    if (!target) return null;
-
-    if (!routeManifest) {
-        const m = await createRouteManifest();
-        routeManifest = m.rootNode;
-        metadataManifest = m.metadataMap;
-    }
-
-    const targetUrl = new URL(target, reqUrl.origin);
-    const params = Object.fromEntries(targetUrl.searchParams);
-    const ser = (value: unknown) =>
-        serialize(value, { plugins: SEROVAL_PLUGINS });
-
-    const match = matchRoute(routeManifest, targetUrl.pathname);
-    if (!match) {
-        return ser({ type: 'not-found' });
-    }
-    if (match.handler.type !== 'page') {
-        // API route — the client must hard-navigate to it.
-        return ser({ type: 'route' });
-    }
-
-    const entry = match.handler as RoutePageHandler;
-    const routeParams = match.params || {};
-    // Run loaders against the target URL so params/search + cache keys are right.
-    const pageReq = new Request(targetUrl.toString(), { headers: req.headers });
-
-    try {
-        const { loaderData, deferredKeys, meta } = await resolveRouteData(
-            entry,
-            pageReq,
-            cspNonce,
-        );
-        return ser({
-            type: 'page',
-            manifestPath: entry.mainPage.manifestPath,
-            params: routeParams,
-            searchParams: params,
-            loaderData,
-            deferredKeys,
-            meta,
-        });
-    } catch (err: any) {
-        if (err instanceof RedirectError || err?.name === 'RedirectError') {
-            return ser({ type: 'redirect', location: err.message });
-        }
-        // The page loader threw: render the route's error boundary client-side
-        // if one exists, otherwise surface a not-found.
-        if (entry.errorPage) {
-            return ser({
-                type: 'error',
-                errorPageManifest: entry.errorPage.manifestPath,
-                params: routeParams,
-                searchParams: params,
-                message: err instanceof Error ? err.message : String(err),
-            });
-        }
-        return ser({ type: 'not-found' });
-    }
-};
-
-// ISR entries never hard-expire (~10y) so a stale artifact is always served
-// while it regenerates in the background.
-const ISR_SWR_MAX = 1000 * 60 * 60 * 24 * 365 * 10;
-
-// Regenerate an ISR page by self-fetching it with the bypass header (so the
-// handler renders it fresh), then refresh the cached artifact.
-const regenerateIsr = async (
-    origin: string,
-    pathname: string,
-    revalidate: number,
-    tags?: string[],
-): Promise<string> => {
-    const res = await fetchServer(
-        origin + pathname,
-        {
-            method: 'GET',
-            headers: { [ISR_BYPASS_HEADER]: '1' },
-            MAX_FETCH_TIME: 30_000,
-        },
-        false,
-    );
-    const html = await res.text();
-    await setCacheWithOptions(`isr:${pathname}`, html, {
-        ttl: revalidate * 1000,
-        swr: ISR_SWR_MAX,
-        tags,
-    });
-    return html;
-};
-
-/**
- * Serve an ISR page's cached full-HTML artifact with stale-while-revalidate:
- * fresh hits return immediately; stale hits return the stale artifact and kick
- * off one coalesced background regeneration; a cold miss renders on demand.
- */
-const serveIsr = async (
-    origin: string,
-    pathname: string,
-    revalidate: number,
-    tags?: string[],
-): Promise<string> => {
-    const key = `isr:${pathname}`;
-    const entry = await getCacheEntry<string>(key);
-    if (entry) {
-        if (entry.staleAt === null || Date.now() < entry.staleAt) {
-            return entry.value;
-        }
-        singleFlight(key, () =>
-            regenerateIsr(origin, pathname, revalidate, tags),
-        ).catch(() => undefined);
-        return entry.value;
-    }
-    return singleFlight(key, () =>
-        regenerateIsr(origin, pathname, revalidate, tags),
-    );
-};
-
-// Shape of `prerender-manifest.json` written by the build crawler into the
-// server output directory.
-type PrerenderManifest = {
-    isr?: {
-        pathname: string;
-        revalidate: number;
-        tags?: string[];
-        file: string;
-    }[];
-};
-
-// Seed prerendered ISR artifacts into the cache so the first request after a
-// (re)start serves the build-time HTML, then revalidates per its interval.
-const seedIsrFromManifest = async (serverDir: string): Promise<void> => {
-    let raw: string;
-    try {
-        raw = await readFile(`${serverDir}/prerender-manifest.json`, 'utf-8');
-    } catch {
-        return; // no ISR pages were prerendered
-    }
-    let manifest: PrerenderManifest;
-    try {
-        manifest = JSON.parse(raw);
-    } catch {
-        return;
-    }
-    for (const entry of manifest.isr ?? []) {
-        try {
-            const html = await readFile(`${serverDir}/${entry.file}`, 'utf-8');
-            await setCacheWithOptions(`isr:${entry.pathname}`, html, {
-                ttl: (entry.revalidate || 60) * 1000,
-                swr: ISR_SWR_MAX,
-                tags: entry.tags,
-            });
-        } catch {
-            // Skip a missing/unreadable artifact.
-        }
-    }
-};
-
-const template = `
-    <!DOCTYPE html>
-    <html lang="en">
-    <head><!--app-head--></head>
-    <!--app-body-->
-    </html>
-`;
-
-const render = async ({
-    toRender,
-    entry,
-    routeParams,
-    searchParams,
-    req,
-    pageOptions,
-    cspNonce,
-    error,
-}: {
-    toRender: 'main' | 'loading' | 'error' | 'not-found';
-    entry: RoutePageHandler;
-    routeParams: Record<string, string | string[]>;
-    searchParams: Record<string, string>;
-    req: Request;
-    pageOptions: Record<string, any>;
-    cspNonce?: string;
-    error?: Error;
-}) => {
-    const url = new URL(req.url);
-    // SSG (`static`), ISR, and PPR pages have their own artifact/ISR cache (or a
-    // shell artifact); plain dynamic pages are cached only when they opt in with
-    // a positive `cache.ttl`. The key includes the query string so `?q=a` and
-    // `?q=b` don't collide. See `utils/page-cache`.
-    const isPPR = pageOptions?.render === 'ppr';
-    const shouldCache = shouldCachePage(pageOptions);
-    const cacheKey = pageCacheKey(url);
-    const cachedEntry = shouldCache
-        ? await getCache<{
-              rendered: string;
-              documentMeta: Meta;
-              documentAssets: any[];
-              loaderData: Record<string, any>;
-          }>(cacheKey)
-        : null;
-
-    if (cachedEntry && toRender === 'main') {
-        return {
-            rendered: cachedEntry.rendered,
-            documentMeta: cachedEntry.documentMeta,
-            documentAssets: cachedEntry.documentAssets,
-            loaderData: cachedEntry.loaderData,
-        };
-    }
-
-    type CacheOptions = {
-        ttl?: number;
-        swr?: number;
-        tags?: string[];
-    };
-    let meta: Meta = {};
-    const loaderData: Record<string, any> = {};
-    const clientManifest = getManifest('client');
-    const assets: any[] = [];
-
-    // Select the page variant being rendered up front so its loader can be
-    // pre-resolved alongside the layout loaders.
-    const pageToRender: any =
-        toRender === 'loading'
-            ? entry.loadingPage
-            : toRender === 'error'
-              ? entry.errorPage
-              : toRender === 'not-found'
-                ? entry.notFoundPage
-                : entry.mainPage;
-
-    // Run every layout loader and the page loader concurrently instead of
-    // sequentially down the layout chain. Results are keyed by manifestPath and
-    // applied in tree order below, so loaderData ordering and per-node data are
-    // unchanged — only the awaits now overlap.
-    const loaderTargets: { manifestPath: string; loader: any }[] = [];
-    for (const layout of entry.layouts) {
-        if (layout.loader) {
-            loaderTargets.push({
-                manifestPath: layout.manifestPath,
-                loader: layout.loader,
-            });
-        }
-    }
-    if (pageToRender?.loader) {
-        loaderTargets.push({
-            manifestPath: pageToRender.manifestPath,
-            loader: pageToRender.loader,
-        });
-    }
-    // A `$loader` import is created for every layout/page node, even when the
-    // file exports no loader — in that case the picked module is empty and has
-    // no `loader` export, so we skip it. Only nodes whose loader actually ran
-    // get an entry here, which is how the closures below decide whether to
-    // populate loaderData (matching the previous in-closure behavior).
-    const resolvedLoaderData = new Map<string, any>();
-    // Deferred loaders (`type: 'defer'`) are started but NOT awaited here; their
-    // promise is handed to a Solid resource so the component can stream it in
-    // under `<Suspense>`. Sequential loaders are awaited as before.
-    const deferredLoaderData = new Map<string, Promise<any>>();
-    await Promise.all(
-        loaderTargets.map(async ({ manifestPath, loader }) => {
-            const { loader: loaderFn } = await getCachedModule<{ loader: any }>(
-                loader,
-            );
-            if (!loaderFn) return;
-            // Only the page loader supports `defer` for now; layout loaders are
-            // always awaited (sequential).
-            const isDeferred =
-                loaderFn.options?.type === 'defer' &&
-                manifestPath === pageToRender?.manifestPath;
-            if (isDeferred) {
-                // PPR: don't run the loader at build/shell time — leave the hole
-                // pending so `renderToString` emits its fallback. The client
-                // fetches the data and fills it in.
-                if (isPPR) {
-                    deferredLoaderData.set(
-                        manifestPath,
-                        new Promise<any>(() => undefined),
-                    );
-                    return;
-                }
-                const pending = getCachedLoaderData(
-                    loaderFn,
-                    manifestPath,
-                    req,
-                );
-                // Swallow rejections here; the resource created from this promise
-                // re-observes it and routes the error to a Suspense/ErrorBoundary.
-                pending.catch(() => undefined);
-                deferredLoaderData.set(manifestPath, pending);
-                return;
-            }
-            // Isolate sequential loader failures: a layout/group loader that
-            // throws yields a serializable error sentinel (siblings still
-            // render); only the page loader re-throws to the route error page.
-            const data = await runSequentialLoader(
-                loaderFn,
-                manifestPath,
-                req,
-                manifestPath === pageToRender?.manifestPath,
-            );
-            resolvedLoaderData.set(manifestPath, data);
-        }),
-    );
-    const hasDeferred = deferredLoaderData.size > 0;
-    // Set by the group loop below when a group has a loading/error boundary or a
-    // deferred loader — such routes also take the streaming path.
-    let hasStreamingGroup = false;
-
-    const compose = entry.layouts.reduceRight(
-        (children, layout, index) => async () => {
-            const moduleSrc = `${layout.layout.src}&pick=$css`;
-            const moduleAssets =
-                await clientManifest.inputs[moduleSrc].assets();
-            assets.push(...moduleAssets);
-            const { default: layoutModule } = await getCachedModule<{
-                default: any;
-            }>(layout.layout);
-            const { generateMeta: generateMetaPage } = layout.generateMeta
-                ? await getCachedModule<{ generateMeta: any }>(
-                      layout.generateMeta,
-                  )
-                : { generateMeta: null };
-            let data = {};
-            if (generateMetaPage) {
-                const metaData = await generateMetaPage({
-                    req,
-                    cspNonce,
-                });
-                if (metaData) {
-                    meta = {
-                        ...meta,
-                        ...metaData,
-                    };
-                }
-            }
-            if (resolvedLoaderData.has(layout.manifestPath)) {
-                data = resolvedLoaderData.get(layout.manifestPath);
-                loaderData[layout.manifestPath] = data;
-            }
-            const slots: Record<string, any> = {};
-            const slotPromises: any[] = [children()];
-            if (index === entry.layouts.length - 1) {
-                // last layout, we can render slots
-                const groups = entry.groups || {};
-                for (const [groupName, group] of Object.entries(groups)) {
-                    slotPromises.push(
-                        (async () => {
-                            const slotName = groupName.replace('@', '');
-                            const moduleSrc = `${group.page.src}&pick=$css`;
-                            const moduleAssets =
-                                await clientManifest.inputs[moduleSrc].assets();
-                            assets.push(...moduleAssets);
-                            const { default: groupPage } =
-                                await getCachedModule<{ default: any }>(
-                                    group.page,
-                                );
-                            const { loader: groupLoader } = group.loader
-                                ? await getCachedModule<{ loader: any }>(
-                                      group.loader,
-                                  )
-                                : { loader: null };
-
-                            const groupDeferred =
-                                groupLoader?.options?.type === 'defer';
-                            const needsWrap =
-                                !!group.loadingPage ||
-                                !!group.errorPage ||
-                                groupDeferred;
-
-                            // Plain group (no boundary): await its loader and
-                            // pass the data directly, exactly as before.
-                            if (!needsWrap) {
-                                let data: any = {};
-                                if (groupLoader) {
-                                    // Isolate: a failing plain-group loader
-                                    // yields a sentinel rather than taking down
-                                    // the whole render.
-                                    data = await runSequentialLoader(
-                                        groupLoader,
-                                        group.manifestPath,
-                                        req,
-                                        false,
-                                    );
-                                    loaderData[group.manifestPath] = data;
-                                }
-                                slots[slotName] = () =>
-                                    groupPage({
-                                        routeParams,
-                                        searchParams,
-                                        loaderData: data,
-                                    });
-                                return;
-                            }
-
-                            // Boundary group: render via <Suspense>/<ErrorBoundary>
-                            // so its loading.tsx/error.tsx isolate this slot.
-                            hasStreamingGroup = true;
-                            let GroupLoading: any = null;
-                            let GroupError: any = null;
-                            if (group.loadingPage) {
-                                const src = `${group.loadingPage.src}&pick=$css`;
-                                assets.push(
-                                    ...(await clientManifest.inputs[
-                                        src
-                                    ].assets()),
-                                );
-                                GroupLoading = (
-                                    await getCachedModule<{ default: any }>(
-                                        group.loadingPage,
-                                    )
-                                ).default;
-                            }
-                            if (group.errorPage) {
-                                const src = `${group.errorPage.src}&pick=$css`;
-                                assets.push(
-                                    ...(await clientManifest.inputs[
-                                        src
-                                    ].assets()),
-                                );
-                                GroupError = (
-                                    await getCachedModule<{ default: any }>(
-                                        group.errorPage,
-                                    )
-                                ).default;
-                            }
-                            // A boundary group with a loader streams its data in
-                            // as a resource (so loader errors reach the
-                            // ErrorBoundary and hydrate consistently).
-                            let pending: Promise<any> | null = null;
-                            if (groupLoader) {
-                                if (isPPR && groupDeferred) {
-                                    // PPR hole: leave pending so the shell shows
-                                    // the fallback; the client fetches it.
-                                    pending = new Promise<any>(() => undefined);
-                                } else {
-                                    pending = getCachedLoaderData(
-                                        groupLoader,
-                                        group.manifestPath,
-                                        req,
-                                    );
-                                    pending.catch(() => undefined);
-                                }
-                                deferredLoaderData.set(
-                                    group.manifestPath,
-                                    pending,
-                                );
-                            }
-                            slots[slotName] = () => {
-                                const inner = () => {
-                                    if (!pending) {
-                                        return groupPage({
-                                            routeParams,
-                                            searchParams,
-                                            loaderData: {},
-                                        });
-                                    }
-                                    const resource =
-                                        createDeferredResource(pending);
-                                    return createComponent(Suspense, {
-                                        fallback: GroupLoading
-                                            ? createComponent(GroupLoading, {
-                                                  routeParams,
-                                                  searchParams,
-                                              })
-                                            : undefined,
-                                        get children() {
-                                            return groupPage({
-                                                routeParams,
-                                                searchParams,
-                                                loaderData: resource,
-                                            });
-                                        },
-                                    });
-                                };
-                                if (GroupError) {
-                                    return createComponent(ErrorBoundary, {
-                                        fallback: (err: any) =>
-                                            createComponent(GroupError, {
-                                                error: err,
-                                                routeParams,
-                                                searchParams,
-                                            }),
-                                        get children() {
-                                            return inner();
-                                        },
-                                    });
-                                }
-                                return inner();
-                            };
-                        })(),
-                    );
-                }
-            }
-            const [childrenRendered] = await Promise.all(slotPromises);
-            return () =>
-                layoutModule({
-                    children: childrenRendered,
-                    routeParams,
-                    searchParams,
-                    loaderData: data,
-                    slots: slots,
-                    locals: {
-                        cspNonce: cspNonce,
-                    },
-                });
-        },
-        async () => {
-            const moduleSrc = `${pageToRender.page.src}&pick=$css`;
-            const moduleAssets =
-                await clientManifest.inputs[moduleSrc].assets();
-            assets.push(...moduleAssets);
-            const { default: page } = await getCachedModule<{ default: any }>(
-                pageToRender.page,
-            );
-            const { generateMeta } = pageToRender.generateMeta
-                ? await getCachedModule<{ generateMeta: any }>(
-                      pageToRender.generateMeta,
-                  )
-                : { generateMeta: null };
-
-            let data = {};
-            if (resolvedLoaderData.has(pageToRender.manifestPath)) {
-                data = resolvedLoaderData.get(pageToRender.manifestPath);
-                loaderData[pageToRender.manifestPath] = data;
-            }
-            if (generateMeta) {
-                const metaData = await generateMeta({
-                    req,
-                    cspNonce,
-                });
-                if (metaData) {
-                    meta = {
-                        ...meta,
-                        ...metaData,
-                    };
-                }
-            }
-            const props: any = {
-                routeParams,
-                searchParams,
-                loaderData: data,
-                locals: {
-                    cspNonce: cspNonce,
-                },
-            };
-            if (toRender === 'error') {
-                props.error = error;
-            }
-
-            // Deferred page loader: stream its data in under <Suspense> instead
-            // of blocking the shell. `loading.tsx` (if present) is the fallback.
-            const deferredPromise = deferredLoaderData.get(
-                pageToRender.manifestPath,
-            );
-            if (deferredPromise) {
-                let LoadingFallback: any = null;
-                if (entry.loadingPage) {
-                    const loadingSrc = `${entry.loadingPage.page.src}&pick=$css`;
-                    const loadingAssets =
-                        await clientManifest.inputs[loadingSrc].assets();
-                    assets.push(...loadingAssets);
-                    const { default: lf } = await getCachedModule<{
-                        default: any;
-                    }>(entry.loadingPage.page);
-                    LoadingFallback = lf;
-                }
-                return () => {
-                    const resource = createDeferredResource(deferredPromise);
-                    return createComponent(Suspense, {
-                        fallback: LoadingFallback
-                            ? createComponent(LoadingFallback, {
-                                  routeParams,
-                                  searchParams,
-                              })
-                            : undefined,
-                        get children() {
-                            return page({ ...props, loaderData: resource });
-                        },
-                    });
-                };
-            }
-            return () => page(props);
-        },
-    );
-
-    const composed = await compose();
-
-    // Deferred route: hand the composed tree back to the caller to stream via
-    // `renderToStream` (the page suspends on its deferred resource). Streamed
-    // responses are not page-cached. `meta`/`assets` are fully populated by the
-    // awaited `compose()` above, so the caller can emit the <head> first.
-    // PPR renders a synchronous shell (holes stay pending → fallback) via
-    // renderToString below; it does NOT stream. Other deferred routes stream.
-    if ((hasDeferred || hasStreamingGroup) && toRender === 'main' && !isPPR) {
-        return {
-            deferred: true as const,
-            composed,
-            documentMeta: meta,
-            documentAssets: assets,
-            loaderData,
-            deferredKeys: [...deferredLoaderData.keys()],
-        };
-    }
-
-    const rendered = await renderToString(() => composed());
-
-    // PPR shell: return the shell HTML plus the hole manifest paths so the
-    // handler can tell the client which holes to fetch and fill.
-    if (isPPR && toRender === 'main') {
-        return {
-            rendered,
-            documentMeta: meta,
-            documentAssets: assets,
-            loaderData,
-            pprHoles: [...deferredLoaderData.keys()],
-        };
-    }
-
-    if (toRender === 'main' && shouldCache) {
-        const options = pageOptions?.cache as CacheOptions | undefined;
-        await setCacheWithOptions(
-            cacheKey,
-            {
-                rendered: rendered,
-                documentMeta: meta,
-                documentAssets: assets,
-                loaderData: loaderData,
-            },
-            {
-                ttl: options?.ttl ? options.ttl : 0,
-                swr: options?.swr,
-                tags: options?.tags,
-            },
-        );
-    }
-
-    return {
-        rendered: rendered,
-        documentMeta: meta,
-        documentAssets: assets,
-        loaderData: loaderData,
-    };
-};
-
-// Whether a matched page route needs the streaming (renderToStream) path: the
-// page loader is deferred, or any parallel-route group has a loading/error
-// boundary or a deferred loader. Loader modules are cached, so imports are cheap.
-const routeNeedsStreaming = async (
-    entry: RoutePageHandler,
-): Promise<boolean> => {
-    const pageLoader = entry.mainPage.loader;
-    if (pageLoader) {
-        const { loader: loaderFn } = await getCachedModule<{ loader: any }>(
-            pageLoader as Import,
-        );
-        if (loaderFn?.options?.type === 'defer') return true;
-    }
-    for (const group of Object.values(entry.groups || {})) {
-        if (group.loadingPage || group.errorPage) return true;
-        if (group.loader) {
-            const { loader: loaderFn } = await getCachedModule<{ loader: any }>(
-                group.loader as Import,
-            );
-            if (loaderFn?.options?.type === 'defer') return true;
-        }
-    }
-    return false;
-};
-
-let routeManifest: RouteNode | null = null;
-let metadataManifest: Map<string, MetadataRoute> | null = null;
-type Manifest = ReturnType<typeof getManifest>;
-let clientManifest: Manifest | null = null;
 
 const onStart = async () => {
     // The built server's `import.meta.url` is not always a usable absolute file
@@ -1279,8 +92,7 @@ const onStart = async () => {
     }
     try {
         const manifest = await createRouteManifest();
-        routeManifest = manifest.rootNode;
-        metadataManifest = manifest.metadataMap;
+        setRouteManifest(manifest.rootNode, manifest.metadataMap);
         let sharedConfig = (globalThis as any).__SOLIDSTEP_CONFIG__;
         if (!sharedConfig) {
             const configContent = await readFile(
@@ -1329,9 +141,11 @@ instrumentationReady = onStart();
  * request method and run the request/response/error instrumentation hooks.
  */
 const handleApiRoute = async (
+    // `event` is vinxi's H3Event, deliberately typed wider than the published
+    // type (e.g. `event.locals`), matching the outer handler's usage.
     event: any,
     req: Request,
-    matched: any,
+    matched: ApiRouteHandler,
     params: Record<string, string | string[]>,
     searchParams: Record<string, string>,
 ) => {
@@ -1345,17 +159,20 @@ const handleApiRoute = async (
     await safeExecuteHook('onRequest', inst?.onRequest, req, reqCtx);
 
     try {
-        const routeModule = await getCachedModule<Record<string, any>>(
+        const routeModule = await getCachedModule<RouteApiModule>(
             matched.handler,
         );
         const reqMethod = req.method?.toUpperCase();
         if (reqMethod) {
             const methodHandler = routeModule[reqMethod];
             if (typeof methodHandler === 'function') {
-                const result = await methodHandler(req, {
-                    params: params,
-                    searchParams: searchParams,
-                });
+                const result = await (methodHandler as RouteMethodHandler)(
+                    req,
+                    {
+                        params: params,
+                        searchParams: searchParams,
+                    },
+                );
                 const respCtx = createResponseContext(
                     reqCtx,
                     getResponseStatus(event) || 200,
@@ -1416,15 +233,9 @@ const handler = eventHandler(async (event) => {
             return JSON.stringify(await collectPrerenderTargets());
         }
 
-        if (!routeManifest) {
-            const manifest = await createRouteManifest();
-            routeManifest = manifest.rootNode;
-            metadataManifest = manifest.metadataMap;
-        }
+        const routeManifest = await ensureRouteManifest();
 
-        if (!clientManifest) {
-            clientManifest = getManifest('client');
-        }
+        const clientManifest = ensureClientManifest();
 
         // PPR hole data: the client fetches a deferred loader's data here to fill
         // a partially-prerendered page's dynamic holes.
@@ -1460,7 +271,7 @@ const handler = eventHandler(async (event) => {
 
         // Dynamic metadata files (robots.txt / sitemap.xml / manifest / llms.txt).
         // A matching static file in public/ is served by the static router first.
-        const metaRoute = metadataManifest?.get(pathnamePart);
+        const metaRoute = getMetadataManifest()?.get(pathnamePart);
         if (metaRoute) {
             const mod = await getCachedModule<{
                 default?: (req: Request) => unknown | Promise<unknown>;
@@ -1510,11 +321,8 @@ const handler = eventHandler(async (event) => {
                 const optionsImport = (matched as RoutePageHandler).mainPage
                     .options;
                 const pageOptions = optionsImport
-                    ? (
-                          await getCachedModule<{ options?: PrerenderOptions }>(
-                              optionsImport,
-                          )
-                      ).options
+                    ? (await getCachedModule<OptionsModule>(optionsImport))
+                          .options
                     : undefined;
                 if (pageOptions?.render === 'isr') {
                     const revalidate =
@@ -1571,10 +379,14 @@ const handler = eventHandler(async (event) => {
                         try {
                             if (!matched) {
                                 try {
+                                    // Non-null assertion is compile-time only:
+                                    // a missing match throws the same way the
+                                    // previous `match.handler` access did (the
+                                    // outer catch maps it to a 404).
                                     const match = matchRoute(
-                                        routeManifest as any,
+                                        routeManifest,
                                         '/',
-                                    ) as any;
+                                    )!;
                                     const notFoundEntry = match.handler;
                                     if (!notFoundEntry) {
                                         throw new Error(
@@ -1586,7 +398,7 @@ const handler = eventHandler(async (event) => {
                                         documentMeta,
                                         documentAssets,
                                         loaderData,
-                                    } = await render({
+                                    } = (await render({
                                         toRender: 'not-found',
                                         entry: notFoundEntry as RoutePageHandler,
                                         routeParams: {},
@@ -1594,7 +406,7 @@ const handler = eventHandler(async (event) => {
                                         req: req,
                                         pageOptions: {},
                                         cspNonce,
-                                    });
+                                    })) as RenderPlainResult;
                                     assets.push(...documentAssets);
                                     clientHydrationScript =
                                         buildHydrationScript({
@@ -1622,17 +434,13 @@ const handler = eventHandler(async (event) => {
                                 const { options } = (
                                     matched as RoutePageHandler
                                 ).mainPage.options
-                                    ? await getCachedModule<{ options: any }>(
+                                    ? await getCachedModule<OptionsModule>(
                                           (matched as RoutePageHandler).mainPage
                                               .options as Import,
                                       )
                                     : { options: {} };
                                 if (options?.responseHeaders) {
-                                    const headers =
-                                        options.responseHeaders as Record<
-                                            string,
-                                            string
-                                        >;
+                                    const headers = options.responseHeaders;
                                     for (const [key, value] of Object.entries(
                                         headers,
                                     )) {
@@ -1654,9 +462,9 @@ const handler = eventHandler(async (event) => {
                                         req,
                                         pageOptions: options,
                                         cspNonce,
-                                    })) as any;
+                                    })) as RenderPprResult;
                                     const assetsHtml = renderAssetsToHtml(
-                                        result.documentAssets as any[],
+                                        result.documentAssets,
                                         cspNonce,
                                     );
                                     const headHtml = buildHeadHtml(
@@ -1706,9 +514,9 @@ const handler = eventHandler(async (event) => {
                                         req,
                                         pageOptions: options,
                                         cspNonce,
-                                    })) as any;
+                                    })) as RenderDeferredResult;
                                     const assetsHtml = renderAssetsToHtml(
-                                        result.documentAssets as any[],
+                                        result.documentAssets,
                                         cspNonce,
                                     );
                                     const headHtml = buildHeadHtml(
@@ -1775,7 +583,7 @@ const handler = eventHandler(async (event) => {
                                         rendered,
                                         documentMeta,
                                         documentAssets,
-                                    } = await render({
+                                    } = (await render({
                                         toRender: 'loading',
                                         entry: matched as RoutePageHandler,
                                         routeParams: params,
@@ -1783,7 +591,7 @@ const handler = eventHandler(async (event) => {
                                         req: req,
                                         pageOptions: options,
                                         cspNonce,
-                                    });
+                                    })) as RenderPlainResult;
                                     const assetsHtml = renderAssetsToHtml(
                                         assets.concat(documentAssets),
                                         cspNonce,
@@ -1813,7 +621,17 @@ const handler = eventHandler(async (event) => {
                                     // data and race the main hydration below.)
                                     loading = true;
                                 } catch (e) {
-                                    // skip
+                                    // The loading boundary failed to render; we
+                                    // still proceed to render the main page, but
+                                    // surface this so authors notice a broken
+                                    // loading.tsx.
+                                    logger.warn(
+                                        {
+                                            route: pathnamePart,
+                                            err: String(e),
+                                        },
+                                        'Failed to render loading boundary (loading.tsx)',
+                                    );
                                 }
 
                                 const {
@@ -1821,7 +639,7 @@ const handler = eventHandler(async (event) => {
                                     documentMeta,
                                     documentAssets,
                                     loaderData,
-                                } = await render({
+                                } = (await render({
                                     toRender: 'main',
                                     entry: matched as RoutePageHandler,
                                     routeParams: params,
@@ -1829,7 +647,7 @@ const handler = eventHandler(async (event) => {
                                     req: req,
                                     pageOptions: options,
                                     cspNonce,
-                                });
+                                })) as RenderPlainResult;
                                 assets.push(...documentAssets);
                                 clientHydrationScript = buildHydrationScript({
                                     entryPath,
@@ -1886,7 +704,7 @@ const handler = eventHandler(async (event) => {
                                     documentMeta,
                                     documentAssets,
                                     loaderData,
-                                } = await render({
+                                } = (await render({
                                     toRender: 'error',
                                     entry: matched as RoutePageHandler,
                                     routeParams: params,
@@ -1895,7 +713,7 @@ const handler = eventHandler(async (event) => {
                                     pageOptions: {},
                                     cspNonce,
                                     error: e1,
-                                });
+                                })) as RenderPlainResult;
                                 assets.push(...documentAssets);
                                 clientHydrationScript = buildHydrationScript({
                                     entryPath,
@@ -1926,19 +744,77 @@ const handler = eventHandler(async (event) => {
                             push(
                                 `<template id="__page_html__">${html}</template>`,
                             );
+                            // Swap the transient loading shell for the real page
+                            // without wiping `<head>`. Wiping `head.innerHTML`
+                            // (then re-appending scripts) drops/reorders head
+                            // state and is brittle under CSP and streamed assets.
+                            // Instead we parse the new head nodes (title/meta/
+                            // link/style only — `renderAssetsToHtml(..., false)`
+                            // omits scripts) and merge them in explicitly,
+                            // leaving every existing <script> (hydration/manifest)
+                            // untouched.
                             push(`
                         <script ${cspNonce ? `nonce="${cspNonce}"` : ''}>
-                        const head = document.querySelector('head');
-                        const scripts = Array.from(head.querySelectorAll('script'));
-                        head.innerHTML = ${escapeScript(JSON.stringify(generateHtmlHead(meta) + assetsHtml))};
-                        scripts.forEach(script => {
-                            head.appendChild(script);
-                        });
-                        document.querySelector('script[data-hydration="loading"]')?.remove();
-                        const loading = document.querySelector('body');
-                        const template = document.getElementById('__page_html__');
-                        loading.innerHTML = template.innerHTML;
-                        template.remove();
+                        (function () {
+                            const head = document.head;
+                            const tpl = document.createElement('template');
+                            tpl.innerHTML = ${escapeScript(JSON.stringify(generateHtmlHead(meta) + assetsHtml))};
+                            const incoming = Array.from(tpl.content.childNodes);
+                            const metaKey = (el) =>
+                                el.getAttribute('charset') !== null
+                                    ? 'charset'
+                                    : el.getAttribute('name')
+                                      ? 'name=' + el.getAttribute('name')
+                                      : el.getAttribute('property')
+                                        ? 'property=' + el.getAttribute('property')
+                                        : el.getAttribute('http-equiv')
+                                          ? 'http-equiv=' + el.getAttribute('http-equiv')
+                                          : null;
+                            for (const node of incoming) {
+                                if (node.nodeType !== 1) continue;
+                                const tag = node.tagName;
+                                if (tag === 'TITLE') {
+                                    document.title = node.textContent || '';
+                                    continue;
+                                }
+                                if (tag === 'META') {
+                                    const key = metaKey(node);
+                                    const existing = key
+                                        ? head.querySelector('meta[' + (key === 'charset' ? 'charset' : key.replace('=', '="') + '"') + ']')
+                                        : null;
+                                    if (existing) {
+                                        existing.replaceWith(node);
+                                    } else {
+                                        head.appendChild(node);
+                                    }
+                                    continue;
+                                }
+                                if (tag === 'LINK') {
+                                    const href = node.getAttribute('href');
+                                    if (
+                                        href &&
+                                        head.querySelector('link[href="' + href.replace(/"/g, '\\\\"') + '"]')
+                                    ) {
+                                        continue;
+                                    }
+                                    head.appendChild(node);
+                                    continue;
+                                }
+                                // <style> and any other head node: append.
+                                head.appendChild(node);
+                            }
+                            document
+                                .querySelector('script[data-hydration="loading"]')
+                                ?.remove();
+                            const template = document.getElementById('__page_html__');
+                            if (template) {
+                                const body = document.body;
+                                const next = document.createElement('template');
+                                next.innerHTML = template.innerHTML;
+                                body.replaceChildren(...next.content.childNodes);
+                                template.remove();
+                            }
+                        })();
                         </script>
                     `);
                             push(manifestHtml);

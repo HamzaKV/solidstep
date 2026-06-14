@@ -18,7 +18,10 @@ import {
 
 export type { ClientImport, ClientPageHandler } from './client-manifest-core';
 
+// Lazily-built, process-wide client route trie. Built once from the real client
+// `fileRoutes` on first match and reused for every subsequent navigation.
 let manifest: ReturnType<typeof buildManifest> | null = null;
+/** Build (once) and return the memoized client route trie. */
 const getManifestTrie = () => {
     if (!manifest) {
         manifest = buildManifest(fileRoutes as unknown as ClientFileRoute[]);

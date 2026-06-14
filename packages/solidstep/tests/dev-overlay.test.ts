@@ -25,6 +25,17 @@ describe('renderDevOverlayDocument', () => {
         expect(html).toContain('plain failure');
         expect(html).not.toContain('class="ss-req"');
     });
+
+    it('falls back to defaults for an error with empty name/message/stack', () => {
+        const err = new Error('');
+        err.name = '';
+        err.stack = '';
+        const html = renderDevOverlayDocument(err);
+        // name falls back to 'Error'; empty message/stack render empty.
+        expect(html).toContain('Error — SolidStep (dev)');
+        expect(html).toContain('<div class="ss-msg"></div>');
+        expect(html).toContain('<pre class="ss-stack"></pre>');
+    });
 });
 
 describe('devOverlayClientScript', () => {

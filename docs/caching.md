@@ -57,7 +57,7 @@ const action = async () => {
 };
 ```
 
-2. Using the `revalidatePath` utility to revalidate specific paths and revalidate the frontend DOM - signaling the server action as a Single Flight Mutation query.
+2. Using the `revalidatePath` utility from within a server action. It sets a response header that the client router reads: when the revalidated path matches the route the user is currently on, the router automatically re-fetches that route's loader data + metadata and updates the page **in place** (no full reload, no component remount — local component state is preserved). This is the "single-flight mutation" flow: the mutation and the refreshed data round-trip together. To trigger the same in-place refresh manually (outside a server action), call `useRouter().refresh()` — see [Client Navigation](./routing.md#revalidating-after-a-mutation).
 ```tsx
 import { revalidatePath } from 'solidstep/utils/cache';
 

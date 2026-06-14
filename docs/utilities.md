@@ -107,9 +107,11 @@ export const loader = defineLoader(async () => {
 
 ## Preloading / Prefetching Strategies
 
-SolidStep supports various preloading and prefetching strategies to enhance user experience by loading data and resources ahead of time. This can significantly reduce perceived latency and improve navigation speed within your application. Solidstep does not include any preloading/prefetching by default, but you can implement your own strategies using the built-in fetch utilities and SolidJS features.
+SolidStep supports various preloading and prefetching strategies to enhance user experience by loading data and resources ahead of time. This can significantly reduce perceived latency and improve navigation speed within your application.
 
-Some common strategies include:
+The router has prefetching built in. The [`<Link>`](./routing.md#link) component prefetches a route's data and component modules on hover by default (configurable via `prefetch="viewport" | true | false`), and you can prefetch imperatively with [`prefetchRoute(target)`](./routing.md#programmatic-navigation--router-hooks) from `solidstep/router`. See [Client Navigation](./routing.md#client-navigation) for the full API.
+
+You can also layer additional strategies on top using the built-in fetch utilities and SolidJS features. Some common ones include:
 - **Link Prefetching**: Use the `<link rel="prefetch">` tag to hint the browser to prefetch resources for links that users are likely to click on next.
 - **Using Intersection Observer**: Implement lazy loading and prefetching of data when certain elements come into the viewport.
 - **Using [instant.page](https://instant.page/)**: A small library that preloads pages on hover or touchstart events.

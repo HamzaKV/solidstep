@@ -1,8 +1,33 @@
+/**
+ * Radix-style route trie used by both the server and client routers.
+ *
+ * Routes are inserted by their clean URL path (e.g. `/blog/[slug]`) into a
+ * {@link RouteNode} tree where each path segment is one of three kinds, ordered
+ * by match priority: static (`blog`) → dynamic param (`[slug]`) → catch-all
+ * (`[...rest]` / optional `[[...rest]]`). {@link matchRoute} walks the tree
+ * segment-by-segment, trying static first, then param, then catch-all, so a
+ * concrete route always wins over a more general one. Params collected during
+ * the walk are returned alongside the matched handler.
+ *
+ * The trie is convention-agnostic: it stores arbitrary {@link RouteHandler}s,
+ * which on the server are full page/api handlers and on the client are the
+ * leaner {@link RouteNode}-compatible page handlers (see `client-manifest-core`).
+ */
+
+/** A lazy module reference: its `src` (manifest key) and an `import()` thunk. */
 export type Import = {
     src: string;
     import: any;
 };
 
+/**
+ * Everything the SSR render pipeline needs for a matched page route: the page
+ * component plus its associated loader/meta/options/static-params imports, the
+ * chain of enclosing `layout`s (root → leaf order), the optional
+ * `loading`/`error`/`not-found` boundary pages, and any parallel-route `groups`
+ * (slots) attached at this route. All component/loader references are lazy
+ * {@link Import}s resolved on demand at render time.
+ */
 export type RoutePageHandler = {
     type: 'page';
     mainPage: {
@@ -45,6 +70,10 @@ export type RoutePageHandler = {
     };
 };
 
+/**
+ * A leaf payload stored on a {@link RouteNode}: either an API `route` (a single
+ * `route.ts` handler module) or a {@link RoutePageHandler} for a page route.
+ */
 export type RouteHandler =
     | {
           type: 'route';
@@ -53,8 +82,24 @@ export type RouteHandler =
       }
     | RoutePageHandler;
 
+/** Matched route params: a single value for `[id]`, an array for catch-alls. */
 type Params = Record<string, string | string[]>;
 
+/**
+ * A node in the route trie. Each node has at most three kinds of children,
+ * matched in priority order by {@link matchRoute}:
+ *
+ * - `staticChildren` — literal segments keyed by their exact value (highest
+ *   priority); a node may have many.
+ * - `paramChild` — the single `[name]` dynamic segment, if any; binds one
+ *   segment to `name`.
+ * - `catchAllChild` — the single `[...name]` / `[[...name]]` segment, if any;
+ *   binds the remaining segments to `name`. `optional` marks `[[...name]]`,
+ *   which can also match zero remaining segments.
+ *
+ * `handler` is the route payload terminating at this node (a node may be a pure
+ * intermediate with no handler).
+ */
 export type RouteNode = {
     staticChildren: Map<string, RouteNode>;
 
@@ -72,6 +117,7 @@ export type RouteNode = {
     handler?: RouteHandler;
 };
 
+/** Create an empty trie node (used both for the root and for each child). */
 export const createNode = (): RouteNode => ({
     staticChildren: new Map(),
 });
@@ -96,6 +142,11 @@ type ParseSegment =
           name: string;
       };
 
+/**
+ * Classify one raw path segment by its bracket convention: `[[...x]]` optional
+ * catch-all, `[...x]` required catch-all, `[x]` dynamic param, or otherwise a
+ * static literal. The param/catch-all `name` strips the surrounding brackets.
+ */
 const parseSegment = (segment: string): ParseSegment => {
     // [[...slug]]
     if (segment.startsWith('[[...') && segment.endsWith(']]')) {
@@ -119,6 +170,20 @@ const parseSegment = (segment: string): ParseSegment => {
     return { type: 'static', value: segment };
 };
 
+/**
+ * Insert `handler` at `path` into the trie, creating intermediate nodes as
+ * needed. The path is split on `/` (empty segments dropped) and each segment is
+ * classified by {@link parseSegment}; static segments key into
+ * `staticChildren`, a `[param]` reuses/creates the node's single `paramChild`,
+ * and a catch-all reuses/creates `catchAllChild` and then stops (a catch-all
+ * always consumes the rest of the path). Inserting two routes whose segments
+ * differ only by the param/catch-all *name* reuses the existing child node, so
+ * the first inserted name wins. The handler is assigned to the terminal node.
+ *
+ * @param root - The trie root (from {@link createNode}).
+ * @param path - Clean route path, e.g. `/blog/[slug]` or `/docs/[...path]`.
+ * @param handler - The payload to store at the terminal node.
+ */
 export const insertRoute = (
     root: RouteNode,
     path: string,
@@ -165,11 +230,25 @@ export const insertRoute = (
     node.handler = handler;
 };
 
+/** The matched handler plus the params bound while walking, or `null` on no match. */
 type MatchResult = {
     handler: RouteHandler;
     params: Params;
 } | null;
 
+/**
+ * Match a pathname against the trie, returning the terminal handler and the
+ * params collected along the way. The recursive walk tries children in strict
+ * priority order at each segment — static, then param, then catch-all — and
+ * backtracks (undoing a tentatively-bound param) if a deeper branch dead-ends,
+ * so a fully-static path always beats a param/catch-all alternative. An
+ * optional catch-all (`[[...x]]`) can satisfy the end of the path with an empty
+ * array when no other handler terminates there.
+ *
+ * @param root - The trie root.
+ * @param path - The request pathname (leading/trailing/empty segments ignored).
+ * @returns The {@link MatchResult}, or `null` if nothing matches.
+ */
 export const matchRoute = (root: RouteNode, path: string): MatchResult => {
     const segments = path.split('/').filter(Boolean);
     const params: Params = {};

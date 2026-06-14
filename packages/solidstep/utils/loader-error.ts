@@ -1,4 +1,5 @@
 import { getCachedLoaderData } from './loader-cache';
+import { logger } from './logger';
 
 /**
  * Property key of the JSON-serializable sentinel placed in a node's
@@ -34,9 +35,13 @@ export const runSequentialLoader = async (
         return await getCachedLoaderData(loaderFn, manifestPath, req);
     } catch (err) {
         if (isPageLoader) throw err;
+        const message = err instanceof Error ? err.message : String(err);
+        logger.warn(
+            { manifestPath, err: message },
+            'Layout/group loader failed; rendering with error sentinel',
+        );
         return {
-            [LOADER_ERROR_KEY]:
-                err instanceof Error ? err.message : String(err),
+            [LOADER_ERROR_KEY]: message,
         };
     }
 };
