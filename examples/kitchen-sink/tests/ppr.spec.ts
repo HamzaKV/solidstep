@@ -55,10 +55,9 @@ test.describe('PPR (render: ppr)', () => {
         request,
     }) => {
         const res = await request.get(
-            '/__solidstep_loader?manifest=' +
-                encodeURIComponent('/group/ppr/@now') +
-                '&url=' +
-                encodeURIComponent('/ppr'),
+            `/__solidstep_loader?manifest=${encodeURIComponent(
+                '/group/ppr/@now',
+            )}&url=${encodeURIComponent('/ppr')}`,
         );
         expect(res.status()).toBe(200);
         const body = await res.json();

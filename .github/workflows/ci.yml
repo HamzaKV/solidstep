@@ -39,8 +39,8 @@ jobs:
       - name: Typecheck
         run: pnpm run typecheck
 
-      - name: Unit tests
-        run: pnpm run test
+      - name: Unit tests & coverage
+        run: pnpm run test:coverage
 
       - name: Build framework
         run: pnpm --filter solidstep build

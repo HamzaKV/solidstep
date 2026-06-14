@@ -120,6 +120,7 @@
         "copy-files:root": "copyfiles -u 0 README.md package.json generate/**/* LICENSE CHANGELOG.md ./dist",
         "build": "pnpm clean && tsc && pnpm copy-files:root",
         "test": "vitest run",
+        "test:coverage": "vitest run --coverage",
         "test:watch": "vitest",
         "test:local": "pnpm build && cd ./dist && pnpm link --global",
         "test:local:clean": "pnpm unlink && pnpm clean",

@@ -67,7 +67,11 @@ export interface CacheStore {
     /** Read an entry. Returns `null` on a miss. Does not enforce expiry. */
     get<T>(key: string): MaybePromise<CacheEntry<T> | null>;
     /** Write an entry, computing its deadlines from `options`. */
-    set<T>(key: string, value: T, options?: CacheSetOptions): MaybePromise<void>;
+    set<T>(
+        key: string,
+        value: T,
+        options?: CacheSetOptions,
+    ): MaybePromise<void>;
     /** Remove a single entry. No-op when absent. */
     delete(key: string): MaybePromise<void>;
     /** Remove every entry. */
@@ -233,8 +237,7 @@ export class MemoryCacheStore implements CacheStore {
 // Filesystem adapter
 // ============================================================================
 
-const hashKey = (key: string) =>
-    createHash('sha256').update(key).digest('hex');
+const hashKey = (key: string) => createHash('sha256').update(key).digest('hex');
 
 /**
  * Filesystem-backed cache store. Persists one `seroval`-serialized file per

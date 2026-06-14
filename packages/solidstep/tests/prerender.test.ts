@@ -21,7 +21,9 @@ describe('buildConcretePath', () => {
     });
 
     it('joins static segments', () => {
-        expect(buildConcretePath([s('blog'), s('latest')])).toBe('/blog/latest');
+        expect(buildConcretePath([s('blog'), s('latest')])).toBe(
+            '/blog/latest',
+        );
     });
 
     it('substitutes a string param', () => {
@@ -32,7 +34,9 @@ describe('buildConcretePath', () => {
 
     it('expands a catch-all array into multiple segments', () => {
         expect(
-            buildConcretePath([s('docs'), c('path')], { path: ['a', 'b', 'c'] }),
+            buildConcretePath([s('docs'), c('path')], {
+                path: ['a', 'b', 'c'],
+            }),
         ).toBe('/docs/a/b/c');
     });
 
@@ -69,16 +73,23 @@ describe('hasDynamicSegments', () => {
 
 describe('expandRoute', () => {
     it('returns nothing for a dynamic (non-static/isr) route', () => {
-        expect(expandRoute([s('about')], { render: 'dynamic' }, undefined)).toEqual(
-            [],
-        );
+        expect(
+            expandRoute([s('about')], { render: 'dynamic' }, undefined),
+        ).toEqual([]);
         expect(expandRoute([s('about')], undefined, undefined)).toEqual([]);
     });
 
     it('expands a non-dynamic static route to a single target', () => {
         expect(
             expandRoute([s('about')], { render: 'static' }, undefined),
-        ).toEqual([{ pathname: '/about', render: 'static', revalidate: undefined, tags: undefined }]);
+        ).toEqual([
+            {
+                pathname: '/about',
+                render: 'static',
+                revalidate: undefined,
+                tags: undefined,
+            },
+        ]);
     });
 
     it('defaults the ISR revalidate interval and carries tags', () => {
@@ -99,7 +110,11 @@ describe('expandRoute', () => {
     });
 
     it('honors an explicit ISR revalidate interval', () => {
-        const [target] = expandRoute([s('news')], { render: 'isr', revalidate: 10 }, undefined);
+        const [target] = expandRoute(
+            [s('news')],
+            { render: 'isr', revalidate: 10 },
+            undefined,
+        );
         expect(target.revalidate).toBe(10);
     });
 
@@ -135,11 +150,15 @@ describe('expandRoute', () => {
     });
 
     it('returns nothing for a dynamic route without static params', () => {
-        expect(expandRoute([s('blog'), p('slug')], { render: 'static' }, [])).toEqual(
-            [],
-        );
         expect(
-            expandRoute([s('blog'), p('slug')], { render: 'static' }, undefined),
+            expandRoute([s('blog'), p('slug')], { render: 'static' }, []),
+        ).toEqual([]);
+        expect(
+            expandRoute(
+                [s('blog'), p('slug')],
+                { render: 'static' },
+                undefined,
+            ),
         ).toEqual([]);
     });
 });

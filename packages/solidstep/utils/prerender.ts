@@ -119,7 +119,9 @@ export const expandRoute = (
             : undefined;
 
     if (!hasDynamicSegments(segments)) {
-        return [{ pathname: buildConcretePath(segments), render, revalidate, tags }];
+        return [
+            { pathname: buildConcretePath(segments), render, revalidate, tags },
+        ];
     }
 
     if (!staticParams || staticParams.length === 0) return [];

@@ -8,7 +8,7 @@ test.describe('/__solidstep_route envelope', () => {
         request,
     }) => {
         const res = await request.get(
-            '/__solidstep_route?url=' + encodeURIComponent('/dashboard'),
+            `/__solidstep_route?url=${encodeURIComponent('/dashboard')}`,
         );
         expect(res.status()).toBe(200);
         const body = await res.text();
@@ -22,7 +22,7 @@ test.describe('/__solidstep_route envelope', () => {
         request,
     }) => {
         const res = await request.get(
-            '/__solidstep_route?url=' + encodeURIComponent('/no/such/page'),
+            `/__solidstep_route?url=${encodeURIComponent('/no/such/page')}`,
         );
         expect(res.status()).toBe(200);
         expect(await res.text()).toContain('"not-found"');
@@ -30,7 +30,7 @@ test.describe('/__solidstep_route envelope', () => {
 
     test('returns a route envelope for an API route', async ({ request }) => {
         const res = await request.get(
-            '/__solidstep_route?url=' + encodeURIComponent('/api/health'),
+            `/__solidstep_route?url=${encodeURIComponent('/api/health')}`,
         );
         expect(res.status()).toBe(200);
         expect(await res.text()).toContain('"route"');

@@ -22,6 +22,7 @@
             ".sisyphus/",
             "*.json",
             "payload-types.ts",
+            "**/solidstep-env.d.ts",
             "*.css"
         ]
     },

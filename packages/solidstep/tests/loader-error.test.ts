@@ -5,10 +5,7 @@ vi.mock('vinxi/http', () => ({
     setResponseHeader: vi.fn(),
 }));
 
-import {
-    runSequentialLoader,
-    LOADER_ERROR_KEY,
-} from '../utils/loader-error';
+import { runSequentialLoader, LOADER_ERROR_KEY } from '../utils/loader-error';
 import { clearAllCache } from '../utils/cache';
 
 const req = () => new Request('https://example.com/p');

@@ -4,9 +4,7 @@ import { singleFlight } from '../utils/single-flight';
 describe('singleFlight', () => {
     it('coalesces concurrent calls for the same key into one execution', async () => {
         let resolveFn: (v: number) => void;
-        const fn = vi.fn(
-            () => new Promise<number>((r) => (resolveFn = r)),
-        );
+        const fn = vi.fn(() => new Promise<number>((r) => (resolveFn = r)));
         const a = singleFlight('k', fn);
         const b = singleFlight('k', fn); // shares the in-flight promise
         expect(fn).toHaveBeenCalledTimes(1);

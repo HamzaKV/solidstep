@@ -30,7 +30,10 @@ describe('MemoryCacheStore — basics', () => {
     it('treats ttl <= 0 as no expiry', () => {
         const store = new MemoryCacheStore();
         store.set('z', 1, { ttl: 0, swr: 100 });
-        expect(store.get('z')).toMatchObject({ expiresAt: null, staleAt: null });
+        expect(store.get('z')).toMatchObject({
+            expiresAt: null,
+            staleAt: null,
+        });
     });
 
     it('overwrites value and deadlines in place', () => {
