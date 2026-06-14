@@ -16,6 +16,27 @@ test.describe('per-group loading & error boundaries', () => {
         );
     });
 
+    test('soft-navigating to a deferred group streams its loading.tsx then content', async ({
+        page,
+    }) => {
+        await page.goto('/');
+        let reloaded = false;
+        page.on('load', () => {
+            reloaded = true;
+        });
+
+        await page.getByRole('link', { name: 'Groups' }).click();
+
+        // The @ok group's loader is deferred → its loading.tsx shows first…
+        await expect(page.getByTestId('group-ok-loading')).toBeVisible();
+        // …then its streamed content fills in (fetched via the hole endpoint).
+        await expect(page.getByTestId('group-ok')).toHaveText(
+            'ok-group-content',
+        );
+        await expect(page).toHaveURL(/\/groups$/);
+        expect(reloaded).toBe(false); // soft navigation, not a full reload
+    });
+
     test('raw stream emits the group loading fallback before its content', async ({
         request,
     }) => {

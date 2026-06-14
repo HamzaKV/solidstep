@@ -95,7 +95,8 @@ const action = async () => {
 
 ## Pluggable cache stores
 
-The page-render and loader-data caches run on a swappable `CacheStore` backend.
+The page-render and [loader-data](./data-loading.md#caching-loader-data) caches share a
+single swappable `CacheStore` backend, so one configuration makes **both** persistent.
 The default is an in-memory LRU. Select a built-in adapter via `defineConfig`:
 
 ```ts

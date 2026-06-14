@@ -46,9 +46,9 @@ export const loader = defineLoader(
 - `ttl` — lifetime in milliseconds. `0` or omitted means no expiry (cached for the process lifetime until invalidated).
 - `key` — override the cache key. By default the key includes the request `pathname` + search, so the same loader caches **per-URL** (e.g. `/blog/a` and `/blog/b` cache separately). Provide a stable `key` to share one cached value across URLs.
 
-Loader caching is independent of [page-level caching](./caching.md): it memoizes just the loader's data and uses the same in-memory store, namespaced under a `loader:` key prefix.
+Loader caching is independent of [page-level caching](./caching.md): it memoizes just the loader's data and runs on the **same pluggable `CacheStore`** as the page cache, namespaced under a `loader:` key prefix.
 
-> Loader data caching is in-memory and per-process (like the page cache). A persistent/shared cache is on the roadmap.
+> Loader data caching runs on the active [`CacheStore`](./caching.md#pluggable-cache-stores). The default is an in-memory per-process LRU, but it is **persistent and shared** when you configure a filesystem or external (e.g. Redis) store — the same store backs both the page cache and the loader cache.
 
 ## Deferred loaders (streaming)
 
@@ -78,7 +78,8 @@ export default function Page(props: { loaderData: () => LoaderData | undefined }
 Under the hood the framework renders deferred routes with Solid's `renderToStream`: the shell (layout chrome + any sequential data) is sent first, then each deferred value streams in and hydrates. Non-deferred routes are unaffected and keep the standard render path.
 
 Notes:
-- Only **page** loaders support `defer` today (layout loaders are always sequential). Per-group deferral is on the roadmap.
+- **Page** and **parallel-route group** (`@slot`) loaders support `defer`. A deferred group renders its own `loading.tsx` while its data streams in, independently of the rest of the page — mark the group's loader `type: 'defer'` and add a `loading.tsx` beside it (see the `@slot` example in [Routing](./routing.md)). Layout loaders are always sequential (a layout must resolve before its subtree renders).
+- Deferred data is **streamed** into the HTML on first load and **fetched** on client navigation — either way the route's/group's `loading.tsx` shows until it arrives.
 - Deferred routes are **not** page-cached (they're streamed).
 - A deferred loader can't issue a redirect (headers are already sent once streaming begins) — redirect from a sequential loader instead.
 
