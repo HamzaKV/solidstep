@@ -162,3 +162,64 @@ describe('MemoryCacheStore — tags', () => {
         expect(store.get('k')).toBeNull();
     });
 });
+
+describe('MemoryCacheStore — maxBytes', () => {
+    const big = (n: number) => 'x'.repeat(n);
+
+    it('evicts the LRU entry when the byte budget is exceeded', () => {
+        const store = new MemoryCacheStore({ maxBytes: 60, maxEntries: 100 });
+        store.set('a', big(40)); // ~42 bytes, under budget
+        store.set('b', big(40)); // ~84 total > 60 → evict LRU 'a'
+        expect(store.get('a')).toBeNull();
+        expect(store.get<string>('b')?.value).toBe(big(40));
+    });
+
+    it('keeps the newest entry even if it alone exceeds maxBytes', () => {
+        const store = new MemoryCacheStore({ maxBytes: 10 });
+        store.set('big', big(100)); // far over budget, but it's the only entry
+        expect(store.get<string>('big')?.value).toBe(big(100));
+    });
+
+    it('respects recency: a read protects an entry from eviction', () => {
+        const store = new MemoryCacheStore({ maxBytes: 95 });
+        store.set('a', big(40)); // ~42
+        store.set('b', big(40)); // ~84, both fit
+        store.get('a'); // 'a' is now MRU, 'b' is LRU
+        store.set('c', big(40)); // ~126 > 95 → evict LRU 'b'
+        expect(store.get('b')).toBeNull();
+        expect(store.get('a')).not.toBeNull();
+        expect(store.get('c')).not.toBeNull();
+    });
+
+    it('frees bytes when an existing key is overwritten with a smaller value', () => {
+        const store = new MemoryCacheStore({ maxBytes: 95 });
+        store.set('a', big(40)); // ~42
+        store.set('b', big(40)); // ~84
+        store.set('a', 'z'); // shrink 'a' → total ~45
+        store.set('c', big(40)); // ~87 ≤ 95 → nothing evicted
+        expect(store.get<string>('a')?.value).toBe('z');
+        expect(store.get('b')).not.toBeNull();
+        expect(store.get('c')).not.toBeNull();
+    });
+
+    it('frees bytes on delete', () => {
+        const store = new MemoryCacheStore({ maxBytes: 95 });
+        store.set('a', big(40)); // ~42
+        store.set('b', big(40)); // ~84
+        store.delete('a'); // total ~42
+        store.set('c', big(40)); // ~84 ≤ 95 → 'b' survives (delete freed bytes)
+        expect(store.get('b')).not.toBeNull();
+        expect(store.get('c')).not.toBeNull();
+    });
+
+    it('treats an unserializable value as size 0 instead of throwing', () => {
+        const store = new MemoryCacheStore({ maxBytes: 1000 });
+        const bad = {
+            get boom(): never {
+                throw new Error('cannot serialize');
+            },
+        };
+        expect(() => store.set('bad', bad)).not.toThrow();
+        expect(store.get('bad')?.value).toBe(bad);
+    });
+});

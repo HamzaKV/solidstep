@@ -7,7 +7,11 @@ import { getCache, setCacheWithOptions } from '../utils/cache';
 import { getCachedLoaderData } from '../utils/loader-cache';
 import { runSequentialLoader } from '../utils/loader-error';
 import { shouldCachePage, pageCacheKey } from '../utils/page-cache';
-import type { Import, RoutePageHandler } from '../utils/path-router';
+import type {
+    Import,
+    RoutePageHandler,
+    SearchParams,
+} from '../utils/path-router';
 import type { Options } from '../utils/options';
 import { getCachedModule } from './route-manifest';
 import type {
@@ -41,7 +45,7 @@ export const render = async ({
     toRender: 'main' | 'loading' | 'error' | 'not-found';
     entry: RoutePageHandler;
     routeParams: Record<string, string | string[]>;
-    searchParams: Record<string, string>;
+    searchParams: SearchParams;
     req: Request;
     pageOptions?: Options;
     cspNonce?: string;

@@ -27,7 +27,17 @@ export const csrf =
         if (!safeMethods.includes(requestMethod)) {
             // If we have an Origin header, check it against our allowlist.
             if (origin) {
-                const parsedOrigin = new URL(origin);
+                let parsedOrigin: URL;
+                try {
+                    parsedOrigin = new URL(origin);
+                } catch {
+                    // A malformed Origin header can't be trusted — fail closed
+                    // rather than throwing an unhandled 500.
+                    return {
+                        success: false,
+                        message: 'Invalid origin',
+                    };
+                }
                 if (
                     parsedOrigin.origin !== requestUrl.origin &&
                     !trustedOrigins.includes(parsedOrigin.host)
@@ -50,7 +60,16 @@ export const csrf =
                     };
                 }
 
-                const parsedReferer = new URL(referer);
+                let parsedReferer: URL;
+                try {
+                    parsedReferer = new URL(referer);
+                } catch {
+                    // A malformed Referer header can't be trusted — fail closed.
+                    return {
+                        success: false,
+                        message: 'Invalid referer',
+                    };
+                }
 
                 if (parsedReferer.protocol !== 'https:') {
                     return {

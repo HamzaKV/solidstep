@@ -18,21 +18,23 @@ import {
     devOverlayClientScript,
 } from './utils/dev-overlay';
 import {
-    generateHtmlHead,
     renderAssetsToHtml,
     jsonForScript,
     buildHydrationScript,
     buildHeadHtml,
     createBaseMeta,
 } from './utils/html';
+import { buildLoadingSwapScript } from './utils/loading-swap';
 import { readFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
     matchRoute,
+    parseSearchParams,
     type Import,
     type RouteHandler,
     type RoutePageHandler,
+    type SearchParams,
 } from './utils/path-router';
 import {
     loadInstrumentation,
@@ -108,14 +110,17 @@ const onStart = async () => {
         // instrumentation `register()` so a user `setCacheStore(...)` there
         // (e.g. a Redis adapter) can override it.
         const cacheConfig = sharedConfig?.cache as
-            | { type?: 'memory'; maxEntries?: number }
+            | { type?: 'memory'; maxEntries?: number; maxBytes?: number }
             | { type: 'filesystem'; dir: string }
             | undefined;
         if (cacheConfig?.type === 'filesystem') {
             setCacheStore(new FilesystemCacheStore({ dir: cacheConfig.dir }));
-        } else if (cacheConfig?.maxEntries) {
+        } else if (cacheConfig?.maxEntries || cacheConfig?.maxBytes) {
             setCacheStore(
-                new MemoryCacheStore({ maxEntries: cacheConfig.maxEntries }),
+                new MemoryCacheStore({
+                    maxEntries: cacheConfig.maxEntries,
+                    maxBytes: cacheConfig.maxBytes,
+                }),
             );
         }
     } catch (e) {
@@ -147,7 +152,7 @@ const handleApiRoute = async (
     req: Request,
     matched: ApiRouteHandler,
     params: Record<string, string | string[]>,
-    searchParams: Record<string, string>,
+    searchParams: SearchParams,
 ) => {
     const inst = getInstrumentation();
     const reqCtx = createRequestContext(req, {
@@ -245,7 +250,9 @@ const handler = eventHandler(async (event) => {
                 setResponseStatus(400);
                 return 'Bad Request';
             }
-            setHeader('Content-Type', 'application/json');
+            // seroval-serialized envelope (not JSON) — see `serveHoleData`.
+            setHeader('Content-Type', 'text/plain; charset=utf-8');
+            setHeader('Cache-Control', 'no-store');
             return body;
         }
 
@@ -266,7 +273,7 @@ const handler = eventHandler(async (event) => {
 
         const urlObj = new URL(req.url);
         const pathnamePart = urlObj.pathname;
-        const searchParams = Object.fromEntries(urlObj.searchParams);
+        const searchParams = parseSearchParams(urlObj.searchParams);
         const isrBypass = req.headers.get(ISR_BYPASS_HEADER) === '1';
 
         // Dynamic metadata files (robots.txt / sitemap.xml / manifest / llms.txt).
@@ -296,6 +303,12 @@ const handler = eventHandler(async (event) => {
             return handleApiRoute(event, req, matched, params, searchParams);
         }
 
+        // API routes returned above, so any remaining match is necessarily a
+        // page handler. Narrowing once here lets the render branches below use a
+        // typed `pageEntry!` instead of repeating `pageEntry!`.
+        const pageEntry: RoutePageHandler | undefined =
+            matched?.type === 'page' ? matched : undefined;
+
         // Page (or not-found) render: instrumentation → ISR short-circuit →
         // streamed SSR. Scoped in a local function so the handler above reads as
         // a thin request router.
@@ -318,8 +331,7 @@ const handler = eventHandler(async (event) => {
                 !import.meta.env.DEV &&
                 !isrBypass
             ) {
-                const optionsImport = (matched as RoutePageHandler).mainPage
-                    .options;
+                const optionsImport = pageEntry!.mainPage.options;
                 const pageOptions = optionsImport
                     ? (await getCachedModule<OptionsModule>(optionsImport))
                           .options
@@ -431,12 +443,9 @@ const handler = eventHandler(async (event) => {
                                     return;
                                 }
                             } else {
-                                const { options } = (
-                                    matched as RoutePageHandler
-                                ).mainPage.options
+                                const { options } = pageEntry!.mainPage.options
                                     ? await getCachedModule<OptionsModule>(
-                                          (matched as RoutePageHandler).mainPage
-                                              .options as Import,
+                                          pageEntry!.mainPage.options as Import,
                                       )
                                     : { options: {} };
                                 if (options?.responseHeaders) {
@@ -456,7 +465,7 @@ const handler = eventHandler(async (event) => {
                                 if (options?.render === 'ppr') {
                                     const result = (await render({
                                         toRender: 'main',
-                                        entry: matched as RoutePageHandler,
+                                        entry: pageEntry!,
                                         routeParams: params,
                                         searchParams,
                                         req,
@@ -477,9 +486,8 @@ const handler = eventHandler(async (event) => {
                                     // streamed hydration.
                                     const mainScript = buildHydrationScript({
                                         entryPath,
-                                        manifestPath: (
-                                            matched as RoutePageHandler
-                                        ).mainPage.manifestPath,
+                                        manifestPath:
+                                            pageEntry!.mainPage.manifestPath,
                                         params,
                                         searchParams,
                                         loaderData: result.loaderData,
@@ -501,14 +509,10 @@ const handler = eventHandler(async (event) => {
                                 // stream deferred loader data in afterwards via Solid's
                                 // renderToStream + Suspense. Non-deferred routes fall
                                 // through to the unchanged renderToString path below.
-                                if (
-                                    await routeNeedsStreaming(
-                                        matched as RoutePageHandler,
-                                    )
-                                ) {
+                                if (await routeNeedsStreaming(pageEntry!)) {
                                     const result = (await render({
                                         toRender: 'main',
-                                        entry: matched as RoutePageHandler,
+                                        entry: pageEntry!,
                                         routeParams: params,
                                         searchParams,
                                         req,
@@ -526,9 +530,8 @@ const handler = eventHandler(async (event) => {
                                     );
                                     const mainScript = buildHydrationScript({
                                         entryPath,
-                                        manifestPath: (
-                                            matched as RoutePageHandler
-                                        ).mainPage.manifestPath,
+                                        manifestPath:
+                                            pageEntry!.mainPage.manifestPath,
                                         params,
                                         searchParams,
                                         loaderData: result.loaderData,
@@ -573,10 +576,7 @@ const handler = eventHandler(async (event) => {
                                     return;
                                 }
                                 try {
-                                    if (
-                                        !(matched as RoutePageHandler)
-                                            .loadingPage
-                                    ) {
+                                    if (!pageEntry!.loadingPage) {
                                         throw new Error('No loading page');
                                     }
                                     const {
@@ -585,7 +585,7 @@ const handler = eventHandler(async (event) => {
                                         documentAssets,
                                     } = (await render({
                                         toRender: 'loading',
-                                        entry: matched as RoutePageHandler,
+                                        entry: pageEntry!,
                                         routeParams: params,
                                         searchParams,
                                         req: req,
@@ -641,7 +641,7 @@ const handler = eventHandler(async (event) => {
                                     loaderData,
                                 } = (await render({
                                     toRender: 'main',
-                                    entry: matched as RoutePageHandler,
+                                    entry: pageEntry!,
                                     routeParams: params,
                                     searchParams,
                                     req: req,
@@ -651,8 +651,8 @@ const handler = eventHandler(async (event) => {
                                 assets.push(...documentAssets);
                                 clientHydrationScript = buildHydrationScript({
                                     entryPath,
-                                    manifestPath: (matched as RoutePageHandler)
-                                        .mainPage.manifestPath,
+                                    manifestPath:
+                                        pageEntry!.mainPage.manifestPath,
                                     params,
                                     searchParams,
                                     loaderData,
@@ -680,8 +680,7 @@ const handler = eventHandler(async (event) => {
                                 console.error(e1);
                             }
                             try {
-                                const errorPage = (matched as RoutePageHandler)
-                                    .errorPage;
+                                const errorPage = pageEntry!.errorPage;
                                 if (!errorPage) {
                                     // Dev: show the error overlay for an
                                     // unhandled render error (no error.tsx).
@@ -706,7 +705,7 @@ const handler = eventHandler(async (event) => {
                                     loaderData,
                                 } = (await render({
                                     toRender: 'error',
-                                    entry: matched as RoutePageHandler,
+                                    entry: pageEntry!,
                                     routeParams: params,
                                     searchParams,
                                     req: req,
@@ -744,79 +743,13 @@ const handler = eventHandler(async (event) => {
                             push(
                                 `<template id="__page_html__">${html}</template>`,
                             );
-                            // Swap the transient loading shell for the real page
-                            // without wiping `<head>`. Wiping `head.innerHTML`
-                            // (then re-appending scripts) drops/reorders head
-                            // state and is brittle under CSP and streamed assets.
-                            // Instead we parse the new head nodes (title/meta/
-                            // link/style only — `renderAssetsToHtml(..., false)`
-                            // omits scripts) and merge them in explicitly,
-                            // leaving every existing <script> (hydration/manifest)
-                            // untouched.
-                            push(`
-                        <script ${cspNonce ? `nonce="${cspNonce}"` : ''}>
-                        (function () {
-                            const head = document.head;
-                            const tpl = document.createElement('template');
-                            tpl.innerHTML = ${escapeScript(JSON.stringify(generateHtmlHead(meta) + assetsHtml))};
-                            const incoming = Array.from(tpl.content.childNodes);
-                            const metaKey = (el) =>
-                                el.getAttribute('charset') !== null
-                                    ? 'charset'
-                                    : el.getAttribute('name')
-                                      ? 'name=' + el.getAttribute('name')
-                                      : el.getAttribute('property')
-                                        ? 'property=' + el.getAttribute('property')
-                                        : el.getAttribute('http-equiv')
-                                          ? 'http-equiv=' + el.getAttribute('http-equiv')
-                                          : null;
-                            for (const node of incoming) {
-                                if (node.nodeType !== 1) continue;
-                                const tag = node.tagName;
-                                if (tag === 'TITLE') {
-                                    document.title = node.textContent || '';
-                                    continue;
-                                }
-                                if (tag === 'META') {
-                                    const key = metaKey(node);
-                                    const existing = key
-                                        ? head.querySelector('meta[' + (key === 'charset' ? 'charset' : key.replace('=', '="') + '"') + ']')
-                                        : null;
-                                    if (existing) {
-                                        existing.replaceWith(node);
-                                    } else {
-                                        head.appendChild(node);
-                                    }
-                                    continue;
-                                }
-                                if (tag === 'LINK') {
-                                    const href = node.getAttribute('href');
-                                    if (
-                                        href &&
-                                        head.querySelector('link[href="' + href.replace(/"/g, '\\\\"') + '"]')
-                                    ) {
-                                        continue;
-                                    }
-                                    head.appendChild(node);
-                                    continue;
-                                }
-                                // <style> and any other head node: append.
-                                head.appendChild(node);
-                            }
-                            document
-                                .querySelector('script[data-hydration="loading"]')
-                                ?.remove();
-                            const template = document.getElementById('__page_html__');
-                            if (template) {
-                                const body = document.body;
-                                const next = document.createElement('template');
-                                next.innerHTML = template.innerHTML;
-                                body.replaceChildren(...next.content.childNodes);
-                                template.remove();
-                            }
-                        })();
-                        </script>
-                    `);
+                            push(
+                                buildLoadingSwapScript(
+                                    meta,
+                                    assetsHtml,
+                                    cspNonce,
+                                ),
+                            );
                             push(manifestHtml);
                             push(clientHydrationScript);
                             controller.close();

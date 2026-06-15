@@ -35,17 +35,26 @@ Layouts nest along the route path — a layout at `app/blog/layout.tsx` wraps ev
 
 ## Group Routes
 
-Use parentheses to group routes without affecting the URL:
+Use parentheses to group routes without affecting the URL. A `(group)` folder is
+**organizational only** — its segment is stripped from the matched path:
 
 ```
 app/
 ├── (admin)/
+│   ├── layout.tsx    // wraps every route under (admin)
 │   └── dashboard/
 │       └── page.tsx  // matches /dashboard
 └── (user)/
     └── profile/
         └── page.tsx  // matches /profile
 ```
+
+A `layout.tsx` placed inside a group still wraps that group's routes even though
+the group segment never appears in the URL — handy for sharing a layout (or an
+`error.tsx` / `loading.tsx`) across a set of routes without nesting them under a
+shared URL prefix. [Typed routes](./getting-started.md) reflect the clean URL too
+(`/dashboard`, not `/(admin)/dashboard`). See the kitchen-sink `(marketing)`
+example.
 
 ## Dynamic Routes
 
@@ -165,7 +174,7 @@ await navigate('/dashboard');                 // soft navigate
 await navigate('/login', { replace: true });  // replace history entry
 
 const pathname = usePathname();         // reactive accessor: () => string
-const searchParams = useSearchParams(); // reactive accessor: () => Record<string, string>
+const searchParams = useSearchParams(); // reactive accessor: () => Record<string, string | string[]>
 
 prefetchRoute('/blog/hello');           // manually warm a route's data + modules
 ```

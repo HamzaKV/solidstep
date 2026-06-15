@@ -3,6 +3,7 @@ import { serialize } from 'seroval';
 import { escapeHtml, escapeScript } from './escape';
 import { SEROVAL_PLUGINS } from './serialize';
 import type { Meta } from './meta';
+import type { SearchParams } from './path-router';
 
 /**
  * Pure HTML/inline-script generation for the SSR document. Extracted from
@@ -96,8 +97,8 @@ export const serializeForScript = (value: unknown): string =>
     serialize(value, { plugins: SEROVAL_PLUGINS });
 
 /**
- * Plain JSON payload (params/searchParams are always strings) escaped for safe
- * inline-script embedding.
+ * Plain JSON payload (params/searchParams are strings or string arrays) escaped
+ * for safe inline-script embedding.
  */
 export const jsonForScript = (value: unknown): string =>
     escapeScript(JSON.stringify(value));
@@ -121,7 +122,7 @@ export const buildHydrationScript = (opts: {
     entryPath: string;
     manifestPath: string;
     params: Record<string, string | string[]>;
-    searchParams: Record<string, string>;
+    searchParams: SearchParams;
     loaderData: unknown;
     extraArgs?: string[];
     nonce?: string;

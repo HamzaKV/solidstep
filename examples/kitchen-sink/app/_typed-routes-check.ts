@@ -5,9 +5,13 @@ import type { Href } from 'solidstep/router';
 
 // A real route → accepted.
 const ok: Href = '/about';
+// An organizational `(group)` route is typed by its clean URL (the group folder
+// is stripped): `app/(marketing)/pricing/page.tsx` → `/pricing`.
+const grouped: Href = '/pricing';
 // A typo'd route → rejected by the generated union.
 // @ts-expect-error '/nope' is not a route in this app.
 const bad: Href = '/nope';
 
 void ok;
+void grouped;
 void bad;

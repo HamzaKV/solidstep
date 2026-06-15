@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
     createBasePolicy,
     createStrictPolicy,
+    createNoncePolicy,
     serializePolicy,
     parsePolicy,
     withNonce,
@@ -48,6 +49,21 @@ describe('createStrictPolicy', () => {
 
     it('blocks frames', () => {
         const policy = createStrictPolicy();
+        expect(hasSource(policy, 'frame-ancestors', "'none'")).toBe(true);
+    });
+});
+
+describe('createNoncePolicy', () => {
+    it('is strict (no unsafe sources) and adds the nonce to script/style-src', () => {
+        const policy = createNoncePolicy('abc123');
+        expect(reportUnsafeDirectives(policy)).toHaveLength(0);
+        expect(hasSource(policy, 'script-src', "'nonce-abc123'")).toBe(true);
+        expect(hasSource(policy, 'style-src', "'nonce-abc123'")).toBe(true);
+    });
+
+    it('keeps the strict baseline directives', () => {
+        const policy = createNoncePolicy('n');
+        expect(hasSource(policy, 'default-src', "'self'")).toBe(true);
         expect(hasSource(policy, 'frame-ancestors', "'none'")).toBe(true);
     });
 });

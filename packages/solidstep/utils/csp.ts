@@ -172,6 +172,15 @@ const createStrictPolicy = (): CSPPolicy => [
     createDirective('form-action', ["'self'"]),
 ];
 
+/**
+ * ⚠️ **Permissive policy — not production-safe as-is.** This convenience preset
+ * includes `'unsafe-inline'` (style + script) and `'unsafe-eval'` (script),
+ * which defeat most of CSP's XSS protection. It exists to get a dev app running
+ * with inline styles/scripts; harden it before shipping.
+ *
+ * For production prefer {@link createNoncePolicy} (strict + per-request nonce),
+ * or strip the unsafe sources from this policy with {@link withProductionSources}.
+ */
 const createBasePolicy = (): CSPPolicy => [
     createDirective('default-src', ["'self'"]),
     createDirective('font-src', ["'self'", 'https://fonts.gstatic.com']),
@@ -197,6 +206,28 @@ const createBasePolicy = (): CSPPolicy => [
     createDirective('connect-src', ["'self'", 'ws:']),
     createDirective('img-src', ["'self'", 'data:']),
 ];
+
+/**
+ * A secure-by-default policy for production: the strict baseline
+ * ({@link createStrictPolicy} — `default-src 'self'`, `object-src`/`base-uri`/
+ * `frame-ancestors 'none'`, `form-action 'self'`) with the given per-request
+ * `nonce` added to `script-src` and `style-src` (via {@link withNonce}). No
+ * `'unsafe-inline'`/`'unsafe-eval'`. Pair the same nonce with the framework's
+ * inline scripts (`event.locals.cspNonce`).
+ *
+ * @param nonce - The per-request nonce to authorize inline `<script>`/`<style>`.
+ */
+const createNoncePolicy = (nonce: string): CSPPolicy =>
+    withNonce(
+        [
+            ...createStrictPolicy(),
+            // Seed script/style-src with 'self' so withNonce has a directive to
+            // attach the nonce to (strict has neither). No unsafe-inline/eval.
+            createDirective('script-src', ["'self'"]),
+            createDirective('style-src', ["'self'"]),
+        ],
+        nonce,
+    );
 
 // Environment-Specific Builders
 const withDevelopmentSources = (policy: CSPPolicy): CSPPolicy => {
@@ -309,6 +340,7 @@ export {
     // Presets
     createStrictPolicy,
     createBasePolicy,
+    createNoncePolicy,
     // Environment
     withDevelopmentSources,
     withProductionSources,

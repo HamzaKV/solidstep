@@ -98,6 +98,20 @@ describe('HTTP requests — no referer check required', () => {
     });
 });
 
+describe('malformed headers fail closed (no unhandled throw)', () => {
+    it('rejects a malformed Origin header without throwing', () => {
+        const result = check('POST', httpsUrl, 'not-a-url');
+        expect(result.success).toBe(false);
+        expect(result.message).toBe('Invalid origin');
+    });
+
+    it('rejects a malformed Referer header without throwing', () => {
+        const result = check('POST', httpsUrl, undefined, 'not-a-url');
+        expect(result.success).toBe(false);
+        expect(result.message).toBe('Invalid referer');
+    });
+});
+
 describe('custom safe methods', () => {
     it('respects a custom safe methods list', () => {
         const strictCheck = csrf([], ['GET']);

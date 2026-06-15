@@ -131,6 +131,45 @@ describe('client manifest matching', () => {
         expect(getNotFoundInManifest(buildManifest([]))).toBeUndefined();
     });
 
+    it('strips (group) organizational segments from the URL while keeping layouts', () => {
+        const t = buildManifest([
+            { path: '/layout', type: 'layout', $component: cmp('root') },
+            // `app/(admin)/dashboard/page.tsx` → matches `/dashboard`.
+            {
+                path: '/route/(admin)/dashboard',
+                type: 'route',
+                $component: cmp('admin-dash'),
+            },
+            // A layout inside the group wraps the route even though the segment
+            // is absent from the URL.
+            {
+                path: '/layout/(admin)',
+                type: 'layout',
+                $component: cmp('admin-layout'),
+            },
+            // `app/(user)/profile/page.tsx` → matches `/profile`.
+            {
+                path: '/route/(user)/profile',
+                type: 'route',
+                $component: cmp('profile'),
+            },
+        ]);
+        const dash = matchInManifest(t, '/dashboard');
+        expect(dash?.handler.mainPage.manifestPath).toBe(
+            '/route/(admin)/dashboard',
+        );
+        // The (admin) layout applies despite not being in the URL.
+        expect(dash?.handler.layouts.map((l) => l.layout.src)).toEqual([
+            'root',
+            'admin-layout',
+        ]);
+        expect(
+            matchInManifest(t, '/profile')?.handler.mainPage.manifestPath,
+        ).toBe('/route/(user)/profile');
+        // The literal grouped paths do NOT match.
+        expect(matchInManifest(t, '/(admin)/dashboard')).toBeNull();
+    });
+
     it('attaches a parentless group to the root and skips an unnamed group', () => {
         const t = buildManifest([
             { path: '/route', type: 'route', $component: cmp('home') },

@@ -2,7 +2,7 @@ import type { Component } from 'solid-js';
 import type { getManifest } from 'vinxi/manifest';
 import type { Meta, MetaFunction } from '../utils/meta';
 import type { Options } from '../utils/options';
-import type { Import } from '../utils/path-router';
+import type { Import, SearchParams } from '../utils/path-router';
 import type { GenerateStaticParams } from '../utils/prerender';
 
 /** The vinxi client/server manifest object (`getManifest(...)`). */
@@ -47,7 +47,7 @@ export type RouteMethodHandler = (
     req: Request,
     ctx: {
         params: Record<string, string | string[]>;
-        searchParams: Record<string, string>;
+        searchParams: SearchParams;
     },
 ) => unknown | Promise<unknown>;
 

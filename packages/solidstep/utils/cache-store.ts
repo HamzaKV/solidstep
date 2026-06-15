@@ -1,5 +1,12 @@
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, writeFile, unlink, rm } from 'node:fs/promises';
+import {
+    mkdir,
+    readFile,
+    writeFile,
+    unlink,
+    rm,
+    rename,
+} from 'node:fs/promises';
 import { join } from 'node:path';
 import { serialize, deserialize } from 'seroval';
 import { SEROVAL_PLUGINS } from './serialize';
@@ -103,6 +110,8 @@ const computeDeadlines = (
 
 type Node<T = unknown> = CacheEntry<T> & {
     key: string;
+    /** Approximate byte size of `value`, tracked only when `maxBytes` is set. */
+    size: number;
     prev?: Node<T>;
     next?: Node<T>;
 };
@@ -113,6 +122,13 @@ const DEFAULT_MAX_ENTRIES = 1000;
  * In-memory LRU cache store (the default). Backed by a `Map` plus a
  * doubly-linked list for O(1) least-recently-used eviction, with a reverse
  * tag index for {@link invalidateTag}. Per-process only.
+ *
+ * Evicts the least-recently-used entry when either bound is exceeded:
+ * `maxEntries` (a count) and, optionally, `maxBytes` (an approximate total
+ * value size). `maxBytes` guards memory-constrained runtimes where a 1000-entry
+ * count limit can still hold far more than expected when entries vary wildly in
+ * size (e.g. cached HTML). The newest entry is always kept even if it alone
+ * exceeds `maxBytes`.
  */
 export class MemoryCacheStore implements CacheStore {
     private map = new Map<string, Node>();
@@ -120,9 +136,37 @@ export class MemoryCacheStore implements CacheStore {
     private tail?: Node;
     private tagIndex = new Map<string, Set<string>>();
     private maxEntries: number;
+    private maxBytes: number;
+    private totalBytes = 0;
 
-    constructor(opts?: { maxEntries?: number }) {
+    constructor(opts?: { maxEntries?: number; maxBytes?: number }) {
         this.maxEntries = opts?.maxEntries ?? DEFAULT_MAX_ENTRIES;
+        this.maxBytes = opts?.maxBytes ?? Number.POSITIVE_INFINITY;
+    }
+
+    /**
+     * Approximate byte size of a value. Only computed when `maxBytes` is set
+     * (otherwise sizes are irrelevant), via the seroval encoding the framework
+     * already uses — accurate enough for eviction and robust to Date/Map/Set.
+     */
+    private sizeOf(value: unknown): number {
+        if (this.maxBytes === Number.POSITIVE_INFINITY) return 0;
+        try {
+            return serialize(value, { plugins: SEROVAL_PLUGINS }).length;
+        } catch {
+            return 0;
+        }
+    }
+
+    /** Evict from the LRU tail until both bounds are satisfied (keep ≥1 entry). */
+    private evictToBounds() {
+        while (
+            this.tail &&
+            (this.map.size > this.maxEntries ||
+                (this.totalBytes > this.maxBytes && this.map.size > 1))
+        ) {
+            this.removeTail();
+        }
     }
 
     private moveToFront(node: Node) {
@@ -139,10 +183,11 @@ export class MemoryCacheStore implements CacheStore {
     }
 
     private removeTail() {
-        // Only called when size > maxEntries, so tail and tail.prev are defined.
+        // Only called when a bound is exceeded, so tail and tail.prev are defined.
         const evicted = this.tail!;
         this.map.delete(evicted.key);
         this.untag(evicted.key, evicted.tags);
+        this.totalBytes -= evicted.size;
         this.tail = evicted.prev!;
         this.tail.next = undefined;
     }
@@ -174,11 +219,14 @@ export class MemoryCacheStore implements CacheStore {
     set<T>(key: string, value: T, options?: CacheSetOptions): void {
         const { expiresAt, staleAt } = computeDeadlines(options);
         const tags = options?.tags;
+        const size = this.sizeOf(value);
         const existing = this.map.get(key);
         if (existing) {
             // Drop stale tag associations before re-tagging.
             this.untag(key, existing.tags);
+            this.totalBytes += size - existing.size;
             existing.value = value;
+            existing.size = size;
             existing.expiresAt = expiresAt;
             existing.staleAt = staleAt;
             existing.tags = tags;
@@ -187,6 +235,7 @@ export class MemoryCacheStore implements CacheStore {
             const node: Node<T> = {
                 key,
                 value,
+                size,
                 expiresAt,
                 staleAt,
                 tags,
@@ -196,7 +245,7 @@ export class MemoryCacheStore implements CacheStore {
             this.head = node as Node;
             if (!this.tail) this.tail = node as Node;
             this.map.set(key, node as Node);
-            if (this.map.size > this.maxEntries) this.removeTail();
+            this.totalBytes += size;
         }
         if (tags) {
             for (const tag of tags) {
@@ -208,6 +257,7 @@ export class MemoryCacheStore implements CacheStore {
                 set.add(key);
             }
         }
+        this.evictToBounds();
     }
 
     delete(key: string): void {
@@ -216,12 +266,14 @@ export class MemoryCacheStore implements CacheStore {
         this.unlink(node);
         this.map.delete(key);
         this.untag(key, node.tags);
+        this.totalBytes -= node.size;
     }
 
     clear(): void {
         this.map.clear();
         this.tagIndex.clear();
         this.head = this.tail = undefined;
+        this.totalBytes = 0;
     }
 
     invalidateTag(tag: string): void {
@@ -252,6 +304,7 @@ export class FilesystemCacheStore implements CacheStore {
     private dir: string;
     private tagsFile: string;
     private ready?: Promise<void>;
+    private tmpSeq = 0;
 
     constructor(opts: { dir: string }) {
         this.dir = opts.dir;
@@ -280,7 +333,13 @@ export class FilesystemCacheStore implements CacheStore {
     }
 
     private async writeTags(index: Record<string, string[]>): Promise<void> {
-        await writeFile(this.tagsFile, JSON.stringify(index), 'utf-8');
+        // Write to a unique temp file then atomically rename over the index, so
+        // a crash mid-write can't leave a truncated/torn `__tags.json` that
+        // breaks every later `invalidateTag`. The reader tolerates a missing
+        // file (treats it as empty), so the swap is always consistent.
+        const tmp = `${this.tagsFile}.${process.pid}.${this.tmpSeq++}.tmp`;
+        await writeFile(tmp, JSON.stringify(index), 'utf-8');
+        await rename(tmp, this.tagsFile);
     }
 
     async get<T>(key: string): Promise<CacheEntry<T> | null> {

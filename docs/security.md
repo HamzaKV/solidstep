@@ -6,6 +6,20 @@ SolidStep ships built-in utilities for cookies, CORS, CSP, CSRF, redirects, erro
 
 ## Cookies
 
+For session/auth cookies, prefer `setSecureCookie`, which applies protective
+defaults (`httpOnly`, `sameSite: 'lax'`, `path: '/'`, and `secure` in production)
+that you'd otherwise have to remember on every call. Any field can still be
+overridden via the options argument (which wins over the defaults):
+
+```tsx
+import { setSecureCookie } from 'solidstep/utils/cookies';
+
+// httpOnly + secure (in prod) + sameSite=lax applied automatically.
+await setSecureCookie('session', token, { maxAge: 3600 });
+// Override a default when you need to:
+await setSecureCookie('session', token, { sameSite: 'strict' });
+```
+
 ```tsx
 import { getCookie, setCookie } from 'solidstep/utils/cookies';
 
@@ -52,16 +66,24 @@ const corsHeaders = corsMiddleware(origin, event.node.req.method === 'OPTIONS');
 ...
 ```
 
+To send cookies / `Authorization` on cross-origin requests, enable credentials
+via the fourth argument — `Access-Control-Allow-Credentials: true` is then added
+for trusted (non-wildcard) origins:
+
+```tsx
+const corsMiddleware = cors(trustedOrigins, undefined, undefined, {
+    allowCredentials: true,
+});
+```
+
 ## CSP
 
 ```tsx
-import { createBasePolicy, serializePolicy, withNonce } from 'solidstep/utils/csp';
+import { createNoncePolicy, serializePolicy } from 'solidstep/utils/csp';
 
-let cspPolicy = createBasePolicy();
-
-...
-
-cspPolicy = withNonce(cspPolicy, nonce);
+// Secure-by-default: strict baseline + the per-request nonce on script/style-src,
+// with no 'unsafe-inline' / 'unsafe-eval'.
+const cspPolicy = createNoncePolicy(nonce);
 
 ...
 
@@ -69,6 +91,14 @@ event.response.headers.set('Content-Security-Policy', serializePolicy(cspPolicy)
 
 ...
 ```
+
+> **Pick the right preset.** `createNoncePolicy(nonce)` is the recommended
+> production starting point. `createStrictPolicy()` gives the same locked-down
+> baseline without inline script/style support, and you can layer the helpers
+> (`withNonce`, `withCDN`, `withGoogleFonts`, …) onto it. `createBasePolicy()` is
+> a **permissive dev convenience** — it includes `'unsafe-inline'` and
+> `'unsafe-eval'`; strip them with `withProductionSources(policy)` before shipping
+> if you use it.
 
 The CSP nonce is exposed to pages, layouts, and [metadata](./metadata.md) functions via `cspNonce`.
 
@@ -138,6 +168,23 @@ export function MyComponent() {
 
   return <button onClick={handleClick}>Go to Dashboard</button>;
 }
+```
+
+When the destination comes from **untrusted input** (a `?next=` param, a form
+field), use `safeRedirect` instead of `redirect` to avoid open-redirect abuse. It
+redirects only to same-site relative paths and to absolute URLs whose host you
+explicitly allowlist; anything else (off-site URLs, `javascript:`/`data:`,
+protocol-relative `//evil.com`) falls back to `'/'` (or your `fallback`):
+
+```tsx
+import { safeRedirect, isSafeRedirectTarget } from 'solidstep/utils/redirect';
+
+safeRedirect(nextParam);                                  // → '/' if unsafe
+safeRedirect(nextParam, { fallback: '/login' });
+safeRedirect(nextParam, { allowedHosts: ['auth.example.com'] });
+
+// Or validate without redirecting:
+if (isSafeRedirectTarget(nextParam)) { /* ... */ }
 ```
 
 ## Error Handling

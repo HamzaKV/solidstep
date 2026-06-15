@@ -87,3 +87,40 @@ describe('custom methods and headers', () => {
         expect(headers['Access-Control-Allow-Headers']).toBe('X-Custom-Header');
     });
 });
+
+describe('credentialed CORS', () => {
+    const credCheck = cors(trustedOrigins, undefined, undefined, {
+        allowCredentials: true,
+    });
+
+    it('adds Allow-Credentials on a simple (non-preflight) response', () => {
+        const headers = credCheck('https://example.com', false) as Record<
+            string,
+            string
+        >;
+        expect(headers['Access-Control-Allow-Credentials']).toBe('true');
+        expect(headers['Access-Control-Allow-Origin']).toBe(
+            'https://example.com',
+        );
+    });
+
+    it('adds Allow-Credentials on a preflight response', () => {
+        const headers = credCheck('https://example.com', true) as Record<
+            string,
+            string
+        >;
+        expect(headers['Access-Control-Allow-Credentials']).toBe('true');
+    });
+
+    it('never emits credential headers for an untrusted origin', () => {
+        expect(credCheck('https://evil.com', true)).toEqual({});
+    });
+
+    it('omits Allow-Credentials when not enabled (default)', () => {
+        const headers = check('https://example.com', false) as Record<
+            string,
+            string
+        >;
+        expect(headers['Access-Control-Allow-Credentials']).toBeUndefined();
+    });
+});

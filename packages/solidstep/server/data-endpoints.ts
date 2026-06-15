@@ -6,6 +6,7 @@ import { runSequentialLoader } from '../utils/loader-error';
 import { SEROVAL_PLUGINS } from '../utils/serialize';
 import {
     matchRoute,
+    parseSearchParams,
     type Import,
     type RoutePageHandler,
 } from '../utils/path-router';
@@ -13,10 +14,14 @@ import { ensureRouteManifest, getCachedModule } from './route-manifest';
 import type { LoaderModule, MetaModule } from './types';
 
 /**
- * Run a single deferred loader for a PPR page's hole and return its data as
- * JSON. `manifest` identifies the page/layout/group node; it is validated
- * against the route matched for `url` so only loaders on that route can run.
- * Returns `null` (→ 400) on a bad/unknown request.
+ * Run a single deferred loader for a PPR page's hole and return its data as a
+ * seroval-serialized envelope. `manifest` identifies the page/layout/group node;
+ * it is validated against the route matched for `url` so only loaders on that
+ * route can run. Returns `null` (→ 400) on a bad/unknown request.
+ *
+ * Uses seroval (not JSON) to match the soft-navigation envelope and the
+ * first-load streamed path, so deferred loader data containing `Date` / `Map` /
+ * `Set` / `BigInt` survives the round trip identically across every data path.
  */
 export const serveHoleData = async (req: Request): Promise<string | null> => {
     const reqUrl = new URL(req.url);
@@ -54,7 +59,7 @@ export const serveHoleData = async (req: Request): Promise<string | null> => {
     // loader cache key) are correct.
     const pageReq = new Request(targetUrl.toString(), { headers: req.headers });
     const data = await getCachedLoaderData(loaderFn, manifest, pageReq);
-    return JSON.stringify({ data });
+    return serialize({ data }, { plugins: SEROVAL_PLUGINS });
 };
 
 /**
@@ -174,7 +179,7 @@ export const serveRouteData = async (
     const routeManifest = await ensureRouteManifest();
 
     const targetUrl = new URL(target, reqUrl.origin);
-    const params = Object.fromEntries(targetUrl.searchParams);
+    const params = parseSearchParams(targetUrl.searchParams);
     const ser = (value: unknown) =>
         serialize(value, { plugins: SEROVAL_PLUGINS });
 

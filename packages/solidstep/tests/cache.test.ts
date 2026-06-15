@@ -7,6 +7,7 @@ vi.mock('vinxi/http', () => ({
 
 import {
     getCache,
+    getCacheResult,
     getCacheEntry,
     setCache,
     setCacheWithOptions,
@@ -36,6 +37,26 @@ describe('setCache / getCache', () => {
 
     it('returns null for a key that was never set', async () => {
         expect(await getCache('missing')).toBeNull();
+    });
+
+    it('getCacheResult distinguishes a miss from a cached null', async () => {
+        // Miss.
+        expect(await getCacheResult('absent')).toEqual({
+            hit: false,
+            value: null,
+        });
+        // Deliberately cached null (negative caching) — a hit, not a miss.
+        await setCache('negative', null);
+        expect(await getCacheResult('negative')).toEqual({
+            hit: true,
+            value: null,
+        });
+        // Ordinary hit.
+        await setCache('present', 7);
+        expect(await getCacheResult<number>('present')).toEqual({
+            hit: true,
+            value: 7,
+        });
     });
 
     it('stores and retrieves with an explicit TTL', async () => {

@@ -1,3 +1,14 @@
+/** Options for the {@link cors} resolver. */
+type CorsOptions = {
+    /**
+     * Emit `Access-Control-Allow-Credentials: true` so the browser sends cookies
+     * / `Authorization` with cross-origin requests. Only honored for a trusted,
+     * non-wildcard origin (the spec forbids `*` with credentials). Defaults to
+     * `false`.
+     */
+    allowCredentials?: boolean;
+};
+
 /**
  * Create a CORS header resolver bound to an allowlist of origins.
  *
@@ -12,6 +23,7 @@
  *   the common verbs (GET, POST, PUT, PATCH, DELETE, OPTIONS).
  * @param allowHeaders - Headers advertised in preflight responses. Defaults to
  *   `Content-Type` and `Authorization`.
+ * @param options - Extra CORS behavior (e.g. {@link CorsOptions.allowCredentials}).
  * @returns A `(origin, isPreflight) => Record<string, string>` resolver.
  */
 export const cors =
@@ -26,18 +38,24 @@ export const cors =
             'OPTIONS',
         ],
         allowHeaders: string[] = ['Content-Type', 'Authorization'],
+        options: CorsOptions = {},
     ) =>
     (origin: string, isPreflight: boolean) => {
         if (trustedOrigins.includes(origin)) {
+            const credentialHeaders = options.allowCredentials
+                ? { 'Access-Control-Allow-Credentials': 'true' }
+                : {};
             if (isPreflight) {
                 return {
                     'Access-Control-Allow-Origin': origin,
                     'Access-Control-Allow-Methods': allowMethods.join(', '),
                     'Access-Control-Allow-Headers': allowHeaders.join(', '),
+                    ...credentialHeaders,
                 };
             }
             return {
                 'Access-Control-Allow-Origin': origin,
+                ...credentialHeaders,
             };
         }
         return {};

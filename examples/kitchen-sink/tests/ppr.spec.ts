@@ -35,6 +35,11 @@ test.describe('PPR (render: ppr)', () => {
         );
         // The island is filled client-side via the loader endpoint.
         await expect(page.getByTestId('now-value')).toHaveText(/tick:\d+/);
+        // The hole's Date survived the client round trip as a real Date (the
+        // endpoint serializes with seroval, not JSON) — see @now/page.tsx.
+        await expect(page.getByTestId('now-when')).toHaveText(
+            '2024-01-02T03:04:05.000Z',
+        );
     });
 
     test('the hole is dynamic per request (value differs across visits)', async ({
@@ -51,7 +56,7 @@ test.describe('PPR (render: ppr)', () => {
         expect(second).not.toBe(first);
     });
 
-    test('the loader endpoint returns the hole data as JSON', async ({
+    test('the loader endpoint returns the hole data as a seroval envelope', async ({
         request,
     }) => {
         const res = await request.get(
@@ -60,7 +65,12 @@ test.describe('PPR (render: ppr)', () => {
             )}&url=${encodeURIComponent('/ppr')}`,
         );
         expect(res.status()).toBe(200);
-        const body = await res.json();
-        expect(typeof body.data.tick).toBe('number');
+        // seroval, not JSON: text/plain envelope that JSON.parse rejects but
+        // still encodes the tick and a real `new Date(...)` for the hole's Date.
+        expect(res.headers()['content-type']).toContain('text/plain');
+        const body = await res.text();
+        expect(() => JSON.parse(body)).toThrow();
+        expect(body).toMatch(/tick:\d+|"tick":\d+|tick.*\d/);
+        expect(body).toContain('new Date');
     });
 });

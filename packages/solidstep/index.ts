@@ -49,7 +49,10 @@ type Config = {
      * Select the built-in cache backend used for the page-render and loader
      * data caches. Defaults to an in-memory LRU.
      *
-     * - `{ type: 'memory', maxEntries }` — in-memory LRU (the default).
+     * - `{ type: 'memory', maxEntries, maxBytes }` — in-memory LRU (the default).
+     *   `maxBytes` caps the approximate total value size (evicting LRU entries
+     *   to stay under it) — useful on memory-constrained runtimes where an
+     *   entry-count limit alone can hold far more than expected.
      * - `{ type: 'filesystem', dir }` — persist entries to disk under `dir`
      *   (node-server presets only).
      *
@@ -58,7 +61,7 @@ type Config = {
      * that overrides whatever is selected here.
      */
     cache?:
-        | { type?: 'memory'; maxEntries?: number }
+        | { type?: 'memory'; maxEntries?: number; maxBytes?: number }
         | { type: 'filesystem'; dir: string };
     /**
      * Extra Vite config merged into each router. Provide a single object to

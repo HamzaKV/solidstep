@@ -1,6 +1,7 @@
 // utils/instrumentation.ts
 // Instrumentation types, helpers, and loader for SolidStep telemetry
-// Instrumentation types, helpers, and loader for SolidStep telemetry
+
+import { parseSearchParams, type SearchParams } from './path-router';
 
 // ============================================
 // Types
@@ -22,8 +23,8 @@ export interface RequestContext {
         | 'unknown';
     /** Route parameters extracted from the path */
     params: Record<string, string | string[]>;
-    /** URL search parameters */
-    searchParams: Record<string, string>;
+    /** URL search parameters (repeated keys become arrays) */
+    searchParams: SearchParams;
     /** High-resolution timestamp when request started */
     startTime: number;
     /** Custom metadata attached to the request */
@@ -237,7 +238,7 @@ export function createRequestContext(
         pathname: url.pathname,
         routeType: 'unknown',
         params: {},
-        searchParams: Object.fromEntries(url.searchParams),
+        searchParams: parseSearchParams(url.searchParams),
         startTime: performance.now(),
         metadata: {},
         startTimeEpoch: Date.now(),

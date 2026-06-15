@@ -40,4 +40,66 @@ describe('singleFlight', () => {
         expect(a).toBe('a');
         expect(b).toBe('b');
     });
+
+    describe('timeout eviction', () => {
+        it('evicts a hung flight after timeoutMs so the next caller runs fresh', async () => {
+            vi.useFakeTimers();
+            try {
+                let resolveFirst: (v: string) => void;
+                const fn = vi
+                    .fn()
+                    .mockImplementationOnce(
+                        () =>
+                            new Promise<string>((r) => {
+                                resolveFirst = r;
+                            }),
+                    )
+                    .mockResolvedValueOnce('second');
+                const first = singleFlight('t', fn, 50);
+                // Still in flight before the timeout: coalesced.
+                singleFlight('t', fn, 50);
+                expect(fn).toHaveBeenCalledTimes(1);
+
+                // After the timeout the key is evicted; the next call runs fresh.
+                vi.advanceTimersByTime(50);
+                const second = singleFlight('t', fn, 50);
+                expect(fn).toHaveBeenCalledTimes(2);
+                expect(await second).toBe('second');
+
+                // The original promise still resolves to its awaiters and its
+                // late settle must not evict the new flight's key.
+                resolveFirst!('first');
+                expect(await first).toBe('first');
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        it('clears the timer when the flight settles before the timeout', async () => {
+            vi.useFakeTimers();
+            try {
+                const fn = vi.fn(async () => 'ok');
+                const p = singleFlight('t2', fn, 1000);
+                expect(await p).toBe('ok');
+                // Settled → key cleared, next call runs fresh (timer was cleared).
+                await singleFlight('t2', fn, 1000);
+                expect(fn).toHaveBeenCalledTimes(2);
+                expect(vi.getTimerCount()).toBe(0);
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        it('treats timeoutMs of 0 as no timeout (no timer scheduled)', async () => {
+            vi.useFakeTimers();
+            try {
+                const fn = vi.fn(async () => 'x');
+                const p = singleFlight('t3', fn, 0);
+                expect(vi.getTimerCount()).toBe(0);
+                expect(await p).toBe('x');
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+    });
 });

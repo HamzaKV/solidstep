@@ -3,6 +3,7 @@ import {
     createNode,
     insertRoute,
     matchRoute,
+    parseSearchParams,
     type RouteNode,
     type RouteHandler,
 } from '../utils/path-router';
@@ -259,5 +260,33 @@ describe('robustness — collisions, depth, and group segments', () => {
         insertRoute(root, '/dashboard/@graph', h);
         expect(matchRoute(root, '/dashboard/@graph')!.handler).toBe(h);
         expect(matchRoute(root, '/dashboard/graph')).toBeNull();
+    });
+});
+
+describe('parseSearchParams', () => {
+    const parse = (qs: string) =>
+        parseSearchParams(new URL(`http://x/?${qs}`).searchParams);
+
+    it('returns an empty object for no query string', () => {
+        expect(parse('')).toEqual({});
+    });
+
+    it('keeps a single occurrence as a string', () => {
+        expect(parse('q=hello&page=2')).toEqual({ q: 'hello', page: '2' });
+    });
+
+    it('collects a repeated key into an array (preserving order)', () => {
+        expect(parse('tag=a&tag=b&tag=c')).toEqual({ tag: ['a', 'b', 'c'] });
+    });
+
+    it('mixes single and repeated keys in one object', () => {
+        expect(parse('tag=a&tag=b&sort=asc')).toEqual({
+            tag: ['a', 'b'],
+            sort: 'asc',
+        });
+    });
+
+    it('preserves an empty value for a present key', () => {
+        expect(parse('flag=')).toEqual({ flag: '' });
     });
 });

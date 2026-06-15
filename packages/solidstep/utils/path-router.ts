@@ -86,6 +86,29 @@ export type RouteHandler =
 type Params = Record<string, string | string[]>;
 
 /**
+ * Parsed query string: a single value per key, or an array when a key repeats
+ * (`?tag=a&tag=b` → `{ tag: ['a', 'b'] }`). Mirrors the route-param shape and
+ * matches Next.js's `searchParams`.
+ */
+export type SearchParams = Record<string, string | string[]>;
+
+/**
+ * Convert a {@link URLSearchParams} into a plain object, preserving repeated
+ * keys as arrays. `Object.fromEntries(searchParams)` silently keeps only the
+ * last value for a repeated key (`?tag=a&tag=b` → `{ tag: 'b' }`); this keeps
+ * them all so multi-value filters survive into loaders, pages, and the
+ * soft-navigation envelope.
+ */
+export const parseSearchParams = (sp: URLSearchParams): SearchParams => {
+    const out: SearchParams = {};
+    for (const key of new Set(sp.keys())) {
+        const all = sp.getAll(key);
+        out[key] = all.length > 1 ? all : all[0];
+    }
+    return out;
+};
+
+/**
  * A node in the route trie. Each node has at most three kinds of children,
  * matched in priority order by {@link matchRoute}:
  *

@@ -67,6 +67,24 @@ export const getCache = async <T>(key: string): Promise<T | null> => {
 };
 
 /**
+ * Like {@link getCache}, but distinguishes a **miss** from a cached value that
+ * happens to be `null`/`undefined` — `getCache` returns `null` for both, which
+ * defeats negative caching (e.g. caching "this lookup 404'd" for a while).
+ *
+ * @param key - Cache key.
+ * @returns `{ hit: true, value }` on a (non-expired) hit — `value` may be
+ *   `null`; `{ hit: false, value: null }` on a miss or hard-expired entry.
+ */
+export const getCacheResult = async <T>(
+    key: string,
+): Promise<{ hit: boolean; value: T | null }> => {
+    const entry = await getCacheEntry<T>(key);
+    return entry
+        ? { hit: true, value: entry.value }
+        : { hit: false, value: null };
+};
+
+/**
  * Store a value in the cache with full {@link CacheSetOptions} (TTL, SWR window,
  * tags). All deadlines are wall-clock (`Date.now()`-based).
  *

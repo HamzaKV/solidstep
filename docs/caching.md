@@ -93,6 +93,11 @@ const action = async () => {
 > The cache data functions (`getCache`, `setCache`, `invalidateCache`,
 > `invalidateTag`, `clearAllCache`) are **async** — always `await` them.
 
+> **Negative caching.** `getCache` returns `null` for both a miss and a value
+> cached as `null`. To cache "not found" results (and tell the two apart), use
+> `getCacheResult(key)`, which returns `{ hit, value }` — `hit` is `true` even
+> when the cached `value` is `null`.
+
 ## Pluggable cache stores
 
 The page-render and [loader-data](./data-loading.md#caching-loader-data) caches share a
@@ -106,6 +111,10 @@ import { defineConfig } from 'solidstep';
 export default defineConfig({
   // In-memory LRU (default). Optionally tune the capacity:
   cache: { type: 'memory', maxEntries: 5000 },
+  // Cap approximate total value size too (evicts LRU to stay under it) —
+  // useful on memory-constrained runtimes where a count limit alone can hold
+  // far more than expected:
+  // cache: { type: 'memory', maxEntries: 5000, maxBytes: 64 * 1024 * 1024 },
   // Or persist entries to disk (node-server presets only):
   // cache: { type: 'filesystem', dir: '.cache/solidstep' },
 });

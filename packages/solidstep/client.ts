@@ -1,5 +1,6 @@
 import { hydrate, createComponent } from 'solid-js/web';
 import { Suspense, ErrorBoundary, untrack } from 'solid-js';
+import { deserialize } from 'seroval';
 import 'vinxi/client';
 import { createDeferredResource } from './utils/deferred';
 import {
@@ -8,6 +9,7 @@ import {
     type ClientPageHandler,
 } from './utils/client-manifest';
 import { getModule, preloadHandler } from './utils/client-modules';
+import type { SearchParams } from './utils/path-router';
 import {
     routeStructure,
     routeLoaderData,
@@ -28,8 +30,10 @@ const fetchHole = (manifest: string): Promise<any> =>
             manifest,
         )}&url=${encodeURIComponent(location.pathname + location.search)}`,
     )
-        .then((r) => r.json())
-        .then((j) => j.data);
+        // The hole envelope is seroval-serialized (see `serveHoleData`), so
+        // deserialize rather than `r.json()` — this preserves Date/Map/Set/etc.
+        .then((r) => r.text())
+        .then((t) => (deserialize(t) as { data: any }).data);
 
 /** Synchronously read a preloaded component's default export. */
 const comp = (imp: { src: string }) => getModule(imp.src)?.default;
@@ -287,8 +291,8 @@ const renderTree = () => {
  */
 export const main = async (
     modulePath: string,
-    routeParams: Record<string, string> = {},
-    searchParams: Record<string, string> = {},
+    routeParams: Record<string, string | string[]> = {},
+    searchParams: SearchParams = {},
     loaderDataManifest: Record<string, any> = {},
     deferred: string[] = [],
     ppr = false,

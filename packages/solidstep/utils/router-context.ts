@@ -3,6 +3,7 @@ import { isServer } from 'solid-js/web';
 import { deserialize } from 'seroval';
 import { matchClientRoute } from './client-manifest';
 import { preloadHandler } from './client-modules';
+import { parseSearchParams, type SearchParams } from './path-router';
 
 /**
  * Client-side router runtime: a single reactive `RouteState` signal plus the
@@ -78,7 +79,7 @@ export type RouteParams<P extends RouteId = RouteId> = Register extends {
  */
 export type PageProps<P extends RouteId = RouteId, L = unknown> = {
     routeParams: RouteParams<P>;
-    searchParams: Record<string, string>;
+    searchParams: SearchParams;
     loaderData: L;
 };
 
@@ -89,7 +90,7 @@ export type RouteState = {
     pathname: string;
     search: string;
     params: Record<string, string | string[]>;
-    searchParams: Record<string, string>;
+    searchParams: SearchParams;
     /** The matched page's manifestPath (used to re-derive components). */
     manifestPath: string;
     loaderData: Record<string, any>;
@@ -114,7 +115,7 @@ type RouteEnvelope =
           type: 'page';
           manifestPath: string;
           params: Record<string, string | string[]>;
-          searchParams: Record<string, string>;
+          searchParams: SearchParams;
           loaderData: Record<string, any>;
           deferredKeys: string[];
           meta: Record<string, any>;
@@ -124,7 +125,7 @@ type RouteEnvelope =
           type: 'error';
           errorPageManifest: string;
           params: Record<string, string | string[]>;
-          searchParams: Record<string, string>;
+          searchParams: SearchParams;
           message: string;
           meta?: Record<string, any>;
       }
@@ -176,7 +177,7 @@ const notFoundState = (url: URL): RouteState => ({
     ...EMPTY_STRUCTURE,
     pathname: url.pathname,
     search: url.search,
-    searchParams: Object.fromEntries(url.searchParams),
+    searchParams: parseSearchParams(url.searchParams),
     kind: 'not-found',
     loaderData: {},
 });
