@@ -43,6 +43,17 @@ pnpm --filter kitchen-sink dev     # run the example app
   `exports` map.
 - CI runs `pnpm lint`, `pnpm typecheck`, `pnpm test`, and the Playwright e2e suite on every PR.
 
+## Git hooks
+
+[lefthook](https://github.com/evilmartians/lefthook) installs Git hooks automatically on
+`pnpm install` (via the root `prepare` script):
+
+- **pre-commit** — runs `biome check` on the staged files (lint + format).
+- **pre-push** — runs the full `pnpm typecheck`.
+
+Bypass a hook when you need to with `git commit --no-verify` / `git push --no-verify`. If hooks
+aren't firing, run `pnpm exec lefthook install` once.
+
 ## Testing
 
 - **Unit tests** live in `packages/solidstep/tests/` and run under Vitest with a 100% coverage

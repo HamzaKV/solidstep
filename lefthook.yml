@@ -1,0 +1,19 @@
+# Git hooks for SolidStep contributors, run by lefthook.
+#
+# Installed automatically via the root `prepare` script on `pnpm install`.
+# Bypass once with `git commit --no-verify` / `git push --no-verify`.
+#
+# pre-commit  — fast: lint + format-check only the staged files.
+# pre-push    — slower: full typecheck across the workspace.
+
+pre-commit:
+  parallel: true
+  commands:
+    biome:
+      glob: '*.{ts,tsx,js,jsx,json,jsonc}'
+      run: pnpm exec biome check --no-errors-on-unmatched {staged_files}
+
+pre-push:
+  commands:
+    typecheck:
+      run: pnpm run typecheck
