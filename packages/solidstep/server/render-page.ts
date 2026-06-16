@@ -561,8 +561,10 @@ export const renderPage = async (ctx: PageRenderContext) => {
                 if (streamError) {
                     await safeExecuteHook(
                         'onRequestError',
-                        inst?.onRequestError as any,
-                        streamError,
+                        inst?.onRequestError,
+                        streamError instanceof Error
+                            ? streamError
+                            : new Error(String(streamError)),
                         req,
                         reqCtx,
                     );

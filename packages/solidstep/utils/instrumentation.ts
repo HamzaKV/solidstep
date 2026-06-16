@@ -86,6 +86,7 @@ export type OnShutdownFn = () => void | Promise<void>;
 /** Called when an error occurs during request processing */
 export type OnRequestErrorFn = (
     error: Error,
+    request: Request,
     context: RequestContext,
 ) => void | Promise<void>;
 

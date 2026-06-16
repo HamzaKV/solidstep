@@ -272,7 +272,7 @@ export async function handleServerFunction(event: HTTPEvent) {
     } catch (x) {
         await safeExecuteHook(
             'onRequestError',
-            inst?.onRequestError as any,
+            inst?.onRequestError,
             x instanceof Error ? x : new Error(String(x)),
             request,
             reqCtx,

@@ -41,7 +41,7 @@ export default defineInstrumentation({
 | `onRequest` | Before each request | `(request: Request, context: RequestContext)` |
 | `onResponseStart` | When response is ready, before streaming | `(request: Request, response: Response, context: ResponseContext)` |
 | `onResponseEnd` | After response stream is complete | `(request: Request, context: ResponseContext)` |
-| `onRequestError` | When an unhandled error occurs | `(error: Error, context: RequestContext)` |
+| `onRequestError` | When an unhandled error occurs | `(error: Error, request: Request, context: RequestContext)` |
 
 ## Context Objects
 

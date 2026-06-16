@@ -176,8 +176,8 @@ const handleApiRoute = async (
     } catch (error) {
         await safeExecuteHook(
             'onRequestError',
-            inst?.onRequestError as any,
-            error,
+            inst?.onRequestError,
+            error instanceof Error ? error : new Error(String(error)),
             req,
             reqCtx,
         );
