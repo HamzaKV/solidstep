@@ -57,7 +57,12 @@ export const serveIsr = async (
         }
         singleFlight(key, () =>
             regenerateIsr(origin, pathname, revalidate, tags),
-        ).catch(() => undefined);
+        ).catch((err) =>
+            logger.warn(
+                { pathname, err: String(err) },
+                'ISR background revalidation failed; continuing to serve the stale artifact',
+            ),
+        );
         return { html: entry.value, cacheStatus: 'hit' };
     }
     const html = await singleFlight(key, () =>
@@ -83,13 +88,23 @@ export const seedIsrFromManifest = async (serverDir: string): Promise<void> => {
     let raw: string;
     try {
         raw = await readFile(`${serverDir}/prerender-manifest.json`, 'utf-8');
-    } catch {
-        return; // no ISR pages were prerendered
+    } catch (err) {
+        // A missing manifest is normal — it just means no ISR pages were
+        // prerendered. Logged at debug so it's visible when diagnosing.
+        logger.debug(
+            { err: String(err) },
+            'No ISR prerender manifest found; skipping ISR seed',
+        );
+        return;
     }
     let manifest: PrerenderManifest;
     try {
         manifest = JSON.parse(raw);
-    } catch {
+    } catch (err) {
+        logger.warn(
+            { err: String(err) },
+            'ISR prerender manifest is not valid JSON; skipping ISR seed',
+        );
         return;
     }
     for (const entry of manifest.isr ?? []) {

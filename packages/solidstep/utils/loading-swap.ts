@@ -28,6 +28,7 @@ export const buildLoadingSwapScript = (
 ): string => `
 <script ${nonce ? `nonce="${nonce}"` : ''}>
 (function () {
+  try {
     const head = document.head;
     const tpl = document.createElement('template');
     tpl.innerHTML = ${escapeScript(JSON.stringify(generateHtmlHead(meta) + assetsHtml))};
@@ -86,6 +87,20 @@ export const buildLoadingSwapScript = (
         body.replaceChildren(...next.content.childNodes);
         template.remove();
     }
+    try { sessionStorage.removeItem('__ss_swap_retry'); } catch (_) {}
+  } catch (e) {
+    // A failed swap would otherwise strand the loading shell. Reload once (a
+    // full server render recovers); guard with a one-shot flag so a persistent
+    // failure can't loop.
+    try {
+        if (!sessionStorage.getItem('__ss_swap_retry')) {
+            sessionStorage.setItem('__ss_swap_retry', '1');
+            location.reload();
+            return;
+        }
+    } catch (_) {}
+    console.error('[solidstep] loading-boundary swap failed', e);
+  }
 })();
 </script>
 `;
