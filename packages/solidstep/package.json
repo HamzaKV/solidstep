@@ -129,6 +129,10 @@
         "./utils/server-only": {
             "types": "./utils/server-only.d.ts",
             "default": "./utils/server-only.js"
+        },
+        "./utils/sse": {
+            "types": "./utils/sse.d.ts",
+            "default": "./utils/sse.js"
         }
     },
     "scripts": {
