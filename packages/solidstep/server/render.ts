@@ -94,6 +94,7 @@ export async function render(args: RenderArgs): Promise<RenderResult> {
             documentMeta: cachedEntry.documentMeta,
             documentAssets: cachedEntry.documentAssets,
             loaderData: cachedEntry.loaderData,
+            cacheStatus: 'hit',
         };
     }
 
@@ -527,6 +528,7 @@ export async function render(args: RenderArgs): Promise<RenderResult> {
         documentMeta: meta,
         documentAssets: assets,
         loaderData: loaderData,
+        cacheStatus: toRender === 'main' ? 'miss' : undefined,
     };
 }
 

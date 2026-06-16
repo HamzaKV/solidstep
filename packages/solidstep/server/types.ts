@@ -102,6 +102,12 @@ export type RenderPlainResult = {
     documentMeta: Meta;
     documentAssets: RenderAsset[];
     loaderData: Record<string, unknown>;
+    /**
+     * Whether this plain result came from the page-render cache (`'hit'`) or was
+     * rendered fresh (`'miss'`). Surfaced to request metrics; `undefined` when the
+     * page does not opt into page caching.
+     */
+    cacheStatus?: 'hit' | 'miss';
 };
 
 /** Deferred (streaming) render: the composed tree is streamed by the caller. */

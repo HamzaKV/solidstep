@@ -39,27 +39,31 @@ const regenerateIsr = async (
  * Serve an ISR page's cached full-HTML artifact with stale-while-revalidate:
  * fresh hits return immediately; stale hits return the stale artifact and kick
  * off one coalesced background regeneration; a cold miss renders on demand.
+ *
+ * Returns the HTML plus a `cacheStatus` (`'hit'` when an artifact was served —
+ * fresh or stale — `'miss'` on a cold render) for request metrics.
  */
 export const serveIsr = async (
     origin: string,
     pathname: string,
     revalidate: number,
     tags?: string[],
-): Promise<string> => {
+): Promise<{ html: string; cacheStatus: 'hit' | 'miss' }> => {
     const key = `isr:${pathname}`;
     const entry = await getCacheEntry<string>(key);
     if (entry) {
         if (entry.staleAt === null || Date.now() < entry.staleAt) {
-            return entry.value;
+            return { html: entry.value, cacheStatus: 'hit' };
         }
         singleFlight(key, () =>
             regenerateIsr(origin, pathname, revalidate, tags),
         ).catch(() => undefined);
-        return entry.value;
+        return { html: entry.value, cacheStatus: 'hit' };
     }
-    return singleFlight(key, () =>
+    const html = await singleFlight(key, () =>
         regenerateIsr(origin, pathname, revalidate, tags),
     );
+    return { html, cacheStatus: 'miss' };
 };
 
 // Shape of `prerender-manifest.json` written by the build crawler into the

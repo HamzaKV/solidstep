@@ -88,6 +88,7 @@ describe('render', () => {
         expect('rendered' in result && result.rendered).toBe('<rendered/>');
         expect(result.documentAssets).toEqual([]);
         expect(result.loaderData).toEqual({});
+        expect('cacheStatus' in result && result.cacheStatus).toBe('miss');
         expect(renderToString).toHaveBeenCalledTimes(1);
     });
 
@@ -108,6 +109,7 @@ describe('render', () => {
             pageOptions: { cache: { ttl: 1000 } },
         });
         expect('rendered' in result && result.rendered).toBe('CACHED');
+        expect('cacheStatus' in result && result.cacheStatus).toBe('hit');
         expect(renderToString).not.toHaveBeenCalled();
     });
 

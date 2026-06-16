@@ -118,12 +118,13 @@ export const renderPage = async (ctx: PageRenderContext) => {
                 pageOptions.revalidate && pageOptions.revalidate > 0
                     ? pageOptions.revalidate
                     : 60;
-            const isrHtml = await serveIsr(
+            const isr = await serveIsr(
                 urlObj.origin,
                 pathnamePart,
                 revalidate,
                 pageOptions.cache?.tags,
             );
+            reqCtx.metadata.cacheStatus = isr.cacheStatus;
             setHeader('Content-Type', 'text/html');
             setHeader(
                 'Cache-Control',
@@ -137,7 +138,7 @@ export const renderPage = async (ctx: PageRenderContext) => {
                 req,
                 respCtx,
             );
-            return isrHtml;
+            return isr.html;
         }
     }
 
@@ -428,6 +429,7 @@ export const renderPage = async (ctx: PageRenderContext) => {
                         ) {
                             throw new Error('Expected a plain render result');
                         }
+                        reqCtx.metadata.cacheStatus = mainResult.cacheStatus;
                         const {
                             rendered,
                             documentMeta,
