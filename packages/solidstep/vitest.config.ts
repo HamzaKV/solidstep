@@ -36,8 +36,6 @@ export default defineConfig({
                 'utils/fetch.server.ts',
                 'utils/logger.ts',
                 'utils/cookies.ts',
-                'utils/redirect.ts',
-                'utils/server-only.ts',
                 'utils/client-only.ts',
                 'utils/meta.ts',
                 'utils/options.ts',
