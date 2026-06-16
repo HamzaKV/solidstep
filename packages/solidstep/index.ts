@@ -64,6 +64,14 @@ type Config = {
         | { type?: 'memory'; maxEntries?: number; maxBytes?: number }
         | { type: 'filesystem'; dir: string };
     /**
+     * Default timeout (ms) applied to every data loader: if a loader runs longer
+     * it is aborted and rejects with a `LoaderTimeoutError` (a page loader then
+     * renders `error.tsx`, a layout/group loader yields the error sentinel). A
+     * per-loader `timeout` in `defineLoader` overrides this; omit for no global
+     * timeout. The loader's abort signal is also wired to client disconnects.
+     */
+    loaderTimeout?: number;
+    /**
      * Extra Vite config merged into each router. Provide a single object to
      * apply it everywhere, or a function receiving the target `router` name to
      * vary config per router.
@@ -116,6 +124,7 @@ export const defineConfig = (
     const sharedConfig = {
         logger: config.logger || false,
         cache: config.cache,
+        loaderTimeout: config.loaderTimeout,
     };
 
     // @ts-ignore

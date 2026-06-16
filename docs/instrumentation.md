@@ -57,6 +57,32 @@ export default defineInstrumentation({
 - Works with page routes, API routes, and server actions
 - Compatible with OpenTelemetry, Sentry, Datadog, and any Node.js telemetry SDK
 
+## Built-in request metrics
+
+`createMetricsInstrumentation` provides a ready-made `onResponseEnd` hook that
+emits one structured record per completed request — method, route, status,
+duration, and (when the framework records them) `renderStrategy` and
+`cacheStatus`. Spread it into your instrumentation; it logs through the shared
+[Pino logger](./utilities.md#logging) by default, or pass a `sink` to forward
+records to your telemetry backend:
+
+```tsx
+// app/instrumentation.ts
+import { defineInstrumentation } from 'solidstep/utils/instrumentation';
+import { createMetricsInstrumentation } from 'solidstep/utils/metrics';
+
+export default defineInstrumentation({
+  ...createMetricsInstrumentation({
+    // Optional. Defaults to logging each record at `info`.
+    sink: (record) => myMetrics.record(record),
+  }),
+});
+```
+
+Error responses still reach `onResponseEnd` with their status code, so failures
+are captured too. The framework populates `context.metadata.renderStrategy`
+(`'dynamic' | 'isr' | 'ppr' | 'static'`), which appears on each record.
+
 ## OpenTelemetry Example
 
 ```tsx

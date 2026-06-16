@@ -45,6 +45,30 @@ jobs:
       - name: Build framework
         run: pnpm --filter solidstep build
 
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Fail the pipeline on high/critical advisories in production dependencies.
+      # Dev-only advisories are left to Dependabot so CI isn't blocked by tooling
+      # churn that never ships to users.
+      - name: Audit production dependencies
+        run: pnpm audit --audit-level=high --prod
+
   e2e:
     name: E2E (kitchen-sink)
     runs-on: ubuntu-latest

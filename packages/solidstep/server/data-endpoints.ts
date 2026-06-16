@@ -1,9 +1,11 @@
+import { randomUUID } from 'node:crypto';
 import { serialize } from 'seroval';
 import type { Meta } from '../utils/meta';
 import { RedirectError } from '../utils/redirect';
 import { getCachedLoaderData } from '../utils/loader-cache';
 import { runSequentialLoader } from '../utils/loader-error';
 import { SEROVAL_PLUGINS } from '../utils/serialize';
+import { logger } from '../utils/logger';
 import {
     matchRoute,
     parseSearchParams,
@@ -23,7 +25,10 @@ import type { LoaderModule, MetaModule } from './types';
  * first-load streamed path, so deferred loader data containing `Date` / `Map` /
  * `Set` / `BigInt` survives the round trip identically across every data path.
  */
-export const serveHoleData = async (req: Request): Promise<string | null> => {
+export const serveHoleData = async (
+    req: Request,
+    locals?: Record<string, unknown>,
+): Promise<string | null> => {
     const reqUrl = new URL(req.url);
     const manifest = reqUrl.searchParams.get('manifest');
     const target = reqUrl.searchParams.get('url');
@@ -56,9 +61,16 @@ export const serveHoleData = async (req: Request): Promise<string | null> => {
     if (!loaderFn) return null;
 
     // Run the loader against the original page URL so its params/search (and
-    // loader cache key) are correct.
-    const pageReq = new Request(targetUrl.toString(), { headers: req.headers });
-    const data = await getCachedLoaderData(loaderFn, manifest, pageReq);
+    // loader cache key) are correct. The client-disconnect signal is forwarded
+    // so a hung hole loader can be cancelled.
+    const pageReq = new Request(targetUrl.toString(), {
+        headers: req.headers,
+        signal: req.signal,
+    });
+    const data = await getCachedLoaderData(loaderFn, manifest, pageReq, {
+        locals,
+        signal: pageReq.signal,
+    });
     return serialize({ data }, { plugins: SEROVAL_PLUGINS });
 };
 
@@ -88,6 +100,7 @@ export const resolveRouteData = async (
     entry: RoutePageHandler,
     req: Request,
     cspNonce?: string,
+    locals?: Record<string, unknown>,
 ): Promise<{
     loaderData: Record<string, unknown>;
     deferredKeys: string[];
@@ -95,6 +108,12 @@ export const resolveRouteData = async (
 }> => {
     const loaderData: Record<string, unknown> = {};
     const deferredKeys: string[] = [];
+    // Threaded into each loader: middleware `locals` (+ nonce, matching render)
+    // and the request's abort signal.
+    const invocation = {
+        locals: { ...locals, cspNonce },
+        signal: req.signal,
+    };
 
     // Loader targets: layouts + page + groups. `isPage` controls error
     // isolation (the page loader re-throws; everything else yields a sentinel).
@@ -137,6 +156,7 @@ export const resolveRouteData = async (
                 manifestPath,
                 req,
                 isPage,
+                invocation,
             );
         }),
     );
@@ -171,6 +191,7 @@ export const resolveRouteData = async (
 export const serveRouteData = async (
     req: Request,
     cspNonce?: string,
+    locals?: Record<string, unknown>,
 ): Promise<string | null> => {
     const reqUrl = new URL(req.url);
     const target = reqUrl.searchParams.get('url');
@@ -195,13 +216,18 @@ export const serveRouteData = async (
     const entry = match.handler as RoutePageHandler;
     const routeParams = match.params || {};
     // Run loaders against the target URL so params/search + cache keys are right.
-    const pageReq = new Request(targetUrl.toString(), { headers: req.headers });
+    // Forward the client-disconnect signal so a hung loader can be cancelled.
+    const pageReq = new Request(targetUrl.toString(), {
+        headers: req.headers,
+        signal: req.signal,
+    });
 
     try {
         const { loaderData, deferredKeys, meta } = await resolveRouteData(
             entry,
             pageReq,
             cspNonce,
+            locals,
         );
         return ser({
             type: 'page',
@@ -219,12 +245,28 @@ export const serveRouteData = async (
         // The page loader threw: render the route's error boundary client-side
         // if one exists, otherwise surface a not-found.
         if (entry.errorPage) {
+            const rawMessage = err instanceof Error ? err.message : String(err);
+            // Don't leak internal error text (SQL, file paths, secrets) to the
+            // client in production: log it server-side under a correlation id and
+            // send only a generic message + the id. In dev, send the real message.
+            const errorId = randomUUID();
+            let message: string;
+            if (import.meta.env.DEV) {
+                message = rawMessage;
+            } else {
+                logger.error(
+                    { errorId, err: rawMessage, route: targetUrl.pathname },
+                    'Page loader failed during soft navigation',
+                );
+                message = `An unexpected error occurred (ref: ${errorId}).`;
+            }
             return ser({
                 type: 'error',
                 errorPageManifest: entry.errorPage.manifestPath,
                 params: routeParams,
                 searchParams: params,
-                message: err instanceof Error ? err.message : String(err),
+                message,
+                errorId,
             });
         }
         return ser({ type: 'not-found' });

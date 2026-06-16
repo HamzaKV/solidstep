@@ -50,6 +50,52 @@ Loader caching is independent of [page-level caching](./caching.md): it memoizes
 
 > Loader data caching runs on the active [`CacheStore`](./caching.md#pluggable-cache-stores). The default is an in-memory per-process LRU, but it is **persistent and shared** when you configure a filesystem or external (e.g. Redis) store — the same store backs both the page cache and the loader cache.
 
+## Request context (`locals` & cancellation)
+
+A loader receives a second argument with request-scoped context: the `locals`
+your [middleware](./middleware.md) populated on `event.locals`, and a combined
+abort `signal`. Forward the signal to `fetch`/DB calls so they cancel when the
+client disconnects or the loader times out.
+
+```tsx
+export const loader = defineLoader(async (request, { locals, signal }) => {
+  const user = locals.user; // set in middleware (e.g. event.locals.user = ...)
+  const res = await fetch('https://api.example.com/data', { signal });
+  return { data: await res.json() };
+});
+```
+
+`locals` is typed by the `Locals` interface; augment it for your own keys:
+
+```tsx
+declare module 'solidstep/utils/loader' {
+  interface Locals {
+    user?: { id: string };
+  }
+}
+```
+
+The same `locals` object is passed to page/layout components as the `locals`
+prop, so the CSP nonce and your middleware values are available in both places.
+
+## Loader timeouts
+
+Guard against a slow or hung upstream with a timeout. Set it per loader, or a
+global default via `defineConfig({ loaderTimeout })`:
+
+```tsx
+export const loader = defineLoader(
+  async (request, { signal }) => fetchSlowThing({ signal }),
+  { timeout: 5_000 }, // ms; overrides the global default. 0 disables it.
+);
+```
+
+When a loader exceeds its timeout it is aborted and rejects with
+`LoaderTimeoutError`. This flows through the usual error isolation: a **page**
+loader renders the route's `error.tsx`, while a **layout/group** loader yields
+the error sentinel so siblings still render. The timeout's abort is combined with
+the request's own signal, so whichever fires first cancels the loader's work.
+
 ## Deferred loaders (streaming)
 
 By default a page loader is **sequential**: the page waits for it before any HTML is sent. Mark a page loader `type: 'defer'` to stream the shell **immediately** and stream the loader's data in afterwards — useful for slow, non-critical data.

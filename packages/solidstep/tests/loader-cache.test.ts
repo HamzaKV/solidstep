@@ -75,4 +75,24 @@ describe('getCachedLoaderData', () => {
             vi.useRealTimers();
         }
     });
+
+    it('threads locals and the abort signal into the loader', async () => {
+        const controller = new AbortController();
+        const loader = vi.fn(async () => ({ data: { ok: true } }));
+        const loaderFn = { loader, options: {} };
+        await getCachedLoaderData(loaderFn, '/p', req(), {
+            locals: { user: 'u1' },
+            signal: controller.signal,
+        });
+        expect(loader).toHaveBeenCalledTimes(1);
+        const [passedReq, ctx] = loader.mock.calls[0] as [
+            Request,
+            { locals: Record<string, unknown>; signal?: AbortSignal },
+        ];
+        // The loader gets a request cloned with the combined signal, plus an
+        // explicit context carrying the same signal and the request locals.
+        expect(passedReq).toBeInstanceOf(Request);
+        expect(ctx.signal).toBe(controller.signal);
+        expect(ctx.locals).toEqual({ user: 'u1' });
+    });
 });
