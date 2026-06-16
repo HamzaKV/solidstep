@@ -92,23 +92,26 @@ are the feature set you can build on right now (see the linked guides for detail
 ## On the path to 1.0
 
 Before `1.0`, the focus is hardening and maintainability rather than new surface
-area. These are committed directions (tracked internally), not new user-facing
-features:
+area. Most of the committed direction here has now landed:
 
-- **Decompose the render/server core.** Split the large `server.ts` into cohesive
-  modules (route manifest, data endpoints, ISR, the render engine, response builders)
-  with the orchestrator kept thin, and unit-test the isolated pieces.
-- **Tighten typing in the render/server layer.** Give the internal `render()` a
-  discriminated-union return type and a typed `PageOptions`, replacing the remaining
-  `any` casts on the hot path (compile-time only — no behavior change).
-- **Harden the synchronous loading-placeholder swap** and surface today's
-  intentionally-silent failure paths through the logger at `debug`/`warn` (quiet in
-  production) so misconfiguration is visible.
-- **Expand contributor & user docs** — a dedicated testing guide (loaders, actions,
-  components, e2e) and a deeper request-lifecycle/architecture reference, plus JSDoc
-  on the client/build internals.
-- **Broaden test coverage** of the isolated pipeline and the `client-only` /
-  `server-only` and prefetch boundaries.
+- ✅ **Decomposed the render/server core.** The `server.ts` handler is a thin
+  request router; the page render (ISR/PPR/deferred/loading/main/error + response
+  assembly) lives in `server/render-page.ts` over the `server/render.ts` engine,
+  which now has unit tests.
+- ✅ **Tightened render/server typing.** `render()` is overloaded so non-`main`
+  renders are typed `RenderPlainResult`, and the hot-path `as`-casts were replaced
+  with `isDeferredResult` / `isPprResult` guards.
+- ✅ **Hardened the loading-placeholder swap** (try/catch with a one-shot reload
+  fallback) and routed the cache-store and ISR silent-failure paths through the
+  logger.
+- ✅ **Expanded docs** — testing guide, a deeper request-lifecycle/architecture
+  reference, and new [Data Validation](./data-validation.md),
+  [Database & ORM](./database.md), and [Performance](./performance.md) guides.
+
+Still in progress:
+
+- **Broaden test coverage** of the remaining browser-coupled boundaries
+  (`client-only`, the prefetch path), which are covered by E2E today.
 
 ## Future / under consideration
 

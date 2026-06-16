@@ -8,7 +8,8 @@ This is the documentation index. Pages are grouped into **Guides**, **Reference*
 
 - [Getting Started](./getting-started.md) — create a project, special files, configuration, project structure.
 - [Routing](./routing.md) — pages, layouts, group routes, dynamic routes, parallel routes.
-- [Data Loading](./data-loading.md) — `defineLoader` and typed loader data.
+- [Data Loading](./data-loading.md) — `defineLoader`, typed loader data, request context, timeouts.
+- [Data Validation](./data-validation.md) — validating params/form data with Standard Schema (Zod/Valibot/ArkType).
 - [Rendering Strategies](./rendering.md) — SSG / ISR / dynamic via `render`, `generateStaticParams`.
 - [Server Actions & Forms](./server-actions-and-forms.md) — server functions, `<Form>`, `useActionState`, `useFormStatus`, progressive enhancement.
 - [Metadata](./metadata.md) — SEO metadata with `generateMeta` / `meta()`.
@@ -16,7 +17,9 @@ This is the documentation index. Pages are grouped into **Guides**, **Reference*
 - [Middleware](./middleware.md) — request/response interceptors with `defineMiddleware`.
 - [Instrumentation](./instrumentation.md) — observability hooks and OpenTelemetry.
 - [Caching](./caching.md) — page-level caching and cache invalidation.
-- [API Routes](./api-routes.md) — REST endpoints with `route.ts` and server assets.
+- [API Routes](./api-routes.md) — REST endpoints with `route.ts`, SSE/streaming, server assets.
+- [Database & ORM](./database.md) — Drizzle/Prisma patterns and connection lifecycle.
+- [Performance](./performance.md) — rendering strategy, caching, streaming, metrics, bundle analysis.
 - [Security](./security.md) — cookies, CORS, CSP, CSRF, redirects, error handling, server-only code.
 - [Utilities](./utilities.md) — logging, fetch wrappers, preloading/prefetching strategies.
 - [Assets & Environment](./assets-and-env.md) — fonts, images, environment variables.

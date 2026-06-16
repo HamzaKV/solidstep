@@ -25,6 +25,12 @@ Request
 
 Instrumentation hooks (`onRequest`, `onResponseEnd`, `onRequestError`) wrap this flow — see [Instrumentation](./instrumentation.md).
 
+The top-level handler (`server.ts`) is a thin request router: it short-circuits
+internal endpoints and metadata files, dispatches API routes, then delegates the
+entire page/not-found render — ISR short-circuit, PPR shell, deferred streaming,
+loading boundary, main render, error boundary, and response assembly — to
+`server/render-page.ts`, which calls the render engine in `server/render.ts`.
+
 The numbered sections below walk each stage in order.
 
 ## 1. Route Manifest
@@ -51,7 +57,7 @@ Otherwise:
 
 ## 3. Loaders: Sequential vs Deferred
 
-The `render()` function (in `server.ts`) resolves the page variant to render (`main`, `loading`, `error`, or `not-found`). It then runs **every layout loader along the route path and the page loader concurrently** (`Promise.all`) rather than sequentially down the layout chain. Results are keyed by each node's manifest path and applied in tree order, so `loaderData` ordering is deterministic while the awaits overlap. Parallel-route group loaders run alongside the last layout.
+The `render()` function (in `server/render.ts`) resolves the page variant to render (`main`, `loading`, `error`, or `not-found`). It then runs **every layout loader along the route path and the page loader concurrently** (`Promise.all`) rather than sequentially down the layout chain. Results are keyed by each node's manifest path and applied in tree order, so `loaderData` ordering is deterministic while the awaits overlap. Parallel-route group loaders run alongside the last layout.
 
 Each loader (from `defineLoader`) carries a `type`:
 
@@ -68,7 +74,7 @@ Layouts and the page are composed inside-out (`reduceRight`) into a single compo
 
 ## 4. Render Strategies
 
-A page's `render` option (set in its `options` export — see [Rendering Strategies](./rendering.md)) selects how the matched page is produced. The handler in `server.ts` branches on this:
+A page's `render` option (set in its `options` export — see [Rendering Strategies](./rendering.md)) selects how the matched page is produced. The page renderer in `server/render-page.ts` branches on this:
 
 | Strategy   | When rendered                  | How served                                                                                   |
 | ---------- | ------------------------------ | -------------------------------------------------------------------------------------------- |
