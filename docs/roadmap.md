@@ -46,6 +46,13 @@ are the feature set you can build on right now (see the linked guides for detail
   `<Suspense>` fallback) and stream the data in afterward. Per-group `loading.tsx` /
   `error.tsx` boundaries isolate parallel-route slots. See
   [Data Loading](./data-loading.md) and [Routing](./routing.md).
+- **Loader context, timeouts & cancellation** — loaders receive a second
+  argument, `{ locals, signal }`: the middleware-populated `event.locals` (typed
+  via the augmentable `Locals` interface) and a combined abort signal. A
+  per-loader `timeout` (or the global `defineConfig({ loaderTimeout })`) aborts a
+  hung loader, and the request's abort signal is threaded through so a client
+  disconnect cancels in-flight work. See
+  [Data Loading](./data-loading.md#request-context-locals--cancellation).
 - **Client-side (soft) navigation** — `<Link>` and `useNavigate` navigate without a
   full reload, fetching the route's loader data + metadata in one request and
   re-rendering reactively. Includes prefetch (hover/viewport/eager), scroll
@@ -70,9 +77,14 @@ are the feature set you can build on right now (see the linked guides for detail
 - **Middleware** — composable request/response interceptors via `defineMiddleware`.
   See [Middleware](./middleware.md).
 - **Security utilities** — cookies, CORS, CSP (with nonce), CSRF, redirects, error
-  handling, and `client-only` / `server-only` boundaries. See [Security](./security.md).
-- **Instrumentation** — observability hooks (including OpenTelemetry) and structured
-  logging. See [Instrumentation](./instrumentation.md).
+  handling, `rateLimit` / `bodyLimit` middleware, and `client-only` /
+  `server-only` boundaries. Loader errors no longer leak their message to the
+  client in production (logged server-side under a correlation id instead). See
+  [Security](./security.md).
+- **Instrumentation** — observability hooks (including OpenTelemetry), structured
+  logging, and a built-in `createMetricsInstrumentation` that emits a per-request
+  metric record (timing, status, route, render strategy). See
+  [Instrumentation](./instrumentation.md).
 - **API routes** — REST endpoints with `route.ts`. See [API Routes](./api-routes.md).
 - **Tooling** — a dev error overlay, `@varlabs/create-solidstep` scaffolding with a
   guided starter, and deployment via Nitro presets. See [Deployment](./deployment.md).
@@ -107,13 +119,17 @@ promises.
 - **Deferred *layout* loaders.** `defer` is page- and group-scoped today; layout
   loaders are always awaited. Supporting deferred layouts would unlock more granular
   streaming.
-- **Request-scoped `locals` / context.** A typed request context threaded from
-  middleware through to loaders and actions (today `locals` only carries the CSP
-  nonce).
 - **View Transitions API** integration in the soft-navigation router for animated
   page transitions.
 - **Schema-validated server actions** — type-safe action input validation layered on
-  the existing `<Form>` / `useActionState`.
+  the existing `<Form>` / `useActionState` (targeting the Standard Schema spec so
+  Zod / Valibot / ArkType all work).
+- **On-demand revalidation endpoint** — a secured HTTP endpoint so a CMS webhook
+  can trigger `revalidatePath` / `invalidateTag` without a deploy.
+- **Draft / preview mode** — a signed cookie that bypasses ISR/SSG/PPR caching
+  for a session, for headless-CMS editing workflows.
+- **Parent loader data access** — read an ancestor layout's loader data from a
+  child (à la React Router's `useRouteLoaderData`).
 - **Image & font optimization** components.
 - **i18n routing** convention.
 

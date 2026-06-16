@@ -10,6 +10,7 @@ import {
 import { join } from 'node:path';
 import { serialize, deserialize } from 'seroval';
 import { SEROVAL_PLUGINS } from './serialize';
+import { logger } from './logger';
 
 /** A value that may be returned synchronously or as a promise. */
 export type MaybePromise<T> = T | Promise<T>;
@@ -153,7 +154,13 @@ export class MemoryCacheStore implements CacheStore {
         if (this.maxBytes === Number.POSITIVE_INFINITY) return 0;
         try {
             return serialize(value, { plugins: SEROVAL_PLUGINS }).length;
-        } catch {
+        } catch (err) {
+            // An unserializable value can't be byte-counted; it still gets
+            // cached (size 0), but that defeats the maxBytes bound, so surface it.
+            logger.warn(
+                { err },
+                'MemoryCacheStore: failed to size a cache value; counting it as 0 bytes',
+            );
             return 0;
         }
     }
@@ -327,7 +334,13 @@ export class FilesystemCacheStore implements CacheStore {
     private async readTags(): Promise<Record<string, string[]>> {
         try {
             return JSON.parse(await readFile(this.tagsFile, 'utf-8'));
-        } catch {
+        } catch (err) {
+            // A missing index is normal (first run). Anything else (a truncated
+            // or corrupt index) would silently break invalidateTag, so log it.
+            logger.debug(
+                { err },
+                'FilesystemCacheStore: tag index unreadable; treating as empty',
+            );
             return {};
         }
     }
@@ -346,7 +359,11 @@ export class FilesystemCacheStore implements CacheStore {
         try {
             const raw = await readFile(this.fileFor(key), 'utf-8');
             return deserialize(raw) as CacheEntry<T>;
-        } catch {
+        } catch (err) {
+            // A missing file is an ordinary cache miss; a deserialize failure is
+            // a corrupt entry. Both resolve to a miss — log at debug so it's
+            // diagnosable without being noisy in production.
+            logger.debug({ err }, 'FilesystemCacheStore: cache read miss');
             return null;
         }
     }
@@ -383,8 +400,13 @@ export class FilesystemCacheStore implements CacheStore {
     async delete(key: string): Promise<void> {
         try {
             await unlink(this.fileFor(key));
-        } catch {
-            // Missing file is a no-op.
+        } catch (err) {
+            // Missing file is a no-op; any other unlink failure (e.g. a
+            // permission error) leaves a stale entry, so make it diagnosable.
+            logger.debug(
+                { err },
+                'FilesystemCacheStore: delete found no file to remove',
+            );
         }
     }
 

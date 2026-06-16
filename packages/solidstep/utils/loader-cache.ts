@@ -1,11 +1,52 @@
 import { getCacheEntry, setCacheWithOptions } from './cache';
 import { singleFlight } from './single-flight';
+import { resolveLoaderTimeout, runWithLoaderTimeout } from './loader-timeout';
+import type { LoaderContext } from './loader';
 
 type CacheableLoader = {
-    loader: (request?: Request) => Promise<{ data: unknown }>;
+    loader: (
+        request?: Request,
+        context?: LoaderContext,
+    ) => Promise<{ data: unknown }>;
     options?: {
+        timeout?: number;
         cache?: { ttl?: number; key?: string; swr?: number; tags?: string[] };
     };
+};
+
+/**
+ * Request-scoped values threaded from the handler into a loader invocation:
+ * the middleware-populated `locals` and the request's abort `signal` (client
+ * disconnect). Combined with the loader's timeout inside {@link invokeLoader}.
+ */
+export type LoaderInvocation = {
+    locals?: Record<string, unknown>;
+    signal?: AbortSignal;
+};
+
+/**
+ * Invoke a loader under its effective timeout + the request's abort signal,
+ * passing the request (cloned with the combined signal so the loader can forward
+ * it) and a {@link LoaderContext}. This is the single funnel every loader call
+ * (sequential, deferred, hole, soft-nav) routes through.
+ */
+const invokeLoader = (
+    loaderFn: CacheableLoader,
+    req: Request,
+    invocation?: LoaderInvocation,
+): Promise<{ data: unknown }> => {
+    const timeoutMs = resolveLoaderTimeout(loaderFn.options?.timeout);
+    return runWithLoaderTimeout(
+        (signal) => {
+            const request = signal ? new Request(req, { signal }) : req;
+            const context: LoaderContext = {
+                locals: (invocation?.locals ?? {}) as LoaderContext['locals'],
+                signal,
+            };
+            return loaderFn.loader(request, context);
+        },
+        { timeoutMs, parentSignal: invocation?.signal },
+    );
 };
 
 /**
@@ -25,16 +66,18 @@ type CacheableLoader = {
  * @param loaderFn - The `{ loader, options }` wrapper produced by `defineLoader`.
  * @param manifestPath - The loader's manifest path (part of the cache key).
  * @param req - The incoming request (its URL forms the default key).
+ * @param invocation - Request-scoped `locals` + abort `signal` to thread in.
  * @returns The loader's resolved `data` (cached when enabled).
  */
 export const getCachedLoaderData = async (
     loaderFn: CacheableLoader,
     manifestPath: string,
     req: Request,
+    invocation?: LoaderInvocation,
 ): Promise<unknown> => {
     const cacheOpts = loaderFn.options?.cache;
     if (!cacheOpts) {
-        const result = await loaderFn.loader(req);
+        const result = await invokeLoader(loaderFn, req, invocation);
         return result.data || {};
     }
 
@@ -43,7 +86,7 @@ export const getCachedLoaderData = async (
     const key = `loader:${manifestPath}:${keySuffix}`;
 
     const run = async () => {
-        const result = await loaderFn.loader(req);
+        const result = await invokeLoader(loaderFn, req, invocation);
         const data = result.data || {};
         await setCacheWithOptions(key, data, {
             ttl: cacheOpts.ttl || 0,

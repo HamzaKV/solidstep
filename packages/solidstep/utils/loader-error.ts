@@ -24,15 +24,22 @@ export type LoaderErrorSentinel = { [LOADER_ERROR_KEY]: string };
  * @param manifestPath - The node's manifest path (cache key component).
  * @param req - The incoming request.
  * @param isPageLoader - Whether this is the page loader (vs a layout/group).
+ * @param invocation - Request-scoped `locals` + abort `signal` to thread in.
  */
 export const runSequentialLoader = async (
     loaderFn: Parameters<typeof getCachedLoaderData>[0],
     manifestPath: string,
     req: Request,
     isPageLoader: boolean,
+    invocation?: Parameters<typeof getCachedLoaderData>[3],
 ): Promise<unknown> => {
     try {
-        return await getCachedLoaderData(loaderFn, manifestPath, req);
+        return await getCachedLoaderData(
+            loaderFn,
+            manifestPath,
+            req,
+            invocation,
+        );
     } catch (err) {
         if (isPageLoader) throw err;
         const message = err instanceof Error ? err.message : String(err);

@@ -45,6 +45,34 @@ jobs:
       - name: Build framework
         run: pnpm --filter solidstep build
 
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Report-only. This monorepo's prod tree includes the example app (via
+      # vinxi) and build tooling, whose deep transitive advisories are upstream
+      # and are NOT shipped by the `solidstep` package. Gating on the root audit
+      # would wedge every PR on issues this repo can't fix; Dependabot owns the
+      # actual remediation (dependency bumps). This step keeps advisories visible
+      # in the CI logs without blocking. Review the output for anything in
+      # solidstep's own direct deps.
+      - name: Audit production dependencies (report-only)
+        run: pnpm audit --audit-level=high --prod || true
+
   e2e:
     name: E2E (kitchen-sink)
     runs-on: ubuntu-latest

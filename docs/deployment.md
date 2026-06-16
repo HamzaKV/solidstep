@@ -55,7 +55,7 @@ Refer to the [Nitro deployment docs](https://nitro.build/deploy) for the full li
 ## Build Output Notes
 
 - **`server-assets/`** — the [server assets](./api-routes.md#server-assets) directory is copied into the build so files like templates remain available at runtime via `process.cwd()`.
-- **`.config.json`** — a generated config file in the server build holds the resolved [logger](./utilities.md#logging) configuration, read at server startup.
+- **`.config.json`** — a generated config file in the server build holds the resolved [logger](./utilities.md#logging), cache, and `loaderTimeout` configuration, read at server startup.
 
 ## Environment Variables
 
@@ -120,8 +120,19 @@ CMD ["node", ".output/server/index.mjs"]
 
 > If you deploy on `node:20`/`node:21` images, keep the `node:sqlite` stub described above.
 
+## Hardening for production
+
+- **Rate limiting & body size** — the platform/proxy in front of the app should
+  bound request rate and body size, but SolidStep also ships `rateLimit` and
+  `bodyLimit` middleware you can compose for app-level limits that travel with the
+  code (and, for rate limiting, share an external `CacheStore` across instances).
+  See [Security](./security.md#rate-limiting--body-size).
+- **Loader timeouts** — set `defineConfig({ loaderTimeout })` so a hung upstream
+  can't tie up a response indefinitely. See [Data Loading](./data-loading.md#loader-timeouts).
+
 ## Related
 
 - [Getting Started](./getting-started.md) — `app.config.ts` configuration.
 - [Caching](./caching.md) — page-level caching and response headers.
+- [Security](./security.md) — rate limiting, body limits, CSP/CSRF/CORS.
 - [Troubleshooting](./troubleshooting.md) — common deployment/runtime issues.

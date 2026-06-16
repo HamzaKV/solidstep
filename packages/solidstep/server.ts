@@ -242,10 +242,17 @@ const handler = eventHandler(async (event) => {
 
         const clientManifest = ensureClientManifest();
 
+        // Request-scoped values set by middleware (`event.locals`), threaded into
+        // loaders/components. The CSP nonce is the one framework-populated key.
+        const locals = (event as any).locals as
+            | Record<string, unknown>
+            | undefined;
+        const cspNonce = locals?.cspNonce as string | undefined;
+
         // PPR hole data: the client fetches a deferred loader's data here to fill
         // a partially-prerendered page's dynamic holes.
         if (new URL(req.url).pathname === LOADER_ENDPOINT) {
-            const body = await serveHoleData(req);
+            const body = await serveHoleData(req, locals);
             if (body === null) {
                 setResponseStatus(400);
                 return 'Bad Request';
@@ -256,12 +263,10 @@ const handler = eventHandler(async (event) => {
             return body;
         }
 
-        const cspNonce = (event as any).locals?.cspNonce as string | undefined;
-
         // Soft-navigation route data: the client router fetches a route's full
         // loader data + metadata here as a seroval-serialized envelope.
         if (new URL(req.url).pathname === ROUTE_ENDPOINT) {
-            const body = await serveRouteData(req, cspNonce);
+            const body = await serveRouteData(req, cspNonce, locals);
             if (body === null) {
                 setResponseStatus(400);
                 return 'Bad Request';
@@ -337,6 +342,7 @@ const handler = eventHandler(async (event) => {
                           .options
                     : undefined;
                 if (pageOptions?.render === 'isr') {
+                    reqCtx.metadata.renderStrategy = 'isr';
                     const revalidate =
                         pageOptions.revalidate && pageOptions.revalidate > 0
                             ? pageOptions.revalidate
@@ -418,6 +424,7 @@ const handler = eventHandler(async (event) => {
                                         req: req,
                                         pageOptions: {},
                                         cspNonce,
+                                        locals,
                                     })) as RenderPlainResult;
                                     assets.push(...documentAssets);
                                     clientHydrationScript =
@@ -448,6 +455,8 @@ const handler = eventHandler(async (event) => {
                                           pageEntry!.mainPage.options as Import,
                                       )
                                     : { options: {} };
+                                reqCtx.metadata.renderStrategy =
+                                    options?.render ?? 'dynamic';
                                 if (options?.responseHeaders) {
                                     const headers = options.responseHeaders;
                                     for (const [key, value] of Object.entries(
@@ -471,6 +480,7 @@ const handler = eventHandler(async (event) => {
                                         req,
                                         pageOptions: options,
                                         cspNonce,
+                                        locals,
                                     })) as RenderPprResult;
                                     const assetsHtml = renderAssetsToHtml(
                                         result.documentAssets,
@@ -518,6 +528,7 @@ const handler = eventHandler(async (event) => {
                                         req,
                                         pageOptions: options,
                                         cspNonce,
+                                        locals,
                                     })) as RenderDeferredResult;
                                     const assetsHtml = renderAssetsToHtml(
                                         result.documentAssets,
@@ -591,6 +602,7 @@ const handler = eventHandler(async (event) => {
                                         req: req,
                                         pageOptions: options,
                                         cspNonce,
+                                        locals,
                                     })) as RenderPlainResult;
                                     const assetsHtml = renderAssetsToHtml(
                                         assets.concat(documentAssets),
@@ -647,6 +659,7 @@ const handler = eventHandler(async (event) => {
                                     req: req,
                                     pageOptions: options,
                                     cspNonce,
+                                    locals,
                                 })) as RenderPlainResult;
                                 assets.push(...documentAssets);
                                 clientHydrationScript = buildHydrationScript({
@@ -711,6 +724,7 @@ const handler = eventHandler(async (event) => {
                                     req: req,
                                     pageOptions: {},
                                     cspNonce,
+                                    locals,
                                     error: e1,
                                 })) as RenderPlainResult;
                                 assets.push(...documentAssets);

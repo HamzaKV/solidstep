@@ -1,6 +1,38 @@
 import { isServer } from 'solid-js/web';
 
-type LoaderFunction<T> = (request?: Request) => Promise<T>;
+/**
+ * Request-scoped values populated by middleware (via `event.locals`) and threaded
+ * through to loaders and route components. Augment it with module declaration
+ * merging to type your own keys:
+ *
+ * ```ts
+ * declare module 'solidstep/utils/loader' {
+ *   interface Locals {
+ *     user?: { id: string };
+ *   }
+ * }
+ * ```
+ */
+export interface Locals {
+    /** The per-request CSP nonce, when a nonce policy is in use. */
+    cspNonce?: string;
+}
+
+/**
+ * The second argument passed to a loader: the request-scoped {@link Locals} plus
+ * the combined abort `signal` (client disconnect **and** the loader timeout).
+ * Forward `signal` to `fetch`/DB calls so they cancel when the request aborts or
+ * the loader times out.
+ */
+export type LoaderContext = {
+    locals: Locals;
+    signal?: AbortSignal;
+};
+
+type LoaderFunction<T> = (
+    request?: Request,
+    context?: LoaderContext,
+) => Promise<T>;
 
 type LoaderOptions = {
     /**
@@ -8,6 +40,14 @@ type LoaderOptions = {
      * blocks the initial render; `'defer'` streams the data in after the shell.
      */
     type?: 'defer' | 'sequential';
+    /**
+     * Abort the loader if it runs longer than this many milliseconds, rejecting
+     * with a `LoaderTimeoutError` (which flows through the usual error isolation:
+     * a page loader renders `error.tsx`, a layout/group loader yields the error
+     * sentinel). Overrides the global `loaderTimeout` from `defineConfig`. Omit
+     * to inherit the global default; set `0` to explicitly disable it.
+     */
+    timeout?: number;
     /**
      * Cache the loader's resolved data on the server.
      *
@@ -53,8 +93,8 @@ export const defineLoader = <T>(
     options?: LoaderOptions,
 ) => {
     if (isServer) {
-        const fn = async (request?: Request) => {
-            const loaderData = await loader(request);
+        const fn = async (request?: Request, context?: LoaderContext) => {
+            const loaderData = await loader(request, context);
             return {
                 data: loaderData,
                 type: options?.type || 'sequential',

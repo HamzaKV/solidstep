@@ -256,6 +256,41 @@ export const loader = defineLoader(async () => {
 });
 ```
 
+## Rate limiting & body size
+
+Two composable [middleware](./middleware.md) guard against abusive traffic. Both
+short-circuit with an error `Response` before the route runs.
+
+```tsx
+// app/middleware.ts
+import { defineMiddleware } from 'solidstep/utils/middleware';
+import { rateLimit } from 'solidstep/utils/rate-limit';
+import { bodyLimit } from 'solidstep/utils/body-limit';
+
+export default defineMiddleware([
+  bodyLimit({ maxBytes: 1_000_000 }),        // 413 when Content-Length is too big
+  rateLimit({ windowMs: 60_000, max: 100 }), // 429 (with Retry-After) past the limit
+]);
+```
+
+- `rateLimit` counts requests per key in a fixed window on the active
+  [`CacheStore`](./caching.md#pluggable-cache-stores), so it works across
+  instances when backed by an external store (e.g. Redis). The key defaults to
+  the client IP (`x-forwarded-for` first hop, else the socket address); pass
+  `key: (event) => ...` to bucket by user id, API key, or route instead.
+- `bodyLimit` rejects based on the declared `Content-Length`. A chunked request
+  with no `Content-Length` is not caught here — bound those at your
+  runtime/proxy. Treat it as a first line of defence, not a hard cap.
+
+## Production error messages
+
+When a page loader throws, the framework does **not** leak the raw error message
+to the browser in production. For a soft-navigation failure it logs the message
+server-side under a generated `errorId` (via the [logger](./utilities.md#logging))
+and sends a generic message plus that id to the client, so you can correlate a
+user report to a server log without exposing internal details (SQL text, file
+paths, secrets). In development the full message is sent through for debugging.
+
 ## Server-Only Code
 
 Ensure code only runs on the server and throws an error if accessed on the client:

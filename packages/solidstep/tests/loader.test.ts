@@ -33,15 +33,16 @@ describe('defineLoader (server)', () => {
         expect((await deferred!.loader()).type).toBe('defer');
     });
 
-    it('passes the Request through to the underlying loader', async () => {
+    it('passes the Request and context through to the underlying loader', async () => {
         vi.doMock('solid-js/web', () => ({ isServer: true }));
         const { defineLoader } = await import('../utils/loader');
 
         const spy = vi.fn(async (_req?: Request) => 'ok');
         const def = defineLoader(spy);
         const request = new Request('https://example.com/');
-        await def!.loader(request);
-        expect(spy).toHaveBeenCalledWith(request);
+        const context = { locals: { cspNonce: 'abc' } };
+        await def!.loader(request, context);
+        expect(spy).toHaveBeenCalledWith(request, context);
     });
 });
 

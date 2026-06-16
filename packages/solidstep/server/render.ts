@@ -40,6 +40,7 @@ export const render = async ({
     req,
     pageOptions,
     cspNonce,
+    locals,
     error,
 }: {
     toRender: 'main' | 'loading' | 'error' | 'not-found';
@@ -49,9 +50,17 @@ export const render = async ({
     req: Request;
     pageOptions?: Options;
     cspNonce?: string;
+    locals?: Record<string, unknown>;
     error?: Error;
 }): Promise<RenderResult> => {
     const url = new URL(req.url);
+    // Request-scoped context threaded into every loader on this render: the
+    // middleware-populated `locals` (with the CSP nonce folded in for parity with
+    // the component props) and the request's abort signal for cancellation.
+    const loaderInvocation = {
+        locals: { ...locals, cspNonce },
+        signal: req.signal,
+    };
     // SSG (`static`), ISR, and PPR pages have their own artifact/ISR cache (or a
     // shell artifact); plain dynamic pages are cached only when they opt in with
     // a positive `cache.ttl`. The key includes the query string so `?q=a` and
@@ -152,6 +161,7 @@ export const render = async ({
                     loaderFn,
                     manifestPath,
                     req,
+                    loaderInvocation,
                 );
                 // Swallow rejections here; the resource created from this promise
                 // re-observes it and routes the error to a Suspense/ErrorBoundary.
@@ -167,6 +177,7 @@ export const render = async ({
                 manifestPath,
                 req,
                 manifestPath === pageToRender?.manifestPath,
+                loaderInvocation,
             );
             resolvedLoaderData.set(manifestPath, data);
         }),
@@ -246,6 +257,7 @@ export const render = async ({
                                         group.manifestPath,
                                         req,
                                         false,
+                                        loaderInvocation,
                                     );
                                     loaderData[group.manifestPath] = data;
                                 }
@@ -305,6 +317,7 @@ export const render = async ({
                                         groupLoader,
                                         group.manifestPath,
                                         req,
+                                        loaderInvocation,
                                     );
                                     pending.catch(() => undefined);
                                 }
@@ -367,9 +380,7 @@ export const render = async ({
                     searchParams,
                     loaderData: data,
                     slots: slots,
-                    locals: {
-                        cspNonce: cspNonce,
-                    },
+                    locals: loaderInvocation.locals,
                 });
         },
         async () => {
@@ -409,9 +420,7 @@ export const render = async ({
                 routeParams,
                 searchParams,
                 loaderData: data,
-                locals: {
-                    cspNonce: cspNonce,
-                },
+                locals: loaderInvocation.locals,
             };
             if (toRender === 'error') {
                 props.error = error;
