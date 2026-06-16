@@ -21,28 +21,12 @@ import type {
     PageModule,
     PageVariantNode,
     RenderAsset,
+    RenderPlainResult,
     RenderResult,
 } from './types';
 
-export const template = `
-    <!DOCTYPE html>
-    <html lang="en">
-    <head><!--app-head--></head>
-    <!--app-body-->
-    </html>
-`;
-
-export const render = async ({
-    toRender,
-    entry,
-    routeParams,
-    searchParams,
-    req,
-    pageOptions,
-    cspNonce,
-    locals,
-    error,
-}: {
+/** Arguments for {@link render}. */
+type RenderArgs = {
     toRender: 'main' | 'loading' | 'error' | 'not-found';
     entry: RoutePageHandler;
     routeParams: Record<string, string | string[]>;
@@ -52,7 +36,34 @@ export const render = async ({
     cspNonce?: string;
     locals?: Record<string, unknown>;
     error?: Error;
-}): Promise<RenderResult> => {
+};
+
+export const template = `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head><!--app-head--></head>
+    <!--app-body-->
+    </html>
+`;
+
+// Non-`main` renders (loading / error / not-found) never defer or PPR, so they
+// always resolve to a plain result — the overload lets callers skip narrowing.
+export function render(
+    args: RenderArgs & { toRender: 'loading' | 'error' | 'not-found' },
+): Promise<RenderPlainResult>;
+export function render(args: RenderArgs): Promise<RenderResult>;
+export async function render(args: RenderArgs): Promise<RenderResult> {
+    const {
+        toRender,
+        entry,
+        routeParams,
+        searchParams,
+        req,
+        pageOptions,
+        cspNonce,
+        locals,
+        error,
+    } = args;
     const url = new URL(req.url);
     // Request-scoped context threaded into every loader on this render: the
     // middleware-populated `locals` (with the CSP nonce folded in for parity with
@@ -517,7 +528,7 @@ export const render = async ({
         documentAssets: assets,
         loaderData: loaderData,
     };
-};
+}
 
 // Whether a matched page route needs the streaming (renderToStream) path: the
 // page loader is deferred, or any parallel-route group has a loading/error

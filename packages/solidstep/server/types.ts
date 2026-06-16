@@ -122,3 +122,12 @@ export type RenderPprResult = {
     loaderData: Record<string, unknown>;
     pprHoles: string[];
 };
+
+/** Narrow a {@link RenderResult} to the deferred/streaming shape. */
+export const isDeferredResult = (
+    result: RenderResult,
+): result is RenderDeferredResult => 'composed' in result;
+
+/** Narrow a {@link RenderResult} to the PPR shell shape. */
+export const isPprResult = (result: RenderResult): result is RenderPprResult =>
+    'pprHoles' in result;

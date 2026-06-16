@@ -38,12 +38,8 @@ import {
 import { getCachedModule } from './route-manifest';
 import { serveIsr } from './isr';
 import { render, routeNeedsStreaming, template } from './render';
-import type {
-    OptionsModule,
-    RenderDeferredResult,
-    RenderPlainResult,
-    RenderPprResult,
-} from './types';
+import { isDeferredResult, isPprResult } from './types';
+import type { OptionsModule } from './types';
 
 /**
  * Everything the page-render pipeline needs from the request handler. The
@@ -186,7 +182,7 @@ export const renderPage = async (ctx: PageRenderContext) => {
                                 documentMeta,
                                 documentAssets,
                                 loaderData,
-                            } = (await render({
+                            } = await render({
                                 toRender: 'not-found',
                                 entry: notFoundEntry as RoutePageHandler,
                                 routeParams: {},
@@ -195,7 +191,7 @@ export const renderPage = async (ctx: PageRenderContext) => {
                                 pageOptions: {},
                                 cspNonce,
                                 locals,
-                            })) as RenderPlainResult;
+                            });
                             assets.push(...documentAssets);
                             clientHydrationScript = buildHydrationScript({
                                 entryPath,
@@ -241,7 +237,7 @@ export const renderPage = async (ctx: PageRenderContext) => {
                         // build crawler captures this shell as a .html
                         // artifact; dev and prod-fallback both render here.
                         if (options?.render === 'ppr') {
-                            const result = (await render({
+                            const result = await render({
                                 toRender: 'main',
                                 entry: pageEntry!,
                                 routeParams: params,
@@ -250,7 +246,10 @@ export const renderPage = async (ctx: PageRenderContext) => {
                                 pageOptions: options,
                                 cspNonce,
                                 locals,
-                            })) as RenderPprResult;
+                            });
+                            if (!isPprResult(result)) {
+                                throw new Error('Expected a PPR render result');
+                            }
                             const assetsHtml = renderAssetsToHtml(
                                 result.documentAssets,
                                 cspNonce,
@@ -288,7 +287,7 @@ export const renderPage = async (ctx: PageRenderContext) => {
                         // renderToStream + Suspense. Non-deferred routes fall
                         // through to the unchanged renderToString path below.
                         if (await routeNeedsStreaming(pageEntry!)) {
-                            const result = (await render({
+                            const result = await render({
                                 toRender: 'main',
                                 entry: pageEntry!,
                                 routeParams: params,
@@ -297,7 +296,12 @@ export const renderPage = async (ctx: PageRenderContext) => {
                                 pageOptions: options,
                                 cspNonce,
                                 locals,
-                            })) as RenderDeferredResult;
+                            });
+                            if (!isDeferredResult(result)) {
+                                throw new Error(
+                                    'Expected a deferred render result',
+                                );
+                            }
                             const assetsHtml = renderAssetsToHtml(
                                 result.documentAssets,
                                 cspNonce,
@@ -330,7 +334,7 @@ export const renderPage = async (ctx: PageRenderContext) => {
                                     () => result.composed(),
                                     {
                                         nonce: cspNonce,
-                                        onError(e: any) {
+                                        onError(e: unknown) {
                                             streamError = e;
                                             if (import.meta.env.DEV) {
                                                 console.error(e);
@@ -356,7 +360,7 @@ export const renderPage = async (ctx: PageRenderContext) => {
                                 throw new Error('No loading page');
                             }
                             const { rendered, documentMeta, documentAssets } =
-                                (await render({
+                                await render({
                                     toRender: 'loading',
                                     entry: pageEntry!,
                                     routeParams: params,
@@ -365,7 +369,7 @@ export const renderPage = async (ctx: PageRenderContext) => {
                                     pageOptions: options,
                                     cspNonce,
                                     locals,
-                                })) as RenderPlainResult;
+                                });
                             const assetsHtml = renderAssetsToHtml(
                                 assets.concat(documentAssets),
                                 cspNonce,
@@ -408,12 +412,7 @@ export const renderPage = async (ctx: PageRenderContext) => {
                             );
                         }
 
-                        const {
-                            rendered,
-                            documentMeta,
-                            documentAssets,
-                            loaderData,
-                        } = (await render({
+                        const mainResult = await render({
                             toRender: 'main',
                             entry: pageEntry!,
                             routeParams: params,
@@ -422,7 +421,19 @@ export const renderPage = async (ctx: PageRenderContext) => {
                             pageOptions: options,
                             cspNonce,
                             locals,
-                        })) as RenderPlainResult;
+                        });
+                        if (
+                            isDeferredResult(mainResult) ||
+                            isPprResult(mainResult)
+                        ) {
+                            throw new Error('Expected a plain render result');
+                        }
+                        const {
+                            rendered,
+                            documentMeta,
+                            documentAssets,
+                            loaderData,
+                        } = mainResult;
                         assets.push(...documentAssets);
                         clientHydrationScript = buildHydrationScript({
                             entryPath,
@@ -477,7 +488,7 @@ export const renderPage = async (ctx: PageRenderContext) => {
                             documentMeta,
                             documentAssets,
                             loaderData,
-                        } = (await render({
+                        } = await render({
                             toRender: 'error',
                             entry: pageEntry!,
                             routeParams: params,
@@ -487,7 +498,7 @@ export const renderPage = async (ctx: PageRenderContext) => {
                             cspNonce,
                             locals,
                             error: e1,
-                        })) as RenderPlainResult;
+                        });
                         assets.push(...documentAssets);
                         clientHydrationScript = buildHydrationScript({
                             entryPath,
