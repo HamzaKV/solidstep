@@ -1,8 +1,10 @@
 packages:
   - packages/*
   - examples/*
+
 onlyBuiltDependencies:
   - '@biomejs/biome'
   - '@parcel/watcher'
   - better-sqlite3
   - esbuild
+  - lefthook

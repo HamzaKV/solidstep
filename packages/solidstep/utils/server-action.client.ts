@@ -14,7 +14,7 @@ async function deserializeStream(id: string, response: Response) {
     if (!result.done) {
         reader.drain().then(
             () => {
-                // @ts-ignore
+                // @ts-expect-error $R is seroval's global cross-reference map
                 delete $R[id];
             },
             () => {
@@ -84,20 +84,6 @@ async function fetchServerFunction(
                   },
               }));
 
-    /*if (
-		response.headers.has('Location') ||
-		response.headers.has('X-Revalidate') ||
-		response.headers.has('X-Single-Flight')
-	) {
-		if (response.body) {
-			/* @ts-ignore-next-line 
-			response.customBody = () => {
-				return deserializeStream(instance, response);
-			};
-		}
-		return response;
-	}*/
-
     const contentType = response.headers.get('Content-Type');
     let result: any;
     if (contentType?.startsWith('text/plain')) {
@@ -138,7 +124,7 @@ async function fetchServerFunction(
     return result;
 }
 
-// biome-ignore lint/complexity/noBannedTypes: <explanation>
+// biome-ignore lint/complexity/noBannedTypes: server references wrap arbitrary callables
 export function createServerReference(fn: Function, id: string, name: string) {
     const baseURL = import.meta.env.SERVER_BASE_URL;
     return new Proxy(fn, {
@@ -185,9 +171,10 @@ export function createServerReference(fn: Function, id: string, name: string) {
             }
             return (target as any)[prop];
         },
-        apply(target, thisArg, args) {
-            const maxClientFetchTime = +import.meta.env
-                .VITE_SERVER_ACTION_MAX_CLIENT_FETCH_TIME;
+        apply(_target, _thisArg, args) {
+            const maxClientFetchTime = +(
+                import.meta.env?.VITE_SERVER_ACTION_MAX_CLIENT_FETCH_TIME ?? ''
+            );
             return fetchServerFunction(
                 `${baseURL}/_server`,
                 `${id}#${name}`,

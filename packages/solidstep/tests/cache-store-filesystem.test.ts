@@ -28,8 +28,8 @@ describe('FilesystemCacheStore', () => {
 
     it('persists wall-clock deadlines', async () => {
         await store.set('d', 1, { ttl: 1000, swr: 500 });
-        const entry = await store.get('d')!;
-        expect(entry?.expiresAt! - entry!.staleAt!).toBe(500);
+        const entry = await store.get('d');
+        expect(entry!.expiresAt! - entry!.staleAt!).toBe(500);
     });
 
     it('returns null for a missing key', async () => {

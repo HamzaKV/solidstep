@@ -23,7 +23,6 @@ import invariant from 'vinxi/lib/invariant';
 import { getManifest } from 'vinxi/manifest';
 import { RedirectError } from './redirect';
 import { invalidateCache } from './cache';
-import fetch from './fetch.server';
 import {
     createRequestContext,
     createResponseContext,
@@ -54,14 +53,15 @@ class HeaderProxy {
         return Array.isArray(cookies) ? cookies : [cookies as string];
     }
     forEach(fn: (value: string, key: string, object: Headers) => void) {
-        return Object.entries(getResponseHeaders(this.event)).forEach(
-            ([key, value]) =>
-                fn(
-                    Array.isArray(value) ? value.join(', ') : (value as string),
-                    key,
-                    this as any,
-                ),
-        );
+        for (const [key, value] of Object.entries(
+            getResponseHeaders(this.event),
+        )) {
+            fn(
+                Array.isArray(value) ? value.join(', ') : (value as string),
+                key,
+                this as any,
+            );
+        }
     }
     entries() {
         return Object.entries(getResponseHeaders(this.event))
@@ -130,16 +130,16 @@ export async function handleServerFunction(event: HTTPEvent) {
     } else {
         functionId = url.searchParams.get('id');
         name = url.searchParams.get('name');
+    }
 
-        if (!functionId || !name) {
-            return process.env.NODE_ENV === 'development'
-                ? new Response('Server function not found', { status: 404 })
-                : new Response(null, { status: 404 });
-        }
+    if (!functionId || !name) {
+        return process.env.NODE_ENV === 'development'
+            ? new Response('Server function not found', { status: 404 })
+            : new Response(null, { status: 404 });
     }
 
     const serverFunction = (
-        await getManifest(import.meta.env.ROUTER_NAME).chunks[
+        await getManifest(import.meta.env.ROUTER_NAME!).chunks[
             functionId
         ].import()
     )[name];
@@ -151,12 +151,14 @@ export async function handleServerFunction(event: HTTPEvent) {
         const args = url.searchParams.get('args');
         if (args) {
             const json = JSON.parse(args);
-            (json.t
+            const decoded = json.t
                 ? (fromJSON(json, {
                       plugins: SEROVAL_PLUGINS,
                   }) as any)
-                : json
-            ).forEach((arg: any) => parsed.push(arg));
+                : json;
+            for (const arg of decoded) {
+                parsed.push(arg);
+            }
         }
     }
     if (event.method === 'POST') {
@@ -290,9 +292,9 @@ export async function handleServerFunction(event: HTTPEvent) {
             )
                 setResponseStatus(event, (x as any).status);
             if ((x as any).customBody) {
-                // biome-ignore lint/suspicious/noCatchAssign: <explanation>
+                // biome-ignore lint/suspicious/noCatchAssign: the caught Response is deliberately replaced with its serializable body
                 x = (x as any).customBody();
-                // biome-ignore lint/suspicious/noCatchAssign: <explanation>
+                // biome-ignore lint/suspicious/noCatchAssign: a bodyless Response is normalized to null before serialization
             } else if ((x as any).body === undefined) x = null;
             setHeader(event, 'X-Error', 'true');
         } else if (instance) {

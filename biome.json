@@ -1,5 +1,5 @@
 {
-    "$schema": "https://biomejs.dev/schemas/1.9.2/schema.json",
+    "$schema": "https://biomejs.dev/schemas/2.5.0/schema.json",
     "vcs": {
         "enabled": false,
         "clientKind": "git",
@@ -7,23 +7,24 @@
     },
     "files": {
         "ignoreUnknown": false,
-        "ignore": [
-            ".*.js",
-            "node_modules/",
-            "dist/",
-            "build/",
-            "out/",
-            ".next/",
-            ".output/",
-            ".vinxi/",
-            "coverage/",
-            ".history/",
-            ".opencode/",
-            ".sisyphus/",
-            "*.json",
-            "payload-types.ts",
-            "**/solidstep-env.d.ts",
-            "*.css"
+        "includes": [
+            "**",
+            "!**/.*.js",
+            "!**/node_modules/**",
+            "!**/dist/**",
+            "!**/build/**",
+            "!**/out/**",
+            "!**/.next/**",
+            "!**/.output/**",
+            "!**/.vinxi/**",
+            "!**/coverage/**",
+            "!**/.history/**",
+            "!**/.opencode/**",
+            "!**/.sisyphus/**",
+            "!**/*.json",
+            "!**/payload-types.ts",
+            "!**/solidstep-env.d.ts",
+            "!**/*.css"
         ]
     },
     "formatter": {
@@ -31,13 +32,11 @@
         "indentStyle": "space",
         "indentWidth": 4
     },
-    "organizeImports": {
-        "enabled": false
-    },
+    "assist": { "actions": { "source": { "organizeImports": "off" } } },
     "linter": {
         "enabled": true,
         "rules": {
-            "recommended": true,
+            "preset": "recommended",
             "style": {
                 "useSelfClosingElements": "off",
                 "noNonNullAssertion": "off",

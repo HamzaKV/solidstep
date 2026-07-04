@@ -11,8 +11,8 @@
     "moduleResolution": "bundler",
     "verbatimModuleSyntax": true,
     "outDir": "./dist",
-    "baseUrl": ".",
     "resolveJsonModule": true,
+    "types": ["node"],
 
     // Best practices
     "strict": true,
