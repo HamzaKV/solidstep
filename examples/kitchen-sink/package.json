@@ -16,7 +16,7 @@
     "dependencies": {
         "solid-js": "^1.9.14",
         "solidstep": "link:../../packages/solidstep/dist",
-        "vinxi": "^0.5.8"
+        "vinxi": "^0.5.11"
     },
     "devDependencies": {
         "@playwright/test": "^1.48.0",
