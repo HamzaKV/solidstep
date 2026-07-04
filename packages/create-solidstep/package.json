@@ -38,7 +38,7 @@
         "typescript": "^5.0.0"
     },
     "dependencies": {
-        "inquirer": "^12.6.3"
+        "inquirer": "^14.0.2"
     },
     "keywords": [
         "solidjs",
