@@ -1,5 +1,16 @@
 # solidstep
 
+## 0.5.2
+
+### Patch Changes
+
+- Fix: relative imports/exports in the published ESM `dist` now carry explicit
+  `.js` extensions. `tsc` (`moduleResolution: bundler`) compiled the previous
+  extensionless specifiers without complaint, but Node's native ESM resolver
+  (used by any consumer not going through a bundler, e.g. Vitest) threw
+  `ERR_MODULE_NOT_FOUND` — most visibly on `solidstep/link` failing to resolve
+  `./router-context`. Affected 30 files / 108 specifiers across the package.
+
 ## 0.5.1
 
 ### Patch Changes
