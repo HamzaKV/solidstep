@@ -7,7 +7,7 @@
  * (serialized as JSON) or a string respectively.
  */
 
-import { escapeHtml as escapeXml } from './escape';
+import { escapeHtml as escapeXml } from './escape.js';
 
 const toIso = (value: string | Date) =>
     value instanceof Date ? value.toISOString() : value;

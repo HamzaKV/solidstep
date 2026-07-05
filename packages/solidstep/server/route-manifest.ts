@@ -4,15 +4,15 @@ import {
     expandRoute,
     type PatternSegment,
     type PrerenderTarget,
-} from '../utils/prerender';
+} from '../utils/prerender.js';
 import {
     createNode,
     insertRoute,
     type Import,
     type RoutePageHandler,
     type RouteNode,
-} from '../utils/path-router';
-import type { GenerateStaticParamsModule, OptionsModule } from './types';
+} from '../utils/path-router.js';
+import type { GenerateStaticParamsModule, OptionsModule } from './types.js';
 
 // Module cache for dynamically imported modules — skipped in dev so HMR invalidations are respected
 const moduleCache = new Map<string, unknown>();

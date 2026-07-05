@@ -1,19 +1,19 @@
 import { getManifest } from 'vinxi/manifest';
 import { renderToString, createComponent } from 'solid-js/web';
 import { Suspense, ErrorBoundary } from 'solid-js';
-import { createDeferredResource } from '../utils/deferred';
-import type { Meta } from '../utils/meta';
-import { getCache, setCacheWithOptions } from '../utils/cache';
-import { getCachedLoaderData } from '../utils/loader-cache';
-import { runSequentialLoader } from '../utils/loader-error';
-import { shouldCachePage, pageCacheKey } from '../utils/page-cache';
+import { createDeferredResource } from '../utils/deferred.js';
+import type { Meta } from '../utils/meta.js';
+import { getCache, setCacheWithOptions } from '../utils/cache.js';
+import { getCachedLoaderData } from '../utils/loader-cache.js';
+import { runSequentialLoader } from '../utils/loader-error.js';
+import { shouldCachePage, pageCacheKey } from '../utils/page-cache.js';
 import type {
     Import,
     RoutePageHandler,
     SearchParams,
-} from '../utils/path-router';
-import type { Options } from '../utils/options';
-import { getCachedModule } from './route-manifest';
+} from '../utils/path-router.js';
+import type { Options } from '../utils/options.js';
+import { getCachedModule } from './route-manifest.js';
 import type {
     ComponentFn,
     LoaderModule,
@@ -23,7 +23,7 @@ import type {
     RenderAsset,
     RenderPlainResult,
     RenderResult,
-} from './types';
+} from './types.js';
 
 /** Arguments for {@link render}. */
 type RenderArgs = {

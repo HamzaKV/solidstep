@@ -5,12 +5,12 @@
 // framework populates them — cache status and render strategy) without wiring a
 // telemetry backend by hand. Point `sink` at OpenTelemetry/StatsD/etc. to export.
 
-import { logger } from './logger';
+import { logger } from './logger.js';
 import type {
     OnResponseEndFn,
     RequestContext,
     ResponseContext,
-} from './instrumentation';
+} from './instrumentation.js';
 
 /** One completed-request metric record. */
 export type MetricRecord = {

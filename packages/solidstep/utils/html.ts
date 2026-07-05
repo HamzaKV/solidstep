@@ -1,9 +1,9 @@
 import { generateHydrationScript } from 'solid-js/web';
 import { serialize } from 'seroval';
-import { escapeHtml, escapeScript } from './escape';
-import { SEROVAL_PLUGINS } from './serialize';
-import type { Meta } from './meta';
-import type { SearchParams } from './path-router';
+import { escapeHtml, escapeScript } from './escape.js';
+import { SEROVAL_PLUGINS } from './serialize.js';
+import type { Meta } from './meta.js';
+import type { SearchParams } from './path-router.js';
 
 /**
  * Pure HTML/inline-script generation for the SSR document. Extracted from

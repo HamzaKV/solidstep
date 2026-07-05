@@ -1,6 +1,6 @@
-import { escapeScript } from './escape';
-import { generateHtmlHead } from './html';
-import type { Meta } from './meta';
+import { escapeScript } from './escape.js';
+import { generateHtmlHead } from './html.js';
+import type { Meta } from './meta.js';
 
 /**
  * Build the inline `<script>` that swaps a streamed `loading.tsx` shell for the

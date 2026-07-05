@@ -7,7 +7,7 @@ import {
     onCleanup,
 } from 'solid-js';
 import { Dynamic, isServer } from 'solid-js/web';
-import { navigate, prefetchRoute, type Href } from '../router-context';
+import { navigate, prefetchRoute, type Href } from '../router-context.js';
 
 /**
  * Props for {@link Link}. Extends the native anchor attributes with router

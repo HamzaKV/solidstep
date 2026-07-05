@@ -4,7 +4,7 @@
 // with no Content-Length is not caught here (the runtime/proxy should bound those
 // — see the docs), so treat this as a first line of defence, not a hard cap.
 
-import type { Middleware } from './middleware';
+import type { Middleware } from './middleware.js';
 import type { H3Event } from 'vinxi/http';
 
 /** Parse a `Content-Length` header value into a non-negative integer, or null. */

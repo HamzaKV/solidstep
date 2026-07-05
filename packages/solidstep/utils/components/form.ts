@@ -8,7 +8,7 @@ import { Dynamic } from 'solid-js/web';
 import {
     FormStatusContext,
     type FormStatusContextValue,
-} from '../hooks/form-status';
+} from '../hooks/form-status.js';
 
 /**
  * A server action function created by the `'use server'` directive.

@@ -1,7 +1,7 @@
-import fetch from './fetch.client';
+import fetch from './fetch.client.js';
 import { toJSONAsync } from 'seroval';
-import { SEROVAL_PLUGINS, SerovalChunkReader } from './serialize';
-import { refreshRoute } from './router-context';
+import { SEROVAL_PLUGINS, SerovalChunkReader } from './serialize.js';
+import { refreshRoute } from './router-context.js';
 
 async function deserializeStream(id: string, response: Response) {
     if (!response.body) {

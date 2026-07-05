@@ -1,4 +1,4 @@
-import { escapeHtml } from './escape';
+import { escapeHtml } from './escape.js';
 
 /**
  * Development-only error overlay. Callers gate every use behind

@@ -5,7 +5,7 @@ import {
     getNotFoundInManifest,
     type ClientFileRoute,
     type ClientPageHandler,
-} from './client-manifest-core';
+} from './client-manifest-core.js';
 
 /**
  * Client route manifest. A thin wrapper over `client-manifest-core` (the pure,
@@ -16,7 +16,10 @@ import {
  * data from the `/__solidstep_route` endpoint instead.
  */
 
-export type { ClientImport, ClientPageHandler } from './client-manifest-core';
+export type {
+    ClientImport,
+    ClientPageHandler,
+} from './client-manifest-core.js';
 
 // Lazily-built, process-wide client route trie. Built once from the real client
 // `fileRoutes` on first match and reused for every subsequent navigation.

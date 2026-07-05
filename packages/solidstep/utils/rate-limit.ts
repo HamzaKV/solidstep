@@ -3,8 +3,8 @@
 // so it works with the in-memory default or any external store (e.g. Redis)
 // installed via `setCacheStore`. Compose it with `defineMiddleware`.
 
-import { getCacheEntry, setCacheWithOptions } from './cache';
-import type { Middleware } from './middleware';
+import { getCacheEntry, setCacheWithOptions } from './cache.js';
+import type { Middleware } from './middleware.js';
 import type { H3Event } from 'vinxi/http';
 
 /** Options for {@link rateLimit}. */

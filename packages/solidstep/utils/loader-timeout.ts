@@ -1,4 +1,4 @@
-import { logger } from './logger';
+import { logger } from './logger.js';
 
 /**
  * Thrown when a loader exceeds its configured timeout. It flows through the

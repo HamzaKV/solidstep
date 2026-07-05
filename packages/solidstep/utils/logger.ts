@@ -1,4 +1,4 @@
-import { getLogger } from './pino';
+import { getLogger } from './pino.js';
 
 /**
  * Shared Pino logger instance.

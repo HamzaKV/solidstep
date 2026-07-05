@@ -1,19 +1,19 @@
 import { randomUUID } from 'node:crypto';
 import { serialize } from 'seroval';
-import type { Meta } from '../utils/meta';
-import { RedirectError } from '../utils/redirect';
-import { getCachedLoaderData } from '../utils/loader-cache';
-import { runSequentialLoader } from '../utils/loader-error';
-import { SEROVAL_PLUGINS } from '../utils/serialize';
-import { logger } from '../utils/logger';
+import type { Meta } from '../utils/meta.js';
+import { RedirectError } from '../utils/redirect.js';
+import { getCachedLoaderData } from '../utils/loader-cache.js';
+import { runSequentialLoader } from '../utils/loader-error.js';
+import { SEROVAL_PLUGINS } from '../utils/serialize.js';
+import { logger } from '../utils/logger.js';
 import {
     matchRoute,
     parseSearchParams,
     type Import,
     type RoutePageHandler,
-} from '../utils/path-router';
-import { ensureRouteManifest, getCachedModule } from './route-manifest';
-import type { LoaderModule, MetaModule } from './types';
+} from '../utils/path-router.js';
+import { ensureRouteManifest, getCachedModule } from './route-manifest.js';
+import type { LoaderModule, MetaModule } from './types.js';
 
 /**
  * Run a single deferred loader for a PPR page's hole and return its data as a

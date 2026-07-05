@@ -1,9 +1,9 @@
 import type { Component } from 'solid-js';
 import type { getManifest } from 'vinxi/manifest';
-import type { Meta, MetaFunction } from '../utils/meta';
-import type { Options } from '../utils/options';
-import type { Import, SearchParams } from '../utils/path-router';
-import type { GenerateStaticParams } from '../utils/prerender';
+import type { Meta, MetaFunction } from '../utils/meta.js';
+import type { Options } from '../utils/options.js';
+import type { Import, SearchParams } from '../utils/path-router.js';
+import type { GenerateStaticParams } from '../utils/prerender.js';
 
 /** The vinxi client/server manifest object (`getManifest(...)`). */
 type VinxiManifest = ReturnType<typeof getManifest>;

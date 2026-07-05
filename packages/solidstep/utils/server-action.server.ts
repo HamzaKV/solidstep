@@ -1,6 +1,6 @@
 /// <reference types='vinxi/types/server' />
 import { fromJSON } from 'seroval';
-import { SEROVAL_PLUGINS, serializeToStream } from './serialize';
+import { SEROVAL_PLUGINS, serializeToStream } from './serialize.js';
 import { sharedConfig } from 'solid-js';
 import { provideRequestEvent } from 'solid-js/web/storage';
 import {
@@ -21,14 +21,14 @@ import {
 } from 'vinxi/http';
 import invariant from 'vinxi/lib/invariant';
 import { getManifest } from 'vinxi/manifest';
-import { RedirectError } from './redirect';
-import { invalidateCache } from './cache';
+import { RedirectError } from './redirect.js';
+import { invalidateCache } from './cache.js';
 import {
     createRequestContext,
     createResponseContext,
     getInstrumentation,
     safeExecuteHook,
-} from '../utils/instrumentation';
+} from '../utils/instrumentation.js';
 
 class HeaderProxy {
     constructor(private event: HTTPEvent) {}

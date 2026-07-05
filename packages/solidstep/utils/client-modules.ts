@@ -1,5 +1,5 @@
 import { getManifest } from 'vinxi/manifest';
-import type { ClientImport, ClientPageHandler } from './client-manifest';
+import type { ClientImport, ClientPageHandler } from './client-manifest.js';
 
 /**
  * Synchronous client component-module cache. The reactive route tree in

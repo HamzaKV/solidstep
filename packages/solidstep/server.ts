@@ -5,11 +5,11 @@ import {
     setHeader,
     setResponseStatus,
 } from 'vinxi/http';
-import { RedirectError } from './utils/redirect';
-import { setCacheStore } from './utils/cache';
-import { MemoryCacheStore, FilesystemCacheStore } from './utils/cache-store';
-import { handleServerFunction } from './utils/server-action.server';
-import { renderDevOverlayDocument } from './utils/dev-overlay';
+import { RedirectError } from './utils/redirect.js';
+import { setCacheStore } from './utils/cache.js';
+import { MemoryCacheStore, FilesystemCacheStore } from './utils/cache-store.js';
+import { handleServerFunction } from './utils/server-action.server.js';
+import { renderDevOverlayDocument } from './utils/dev-overlay.js';
 import { readFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -19,14 +19,14 @@ import {
     type RouteHandler,
     type RoutePageHandler,
     type SearchParams,
-} from './utils/path-router';
+} from './utils/path-router.js';
 import {
     loadInstrumentation,
     getInstrumentation,
     safeExecuteHook,
     createRequestContext,
     createResponseContext,
-} from './utils/instrumentation';
+} from './utils/instrumentation.js';
 import {
     createRouteManifest,
     collectPrerenderTargets,
@@ -35,17 +35,17 @@ import {
     getMetadataManifest,
     ensureClientManifest,
     getCachedModule,
-} from './server/route-manifest';
-import { serveHoleData, serveRouteData } from './server/data-endpoints';
-import { seedIsrFromManifest } from './server/isr';
-import type { RouteApiModule, RouteMethodHandler } from './server/types';
-import { renderPage } from './server/render-page';
+} from './server/route-manifest.js';
+import { serveHoleData, serveRouteData } from './server/data-endpoints.js';
+import { seedIsrFromManifest } from './server/isr.js';
+import type { RouteApiModule, RouteMethodHandler } from './server/types.js';
+import { renderPage } from './server/render-page.js';
 import {
     ISR_BYPASS_HEADER,
     PRERENDER_ENDPOINT,
     LOADER_ENDPOINT,
     ROUTE_ENDPOINT,
-} from './server/constants';
+} from './server/constants.js';
 
 /**
  * The API-route variant of a matched {@link RouteHandler} (`route.ts`). The
@@ -79,7 +79,7 @@ const onStart = async () => {
                 'utf-8',
             );
             sharedConfig = JSON.parse(configContent);
-            // @ts-ignore
+            // @ts-expect-error
             globalThis.__SOLIDSTEP_CONFIG__ = sharedConfig;
         }
 

@@ -5,22 +5,22 @@ import {
     setResponseStatus,
 } from 'vinxi/http';
 import { renderToStream } from 'solid-js/web';
-import type { Meta } from '../utils/meta';
-import { RedirectError } from '../utils/redirect';
-import { escapeScript } from '../utils/escape';
-import { logger } from '../utils/logger';
+import type { Meta } from '../utils/meta.js';
+import { RedirectError } from '../utils/redirect.js';
+import { escapeScript } from '../utils/escape.js';
+import { logger } from '../utils/logger.js';
 import {
     renderDevOverlayDocument,
     devOverlayClientScript,
-} from '../utils/dev-overlay';
+} from '../utils/dev-overlay.js';
 import {
     renderAssetsToHtml,
     jsonForScript,
     buildHydrationScript,
     buildHeadHtml,
     createBaseMeta,
-} from '../utils/html';
-import { buildLoadingSwapScript } from '../utils/loading-swap';
+} from '../utils/html.js';
+import { buildLoadingSwapScript } from '../utils/loading-swap.js';
 import {
     matchRoute,
     type Import,
@@ -28,18 +28,18 @@ import {
     type RoutePageHandler,
     type RouteNode,
     type SearchParams,
-} from '../utils/path-router';
+} from '../utils/path-router.js';
 import {
     getInstrumentation,
     safeExecuteHook,
     createRequestContext,
     createResponseContext,
-} from '../utils/instrumentation';
-import { getCachedModule } from './route-manifest';
-import { serveIsr } from './isr';
-import { render, routeNeedsStreaming, template } from './render';
-import { isDeferredResult, isPprResult } from './types';
-import type { OptionsModule } from './types';
+} from '../utils/instrumentation.js';
+import { getCachedModule } from './route-manifest.js';
+import { serveIsr } from './isr.js';
+import { render, routeNeedsStreaming, template } from './render.js';
+import { isDeferredResult, isPprResult } from './types.js';
+import type { OptionsModule } from './types.js';
 
 /**
  * Everything the page-render pipeline needs from the request handler. The
@@ -143,7 +143,7 @@ export const renderPage = async (ctx: PageRenderContext) => {
     }
 
     let loading = false;
-    let html: string | undefined = undefined;
+    let html: string | undefined;
     let meta: Meta = createBaseMeta();
     const assets =
         await clientManifest!.inputs[clientManifest!.handler].assets();
@@ -153,7 +153,7 @@ export const renderPage = async (ctx: PageRenderContext) => {
     // every page (tree-shaken from prod, where `import.meta.env.DEV` is false).
     const manifestHtml = `<script ${cspNonce ? `nonce="${cspNonce}"` : ''}>window.manifest=${escapeScript(JSON.stringify(await clientManifest!.json()))}</script>${import.meta.env.DEV ? devOverlayClientScript(cspNonce) : ''}`;
 
-    let clientHydrationScript: string | undefined = undefined;
+    let clientHydrationScript: string | undefined;
 
     setHeader('Content-Type', 'text/html');
     setHeader('Cache-Control', 'no-cache');

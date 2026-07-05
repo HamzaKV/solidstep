@@ -1,7 +1,7 @@
 // utils/instrumentation.ts
 // Instrumentation types, helpers, and loader for SolidStep telemetry
 
-import { parseSearchParams, type SearchParams } from './path-router';
+import { parseSearchParams, type SearchParams } from './path-router.js';
 
 // ============================================
 // Types

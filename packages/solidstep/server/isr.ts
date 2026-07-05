@@ -1,9 +1,9 @@
 import { readFile } from 'node:fs/promises';
-import { getCacheEntry, setCacheWithOptions } from '../utils/cache';
-import { singleFlight } from '../utils/single-flight';
-import fetchServer from '../utils/fetch.server';
-import { ISR_BYPASS_HEADER } from './constants';
-import { logger } from '../utils/logger';
+import { getCacheEntry, setCacheWithOptions } from '../utils/cache.js';
+import { singleFlight } from '../utils/single-flight.js';
+import fetchServer from '../utils/fetch.server.js';
+import { ISR_BYPASS_HEADER } from './constants.js';
+import { logger } from '../utils/logger.js';
 
 // ISR entries never hard-expire (~10y) so a stale artifact is always served
 // while it regenerates in the background.

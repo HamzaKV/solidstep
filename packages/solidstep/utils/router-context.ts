@@ -1,9 +1,9 @@
 import { createSignal, batch } from 'solid-js';
 import { isServer } from 'solid-js/web';
 import { deserialize } from 'seroval';
-import { matchClientRoute } from './client-manifest';
-import { preloadHandler } from './client-modules';
-import { parseSearchParams, type SearchParams } from './path-router';
+import { matchClientRoute } from './client-manifest.js';
+import { preloadHandler } from './client-modules.js';
+import { parseSearchParams, type SearchParams } from './path-router.js';
 
 /**
  * Client-side router runtime: a single reactive `RouteState` signal plus the

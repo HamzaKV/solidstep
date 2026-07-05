@@ -3,7 +3,7 @@ import {
     insertRoute,
     matchRoute,
     type RouteNode,
-} from './path-router';
+} from './path-router.js';
 
 /**
  * Pure client route-manifest construction + matching, with NO `vinxi/routes`

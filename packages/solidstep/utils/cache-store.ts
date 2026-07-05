@@ -9,8 +9,8 @@ import {
 } from 'node:fs/promises';
 import { join } from 'node:path';
 import { serialize, deserialize } from 'seroval';
-import { SEROVAL_PLUGINS } from './serialize';
-import { logger } from './logger';
+import { SEROVAL_PLUGINS } from './serialize.js';
+import { logger } from './logger.js';
 
 /** A value that may be returned synchronously or as a promise. */
 export type MaybePromise<T> = T | Promise<T>;

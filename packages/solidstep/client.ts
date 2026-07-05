@@ -2,14 +2,14 @@ import { hydrate, createComponent } from 'solid-js/web';
 import { Suspense, ErrorBoundary, untrack } from 'solid-js';
 import { deserialize } from 'seroval';
 import 'vinxi/client';
-import { createDeferredResource } from './utils/deferred';
+import { createDeferredResource } from './utils/deferred.js';
 import {
     matchClientRoute,
     getNotFoundHandler,
     type ClientPageHandler,
-} from './utils/client-manifest';
-import { getModule, preloadHandler } from './utils/client-modules';
-import type { SearchParams } from './utils/path-router';
+} from './utils/client-manifest.js';
+import { getModule, preloadHandler } from './utils/client-modules.js';
+import type { SearchParams } from './utils/path-router.js';
 import {
     routeStructure,
     routeLoaderData,
@@ -17,7 +17,7 @@ import {
     type RouteState,
     type RouteStructure,
     type RouteKind,
-} from './utils/router-context';
+} from './utils/router-context.js';
 
 /**
  * Fetch a PPR hole's loader data from the server (first-load only). `manifest`

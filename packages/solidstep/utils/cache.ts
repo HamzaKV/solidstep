@@ -4,14 +4,14 @@ import {
     type CacheEntry,
     type CacheSetOptions,
     type CacheStore,
-} from './cache-store';
+} from './cache-store.js';
 
-export type { CacheEntry, CacheSetOptions, CacheStore } from './cache-store';
+export type { CacheEntry, CacheSetOptions, CacheStore } from './cache-store.js';
 export {
     MemoryCacheStore,
     FilesystemCacheStore,
     type MaybePromise,
-} from './cache-store';
+} from './cache-store.js';
 
 // The active cache backend. Defaults to an in-memory LRU; swap it at runtime
 // (e.g. inside instrumentation `register()`) via `setCacheStore`.

@@ -1,7 +1,10 @@
-import { getCacheEntry, setCacheWithOptions } from './cache';
-import { singleFlight } from './single-flight';
-import { resolveLoaderTimeout, runWithLoaderTimeout } from './loader-timeout';
-import type { LoaderContext } from './loader';
+import { getCacheEntry, setCacheWithOptions } from './cache.js';
+import { singleFlight } from './single-flight.js';
+import {
+    resolveLoaderTimeout,
+    runWithLoaderTimeout,
+} from './loader-timeout.js';
+import type { LoaderContext } from './loader.js';
 
 type CacheableLoader = {
     loader: (

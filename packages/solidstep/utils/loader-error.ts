@@ -1,6 +1,6 @@
-import { getCachedLoaderData } from './loader-cache';
-import { logger } from './logger';
-import { RedirectError } from './redirect';
+import { getCachedLoaderData } from './loader-cache.js';
+import { logger } from './logger.js';
+import { RedirectError } from './redirect.js';
 
 /**
  * Property key of the JSON-serializable sentinel placed in a node's
