@@ -11,7 +11,7 @@ import { spawnSync } from 'node:child_process';
 import { normalize } from 'vinxi/lib/path';
 import type { LoggerOptions } from 'pino';
 import type { CustomizableConfig } from 'vinxi/dist/types/lib/vite-dev';
-// @ts-ignore
+// @ts-expect-error
 import type { InlineConfig } from 'vite';
 import { config as viteConfigPlugin } from 'vinxi/plugins/config';
 import { routeTypegen } from './utils/typegen.js';
@@ -127,7 +127,7 @@ export const defineConfig = (
         loaderTimeout: config.loaderTimeout,
     };
 
-    // @ts-ignore
+    // @ts-expect-error
     globalThis.__SOLIDSTEP_CONFIG__ = sharedConfig;
 
     const viteConfig = (
@@ -239,6 +239,15 @@ export const defineConfig = (
                                     ),
                                 );
                             })();
+                            const userNoExternal =
+                                userServerVite.ssr?.noExternal;
+                            const mergedNoExternal = Array.isArray(
+                                userNoExternal,
+                            )
+                                ? [...userNoExternal, 'solidstep']
+                                : userNoExternal === true
+                                  ? true
+                                  : ['solidstep'];
                             return {
                                 ...userServerVite,
                                 resolve: {
@@ -248,6 +257,20 @@ export const defineConfig = (
                                         ...(userServerVite.resolve?.alias ||
                                             {}),
                                     },
+                                },
+                                ssr: {
+                                    ...userServerVite.ssr,
+                                    // `solidstep` (and its subpath imports, e.g.
+                                    // `solidstep/link`) must be processed through
+                                    // Vite's own module graph, not externalized to a
+                                    // raw Node `import()`: some of its files import
+                                    // Vite-only virtual specifiers (`vinxi/routes`,
+                                    // served by vinxi's own resolveId/load plugin
+                                    // hooks) that have no runtime resolution outside
+                                    // Vite's plugin pipeline and throw
+                                    // ERR_PACKAGE_PATH_NOT_EXPORTED under Node's real
+                                    // ESM resolver.
+                                    noExternal: mergedNoExternal,
                                 },
                             };
                         })(),
