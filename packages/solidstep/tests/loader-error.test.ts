@@ -60,6 +60,18 @@ describe('runSequentialLoader', () => {
         expect(data).toEqual({ [LOADER_ERROR_KEY]: 'plain string' });
     });
 
+    it('re-throws a RedirectError from a layout/group loader (auth gating)', async () => {
+        const { RedirectError } = await import('../utils/redirect');
+        await expect(
+            runSequentialLoader(
+                throwingLoader(new RedirectError('/login')),
+                '/layout',
+                req(),
+                false,
+            ),
+        ).rejects.toThrow('/login');
+    });
+
     it('re-throws when the failing loader is the page loader', async () => {
         await expect(
             runSequentialLoader(

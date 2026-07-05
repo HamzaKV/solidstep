@@ -1,5 +1,6 @@
 import { getCachedLoaderData } from './loader-cache';
 import { logger } from './logger';
+import { RedirectError } from './redirect';
 
 /**
  * Property key of the JSON-serializable sentinel placed in a node's
@@ -42,6 +43,15 @@ export const runSequentialLoader = async (
         );
     } catch (err) {
         if (isPageLoader) throw err;
+        // A redirect is control flow, not a data failure: layout loaders that
+        // redirect (e.g. auth gating) must abort the whole render, never
+        // degrade into a sentinel that lets the gated tree render.
+        if (
+            err instanceof RedirectError ||
+            (err instanceof Error && err.name === 'RedirectError')
+        ) {
+            throw err;
+        }
         const message = err instanceof Error ? err.message : String(err);
         logger.warn(
             { manifestPath, err: message },
