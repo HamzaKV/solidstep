@@ -30,6 +30,13 @@ import {
     safeExecuteHook,
 } from '../utils/instrumentation.js';
 
+// Dispatch-level failures (unresolvable function, malformed wire payload) are
+// distinct from the target action itself throwing: they must map to a plain
+// 404/400 regardless of whether the caller is the JS client (`instance` set)
+// or a no-JS form post, unlike the generic X-Error/500 handling below.
+class ServerFunctionNotFoundError extends Error {}
+class ServerFunctionBadRequestError extends Error {}
+
 class HeaderProxy {
     constructor(private event: HTTPEvent) {}
     get(key: string) {
@@ -138,79 +145,106 @@ export async function handleServerFunction(event: HTTPEvent) {
             : new Response(null, { status: 404 });
     }
 
-    const serverFunction = (
-        await getManifest(import.meta.env.ROUTER_NAME!).chunks[
+    try {
+        const chunkEntry = getManifest(import.meta.env.ROUTER_NAME!).chunks[
             functionId
-        ].import()
-    )[name];
+        ];
+        if (!chunkEntry) {
+            throw new ServerFunctionNotFoundError(
+                `Unknown server function chunk: ${functionId}`,
+            );
+        }
+        const serverFunction = (await chunkEntry.import())[name];
 
-    let parsed: any[] = [];
+        let parsed: any[] = [];
 
-    // grab bound arguments from url when no JS
-    if (!instance || event.method === 'GET') {
-        const args = url.searchParams.get('args');
-        if (args) {
-            const json = JSON.parse(args);
-            const decoded = json.t
-                ? (fromJSON(json, {
-                      plugins: SEROVAL_PLUGINS,
-                  }) as any)
-                : json;
-            for (const arg of decoded) {
-                parsed.push(arg);
+        // grab bound arguments from url when no JS
+        if (!instance || event.method === 'GET') {
+            const args = url.searchParams.get('args');
+            if (args) {
+                let decoded: any;
+                try {
+                    const json = JSON.parse(args);
+                    decoded = json.t
+                        ? fromJSON(json, { plugins: SEROVAL_PLUGINS })
+                        : json;
+                } catch {
+                    throw new ServerFunctionBadRequestError(
+                        'Malformed args query parameter',
+                    );
+                }
+                for (const arg of decoded) {
+                    parsed.push(arg);
+                }
             }
         }
-    }
-    if (event.method === 'POST') {
-        const contentType = request.headers.get('content-type');
+        if (event.method === 'POST') {
+            const contentType = request.headers.get('content-type');
 
-        // Nodes native IncomingMessage doesn't have a body,
-        // But we need to access it for some reason (#1282)
-        type EdgeIncomingMessage = typeof event.node.req & { body?: BodyInit };
-        const h3Request = event.node.req as
-            | EdgeIncomingMessage
-            | ReadableStream;
+            // Nodes native IncomingMessage doesn't have a body,
+            // But we need to access it for some reason (#1282)
+            type EdgeIncomingMessage = typeof event.node.req & {
+                body?: BodyInit;
+            };
+            const h3Request = event.node.req as
+                | EdgeIncomingMessage
+                | ReadableStream;
 
-        // This should never be the case in 'proper' Nitro presets since node.req has to be IncomingMessage,
-        // But the new azure-functions preset for some reason uses a ReadableStream in node.req (#1521)
-        const isReadableStream = h3Request instanceof ReadableStream;
-        const hasReadableStream =
-            (h3Request as EdgeIncomingMessage).body instanceof ReadableStream;
-        const isH3EventBodyStreamLocked =
-            (isReadableStream && h3Request.locked) ||
-            (hasReadableStream &&
-                ((h3Request as EdgeIncomingMessage).body as ReadableStream)
-                    .locked);
-        const requestBody = isReadableStream ? h3Request : h3Request.body;
+            // This should never be the case in 'proper' Nitro presets since node.req has to be IncomingMessage,
+            // But the new azure-functions preset for some reason uses a ReadableStream in node.req (#1521)
+            const isReadableStream = h3Request instanceof ReadableStream;
+            const hasReadableStream =
+                (h3Request as EdgeIncomingMessage).body instanceof
+                ReadableStream;
+            const isH3EventBodyStreamLocked =
+                (isReadableStream && h3Request.locked) ||
+                (hasReadableStream &&
+                    ((h3Request as EdgeIncomingMessage).body as ReadableStream)
+                        .locked);
+            const requestBody = isReadableStream ? h3Request : h3Request.body;
 
-        if (
-            contentType?.startsWith('multipart/form-data') ||
-            contentType?.startsWith('application/x-www-form-urlencoded')
-        ) {
-            // workaround for https://github.com/unjs/nitro/issues/1721
-            // (issue only in edge runtimes and netlify preset)
-            parsed.push(
-                await (isH3EventBodyStreamLocked
+            if (
+                contentType?.startsWith('multipart/form-data') ||
+                contentType?.startsWith('application/x-www-form-urlencoded')
+            ) {
+                // workaround for https://github.com/unjs/nitro/issues/1721
+                // (issue only in edge runtimes and netlify preset)
+                try {
+                    parsed.push(
+                        await (isH3EventBodyStreamLocked
+                            ? request
+                            : new Request(request, {
+                                  ...request,
+                                  body: requestBody,
+                              })
+                        ).formData(),
+                        // what should work when #1721 is fixed
+                        // parsed.push(await request.formData);
+                    );
+                } catch {
+                    throw new ServerFunctionBadRequestError(
+                        'Malformed form-data body',
+                    );
+                }
+            } else if (contentType?.startsWith('application/json')) {
+                // workaround for https://github.com/unjs/nitro/issues/1721
+                // (issue only in edge runtimes and netlify preset)
+                const tmpReq = isH3EventBodyStreamLocked
                     ? request
-                    : new Request(request, { ...request, body: requestBody })
-                ).formData(),
-            );
-            // what should work when #1721 is fixed
-            // parsed.push(await request.formData);
-        } else if (contentType?.startsWith('application/json')) {
-            // workaround for https://github.com/unjs/nitro/issues/1721
-            // (issue only in edge runtimes and netlify preset)
-            const tmpReq = isH3EventBodyStreamLocked
-                ? request
-                : new Request(request, { ...request, body: requestBody });
-            // what should work when #1721 is fixed
-            // just use request.json() here
-            parsed = fromJSON(await tmpReq.json(), {
-                plugins: SEROVAL_PLUGINS,
-            });
+                    : new Request(request, { ...request, body: requestBody });
+                try {
+                    // what should work when #1721 is fixed
+                    // just use request.json() here
+                    parsed = fromJSON(await tmpReq.json(), {
+                        plugins: SEROVAL_PLUGINS,
+                    });
+                } catch {
+                    throw new ServerFunctionBadRequestError(
+                        'Malformed JSON body',
+                    );
+                }
+            }
         }
-    }
-    try {
         // The request event owns its own `locals`, initialized here. Attaching the
         // metadata to the native h3 event instead would crash when no user middleware
         // has set `event.locals` (it is optional), and would also place the metadata
@@ -279,6 +313,17 @@ export async function handleServerFunction(event: HTTPEvent) {
             request,
             reqCtx,
         );
+
+        if (x instanceof ServerFunctionNotFoundError) {
+            return process.env.NODE_ENV === 'development'
+                ? new Response(x.message, { status: 404 })
+                : new Response(null, { status: 404 });
+        }
+        if (x instanceof ServerFunctionBadRequestError) {
+            return process.env.NODE_ENV === 'development'
+                ? new Response(x.message, { status: 400 })
+                : new Response(null, { status: 400 });
+        }
 
         if (x instanceof Response) {
             // forward headers
