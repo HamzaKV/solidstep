@@ -5,6 +5,7 @@ import {
     type CacheSetOptions,
     type CacheStore,
 } from './cache-store.js';
+import { SERVER_FN_BASE } from '../server/constants.js';
 
 export type { CacheEntry, CacheSetOptions, CacheStore } from './cache-store.js';
 export {
@@ -151,7 +152,11 @@ export const clearAllCache = async (): Promise<void> => {
 export const revalidatePath = (path: string) => {
     // get and verify the event
     const event = getEvent();
-    if (!event.path.includes('_server')) {
+    const pathname = event.path.split('?')[0];
+    if (
+        pathname !== SERVER_FN_BASE &&
+        !pathname.startsWith(`${SERVER_FN_BASE}/`)
+    ) {
         throw new Error('This function can only be used in server functions.');
     }
 

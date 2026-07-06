@@ -45,6 +45,7 @@ import {
     PRERENDER_ENDPOINT,
     LOADER_ENDPOINT,
     ROUTE_ENDPOINT,
+    SERVER_FN_BASE,
 } from './server/constants.js';
 
 /**
@@ -200,7 +201,11 @@ const handler = eventHandler(async (event) => {
             return;
         }
 
-        if (req.url?.includes('_server')) {
+        const serverFnPathname = new URL(req.url).pathname;
+        if (
+            serverFnPathname === SERVER_FN_BASE ||
+            serverFnPathname.startsWith(`${SERVER_FN_BASE}/`)
+        ) {
             return await handleServerFunction(event);
         }
 

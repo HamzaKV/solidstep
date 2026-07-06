@@ -97,6 +97,20 @@ describe('server request handler', () => {
         expect(res.headers.get('Location')).toBe('/login');
     });
 
+    it('does not dispatch a page path that merely contains "_server" to the server-function handler', async () => {
+        matchRoute.mockReturnValue(undefined);
+        renderPage.mockResolvedValue(new Response('ok'));
+        await handler(makeEvent('https://example.com/page_server'));
+        expect(handleServerFunction).not.toHaveBeenCalled();
+        expect(renderPage).toHaveBeenCalled();
+    });
+
+    it('dispatches the trailing-slash /_server/ form to the server-function handler', async () => {
+        handleServerFunction.mockResolvedValue(new Response('ok'));
+        await handler(makeEvent('https://example.com/_server/?id=x&name=y'));
+        expect(handleServerFunction).toHaveBeenCalled();
+    });
+
     it('maps a rejected API route handler to the 500 response', async () => {
         matchRoute.mockReturnValue({
             handler: { type: 'route', handler: {}, routePath: '/api/thing' },

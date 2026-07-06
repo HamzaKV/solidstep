@@ -219,7 +219,22 @@ describe('revalidatePath', () => {
     });
 
     it('sets X-Revalidate header when called from a server function', () => {
-        const fakeEvent = { path: '/api/_server/action' };
+        // Real server-action requests hit the `/_server` base exactly, with the
+        // dispatch id/name in the query string (see @vinxi/server-functions).
+        const fakeEvent = { path: '/_server?id=chunk&name=action' };
+        vi.mocked(vinxiHttp.getEvent).mockReturnValue(fakeEvent as any);
+
+        revalidatePath('/dashboard');
+
+        expect(vinxiHttp.setResponseHeader).toHaveBeenCalledWith(
+            fakeEvent,
+            'X-Revalidate',
+            '/dashboard',
+        );
+    });
+
+    it('sets X-Revalidate header for the trailing-slash /_server/ form', () => {
+        const fakeEvent = { path: '/_server/?id=chunk&name=action' };
         vi.mocked(vinxiHttp.getEvent).mockReturnValue(fakeEvent as any);
 
         revalidatePath('/dashboard');
@@ -233,6 +248,17 @@ describe('revalidatePath', () => {
 
     it('throws when called outside a server function context', () => {
         const fakeEvent = { path: '/api/data' };
+        vi.mocked(vinxiHttp.getEvent).mockReturnValue(fakeEvent as any);
+
+        expect(() => revalidatePath('/dashboard')).toThrow(
+            'This function can only be used in server functions.',
+        );
+    });
+
+    it('throws for a page path that merely contains "_server" as a substring', () => {
+        // A page route named e.g. `/page_server` is not the `/_server` action
+        // base — a substring match would incorrectly treat it as one.
+        const fakeEvent = { path: '/page_server' };
         vi.mocked(vinxiHttp.getEvent).mockReturnValue(fakeEvent as any);
 
         expect(() => revalidatePath('/dashboard')).toThrow(

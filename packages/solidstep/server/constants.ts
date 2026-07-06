@@ -11,3 +11,8 @@ export const LOADER_ENDPOINT = '/__solidstep_loader';
 // ALL of a route's loader data + metadata in one round-trip and returns a
 // seroval-serialized envelope the client deserializes (so Date/Map/etc. survive).
 export const ROUTE_ENDPOINT = '/__solidstep_route';
+// Base path @vinxi/server-functions mounts server actions under. Requests hit
+// this path exactly (optionally with a trailing slash), never as a segment
+// nested under another route — match it precisely, not as a substring, so an
+// ordinary page path (e.g. `/page_server`) is never misrouted as an action.
+export const SERVER_FN_BASE = '/_server';
