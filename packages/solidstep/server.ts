@@ -201,7 +201,7 @@ const handler = eventHandler(async (event) => {
         }
 
         if (req.url?.includes('_server')) {
-            return handleServerFunction(event);
+            return await handleServerFunction(event);
         }
 
         // Build-time prerender discovery. Only answered when the process was
@@ -282,7 +282,13 @@ const handler = eventHandler(async (event) => {
         const params = match?.params || {};
 
         if (matched && matched.type === 'route') {
-            return handleApiRoute(event, req, matched, params, searchParams);
+            return await handleApiRoute(
+                event,
+                req,
+                matched,
+                params,
+                searchParams,
+            );
         }
 
         // API routes returned above, so any remaining match is necessarily a
@@ -295,7 +301,7 @@ const handler = eventHandler(async (event) => {
         // deferred streaming, loading boundary, main render, error boundary, and
         // response assembly — to the render-page module, keeping this handler a
         // thin request router.
-        return renderPage({
+        return await renderPage({
             event,
             req,
             matched,
