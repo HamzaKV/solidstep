@@ -6,9 +6,18 @@ import {
 } from 'solidstep/utils/csp';
 import { cors } from 'solidstep/utils/cors';
 import { csrf } from 'solidstep/utils/csrf';
+import { bodyLimit } from 'solidstep/utils/body-limit';
+import { rateLimit } from 'solidstep/utils/rate-limit';
 import { randomBytes } from 'node:crypto';
 
-const trustedOrigins = ['https://example.com', 'https://another-example.com'];
+// EDIT ME: add every origin that legitimately calls this app cross-origin
+// (another site of yours, a partner integration). Set via the
+// TRUSTED_ORIGINS env var (comma-separated) in production — do not commit
+// real production origins here.
+const trustedOrigins = process.env.TRUSTED_ORIGINS?.split(',') ?? [
+    'https://example.com',
+    'https://another-example.com',
+];
 
 const corsMiddleware = cors(trustedOrigins);
 const csrfMiddleware = csrf(trustedOrigins);
@@ -25,7 +34,7 @@ const logger: Middleware = {
 const security: Middleware = {
     onRequest: (event) => {
         const nonce = randomBytes(16).toString('base64');
-        (event as any).locals = { cspNonce: nonce };
+        (event as any).locals = { ...(event as any).locals, cspNonce: nonce };
 
         let policy = createBasePolicy();
         policy = withNonce(policy, nonce);
@@ -73,4 +82,12 @@ const security: Middleware = {
     },
 };
 
-export default defineMiddleware([logger, security]);
+// Conservative defaults — tighten or loosen for your app's actual traffic
+// shape. Both run first so oversized/abusive requests short-circuit before
+// the CSP/CSRF/CORS work below.
+export default defineMiddleware([
+    bodyLimit({ maxBytes: 1_000_000 }), // 1 MB
+    rateLimit({ windowMs: 60_000, max: 100 }), // 100 req/min per client IP
+    logger,
+    security,
+]);
