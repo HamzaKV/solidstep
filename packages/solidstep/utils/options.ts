@@ -43,10 +43,16 @@ export type Options = {
     };
     /** Client hydration behavior for the route. */
     hydration?: {
-        /** Disable client hydration entirely (render as static HTML). */
+        /**
+         * Ship zero framework JS for this route: no hydration script, no
+         * client-manifest script, no module-preload links. `<Link>` and
+         * `<Form>` degrade to native browser behavior (full page loads,
+         * no-JS form submissions) — both already work server-side.
+         * Incompatible with `render: 'ppr'`, a deferred (`type: 'defer'`)
+         * loader, or a sibling `loading.tsx`; combining them logs a warning
+         * and `disable` is ignored for that render.
+         */
         disable?: boolean;
-        /** Block rendering until hydration is ready. */
-        blockRender?: boolean;
         /** Fetch priority hint for the hydration script. */
         fetchPriority?: 'high' | 'low' | 'auto';
     };

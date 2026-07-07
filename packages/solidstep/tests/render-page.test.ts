@@ -12,6 +12,25 @@ const render = vi.fn();
 const logger = vi.hoisted(() => ({ warn: vi.fn(), error: vi.fn() }));
 const safeExecuteHook = vi.hoisted(() => vi.fn(async () => undefined));
 const getInstrumentation = vi.hoisted(() => vi.fn(() => null as any));
+const getCachedModule = vi.hoisted(() => vi.fn(async () => ({ options: {} })));
+const buildHydrationScript = vi.hoisted(() =>
+    vi.fn(
+        (opts: { fetchPriority?: string }) =>
+            `HYDRATE[fp=${opts.fetchPriority ?? ''}]`,
+    ),
+);
+const buildHeadHtml = vi.hoisted(() =>
+    vi.fn(
+        (_meta: unknown, assetsHtml: string, _nonce?: string, hydrate = true) =>
+            `HEAD[hydrate=${hydrate}]${assetsHtml}`,
+    ),
+);
+const renderAssetsToHtml = vi.hoisted(() =>
+    vi.fn(
+        (assets: { tag: string; attrs: Record<string, unknown> }[]) =>
+            `ASSETS${JSON.stringify(assets)}`,
+    ),
+);
 
 const mockResponseStatus = vi.hoisted(() => ({ current: 200 }));
 vi.mock('vinxi/http', () => ({
@@ -31,10 +50,10 @@ vi.mock('../utils/dev-overlay', () => ({
     devOverlayClientScript: () => '',
 }));
 vi.mock('../utils/html', () => ({
-    renderAssetsToHtml: () => '',
+    renderAssetsToHtml: (...a: unknown[]) => renderAssetsToHtml(...a),
     jsonForScript: () => '',
-    buildHydrationScript: () => '',
-    buildHeadHtml: () => '',
+    buildHydrationScript: (...a: unknown[]) => buildHydrationScript(...a),
+    buildHeadHtml: (...a: unknown[]) => buildHeadHtml(...a),
     createBaseMeta: () => ({}),
 }));
 vi.mock('../utils/loading-swap', () => ({
@@ -50,7 +69,7 @@ vi.mock('../utils/instrumentation', () => ({
     }),
 }));
 vi.mock('../server/route-manifest', () => ({
-    getCachedModule: async () => ({}),
+    getCachedModule: (...a: unknown[]) => getCachedModule(...a),
 }));
 vi.mock('../server/isr', () => ({
     serveIsr: async () => ({ html: '', cacheStatus: 'hit' }),
@@ -90,6 +109,10 @@ beforeEach(() => {
     safeExecuteHook.mockClear();
     getInstrumentation.mockReturnValue(null);
     mockResponseStatus.current = 200;
+    getCachedModule.mockReset().mockResolvedValue({ options: {} });
+    buildHydrationScript.mockClear();
+    buildHeadHtml.mockClear();
+    renderAssetsToHtml.mockClear();
 });
 
 const onResponseStartCalls = () =>
@@ -100,7 +123,10 @@ const baseCtx = () => ({
     req: new Request('https://example.com/p'),
     matched: { type: 'page' } as any,
     pageEntry: {
-        mainPage: { manifestPath: '/p', options: undefined },
+        mainPage: {
+            manifestPath: '/p',
+            options: { src: 'opts', import: async () => ({}) },
+        },
         errorPage: { manifestPath: '/p/error' },
         loadingPage: undefined,
         layouts: [],
@@ -163,6 +189,99 @@ describe('renderPage onResponseStart', () => {
         expect(onResponseStartCalls()[0][3]).toMatchObject({
             statusCode: 404,
         });
+    });
+});
+
+describe('renderPage hydration options', () => {
+    it('threads fetchPriority into the main-render hydration script', async () => {
+        getCachedModule.mockResolvedValue({
+            options: { hydration: { fetchPriority: 'high' } },
+        });
+        render.mockResolvedValue({
+            rendered: '<p>hi</p>',
+            documentMeta: {},
+            documentAssets: [],
+            loaderData: {},
+            cacheStatus: undefined,
+        });
+
+        const stream = await renderPage(baseCtx());
+        const { text } = await readStream(stream as ReadableStream);
+
+        expect(text).toContain('HYDRATE[fp=high]');
+    });
+
+    it('hydration.disable ships no manifest/hydration script and drops modulepreload assets', async () => {
+        getCachedModule.mockResolvedValue({
+            options: { hydration: { disable: true } },
+        });
+        render.mockResolvedValue({
+            rendered: '<p>static</p>',
+            documentMeta: {},
+            documentAssets: [
+                { tag: 'link', attrs: { rel: 'modulepreload', href: '/x.js' } },
+                { tag: 'link', attrs: { rel: 'stylesheet', href: '/x.css' } },
+            ],
+            loaderData: {},
+            cacheStatus: undefined,
+        });
+
+        const stream = await renderPage(baseCtx());
+        const { text, error } = await readStream(stream as ReadableStream);
+
+        expect(error).toBeNull();
+        expect(text).toContain('<p>static</p>');
+        expect(text).not.toContain('HYDRATE[');
+        expect(text).not.toContain('window.manifest');
+        const lastHeadCall =
+            buildHeadHtml.mock.calls[buildHeadHtml.mock.calls.length - 1];
+        expect(lastHeadCall[3]).toBe(false);
+        const assetsPassed = renderAssetsToHtml.mock.calls[
+            renderAssetsToHtml.mock.calls.length - 1
+        ][0] as { attrs: { rel?: string } }[];
+        expect(
+            assetsPassed.some(
+                (a: { attrs: { rel?: string } }) =>
+                    a.attrs.rel === 'modulepreload',
+            ),
+        ).toBe(false);
+        expect(
+            assetsPassed.some(
+                (a: { attrs: { rel?: string } }) =>
+                    a.attrs.rel === 'stylesheet',
+            ),
+        ).toBe(true);
+    });
+
+    it('warns and ignores hydration.disable when a loading.tsx sibling exists', async () => {
+        getCachedModule.mockResolvedValue({
+            options: { hydration: { disable: true } },
+        });
+        const ctx = baseCtx();
+        ctx.pageEntry.loadingPage = { manifestPath: '/p/loading' } as any;
+        render.mockImplementation(
+            async ({ toRender }: { toRender: string }) => {
+                if (toRender === 'loading')
+                    throw new Error('no real loading render');
+                return {
+                    rendered: '<p>hi</p>',
+                    documentMeta: {},
+                    documentAssets: [],
+                    loaderData: {},
+                    cacheStatus: undefined,
+                };
+            },
+        );
+
+        const stream = await renderPage(ctx);
+        const { text } = await readStream(stream as ReadableStream);
+
+        expect(logger.warn).toHaveBeenCalledWith(
+            expect.objectContaining({ route: '/p' }),
+            expect.stringContaining('hydration.disable'),
+        );
+        // disable was ignored -> normal hydration script still present
+        expect(text).toContain('HYDRATE[');
     });
 });
 

@@ -127,6 +127,7 @@ export const buildHydrationScript = (opts: {
     extraArgs?: string[];
     nonce?: string;
     dataHydration?: string;
+    fetchPriority?: 'high' | 'low' | 'auto';
 }): string => {
     const args = [
         jsonForScript(opts.manifestPath),
@@ -139,19 +140,25 @@ export const buildHydrationScript = (opts: {
         'type="module"',
         opts.dataHydration ? `data-hydration="${opts.dataHydration}"` : '',
         opts.nonce ? `nonce="${opts.nonce}"` : '',
+        opts.fetchPriority ? `fetchpriority="${opts.fetchPriority}"` : '',
     ]
         .filter(Boolean)
         .join(' ');
     return `<script ${attrs}>import main from '${opts.entryPath}';main(${args});</script>`;
 };
 
-/** Compose the `<head>` inner HTML: metadata + asset tags + Solid's hydration script. */
+/**
+ * Compose the `<head>` inner HTML: metadata + asset tags + Solid's hydration
+ * script. Pass `hydrate: false` to omit the hydration script entirely (a
+ * route with `hydration.disable` ships no framework JS).
+ */
 export const buildHeadHtml = (
     meta: Meta,
     assetsHtml: string,
     nonce?: string,
+    hydrate = true,
 ): string =>
-    `${generateHtmlHead(meta)}\n${assetsHtml}\n${hydrationScript({ nonce })}`;
+    `${generateHtmlHead(meta)}\n${assetsHtml}${hydrate ? `\n${hydrationScript({ nonce })}` : ''}`;
 
 /**
  * The base document {@link Meta} (charset, viewport, default title, build-time

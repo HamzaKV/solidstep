@@ -163,6 +163,38 @@ static file and would re-render the full tree per request anyway — i.e. it wou
 be `defer` streaming with extra steps. Choose based on whether you need a
 CDN-static shell (`ppr`) or crawlable holes (`defer`).
 
+## Client hydration options
+
+Every page's `options` also accepts a `hydration` object controlling the
+client bootstrap:
+
+```tsx
+export const options = defineOptions({
+  hydration: {
+    disable: true, // ship zero framework JS for this route
+    fetchPriority: 'high', // 'high' | 'low' | 'auto' — hint on the hydration script
+  },
+});
+```
+
+- **`fetchPriority`** sets the `fetchpriority` attribute on the hydration
+  `<script type="module">`, letting the browser prioritize (or deprioritize)
+  fetching it relative to other resources.
+- **`disable`** ships **true zero framework JS** for a plain, synchronously
+  rendered page: no hydration script, no client-manifest script, no
+  module-preload links. `<Link>` and `<Form>` degrade to native browser
+  behavior (full page loads, no-JS form submissions) — both already work
+  server-side, so a fully static page (a marketing/content page with no
+  interactivity) needs no client bundle at all.
+
+  `disable` only applies to a plain `dynamic` render that completes
+  successfully. It is **incompatible** with `render: 'ppr'`, a deferred
+  (`type: 'defer'`) loader, or a sibling `loading.tsx` — all three need the
+  client runtime to fill holes or swap content in. Combining them logs a
+  warning and `disable` is ignored for that render. If the page's render
+  throws and falls back to `error.tsx`, normal hydration resumes for the
+  error page.
+
 ## Related
 
 - [Caching](./caching.md) — the cache store, SWR, and tags that ISR builds on.

@@ -158,6 +158,16 @@ describe('buildHydrationScript', () => {
         expect(out).toContain('nonce="N"');
         expect(out.endsWith('["a"],true);</script>')).toBe(true);
     });
+
+    it('emits a fetchpriority attribute when fetchPriority is set', () => {
+        const out = buildHydrationScript({ ...base, fetchPriority: 'high' });
+        expect(out).toContain('fetchpriority="high"');
+    });
+
+    it('omits fetchpriority when not set', () => {
+        const out = buildHydrationScript(base);
+        expect(out).not.toContain('fetchpriority');
+    });
 });
 
 describe('buildHeadHtml', () => {
@@ -169,6 +179,15 @@ describe('buildHeadHtml', () => {
         expect(out).toContain('<title>T</title>');
         expect(out).toContain('<link href="/a">');
         expect(out).toContain('nonce="N"'); // from the hydration script
+    });
+
+    it('omits the Solid hydration script when hydrate is false', () => {
+        const meta: Meta = {
+            title: { type: 'title', attributes: {}, content: 'T' },
+        };
+        const out = buildHeadHtml(meta, '<link href="/a">', 'N', false);
+        expect(out).toContain('<title>T</title>');
+        expect(out).not.toContain('/*hydration*/');
     });
 });
 

@@ -150,6 +150,7 @@ export const renderPage = async (ctx: PageRenderContext) => {
 
     let loading = false;
     let html: string | undefined;
+    let hydrationDisabled = false;
     let meta: Meta = createBaseMeta();
     const assets =
         await clientManifest!.inputs[clientManifest!.handler].assets();
@@ -253,6 +254,29 @@ export const renderPage = async (ctx: PageRenderContext) => {
                             }
                         }
 
+                        // hydration.disable ships zero framework JS for a
+                        // plain synchronous render; it can't coexist with a
+                        // PPR shell, a deferred/streamed render, or a
+                        // loading.tsx swap (all three need the client runtime
+                        // to fill holes / swap content in). Compute once here
+                        // so every branch below sees a consistent decision.
+                        const needsStreaming =
+                            options?.render !== 'ppr' &&
+                            (await routeNeedsStreaming(pageEntry!));
+                        if (
+                            options?.hydration?.disable &&
+                            (options?.render === 'ppr' ||
+                                needsStreaming ||
+                                pageEntry!.loadingPage)
+                        ) {
+                            logger.warn(
+                                { route: pathnamePart },
+                                'hydration.disable is incompatible with render: "ppr", a deferred loader, or a sibling loading.tsx; ignored for this render',
+                            );
+                        } else {
+                            hydrationDisabled = !!options?.hydration?.disable;
+                        }
+
                         // PPR: render and serve the static shell (deferred
                         // holes left as their loading fallback). The client
                         // fills the holes by fetching their loader data. The
@@ -295,6 +319,8 @@ export const renderPage = async (ctx: PageRenderContext) => {
                                     'true',
                                 ],
                                 nonce: cspNonce,
+                                fetchPriority:
+                                    options?.hydration?.fetchPriority,
                             });
                             setResponseStatus(200);
                             await fireResponseStart();
@@ -309,7 +335,7 @@ export const renderPage = async (ctx: PageRenderContext) => {
                         // stream deferred loader data in afterwards via Solid's
                         // renderToStream + Suspense. Non-deferred routes fall
                         // through to the unchanged renderToString path below.
-                        if (await routeNeedsStreaming(pageEntry!)) {
+                        if (needsStreaming) {
                             const result = await render({
                                 toRender: 'main',
                                 entry: pageEntry!,
@@ -342,6 +368,8 @@ export const renderPage = async (ctx: PageRenderContext) => {
                                 loaderData: result.loaderData,
                                 extraArgs: [jsonForScript(result.deferredKeys)],
                                 nonce: cspNonce,
+                                fetchPriority:
+                                    options?.hydration?.fetchPriority,
                             });
                             setResponseStatus(200);
                             await fireResponseStart();
@@ -460,14 +488,18 @@ export const renderPage = async (ctx: PageRenderContext) => {
                             loaderData,
                         } = mainResult;
                         assets.push(...documentAssets);
-                        clientHydrationScript = buildHydrationScript({
-                            entryPath,
-                            manifestPath: pageEntry!.mainPage.manifestPath,
-                            params,
-                            searchParams,
-                            loaderData,
-                            nonce: cspNonce,
-                        });
+                        if (!hydrationDisabled) {
+                            clientHydrationScript = buildHydrationScript({
+                                entryPath,
+                                manifestPath: pageEntry!.mainPage.manifestPath,
+                                params,
+                                searchParams,
+                                loaderData,
+                                nonce: cspNonce,
+                                fetchPriority:
+                                    options?.hydration?.fetchPriority,
+                            });
+                        }
                         html = rendered;
                         meta = {
                             ...meta,
@@ -476,6 +508,10 @@ export const renderPage = async (ctx: PageRenderContext) => {
                         setResponseStatus(200);
                     }
                 } catch (e1: any) {
+                    // Any error path (including a broken error.tsx) resumes
+                    // normal hydration: hydration.disable only ever applies
+                    // to a genuinely successful plain main render.
+                    hydrationDisabled = false;
                     streamError = e1;
                     if (
                         e1 instanceof RedirectError ||
@@ -568,19 +604,39 @@ export const renderPage = async (ctx: PageRenderContext) => {
                     push(`<template id="__page_html__">${html}</template>`);
                     push(buildLoadingSwapScript(meta, assetsHtml, cspNonce));
                     push(manifestHtml);
-                    push(clientHydrationScript);
+                    push(clientHydrationScript ?? '');
                     controller.close();
                     return;
                 }
-                const assetsHtml = renderAssetsToHtml(assets, cspNonce);
+                // hydration.disable: ship no client-manifest script, no
+                // module-preload links, and no Solid hydration bootstrap —
+                // true zero framework JS for this response.
+                const bodyAssets = hydrationDisabled
+                    ? assets.filter(
+                          (a) =>
+                              !(
+                                  a.tag === 'link' &&
+                                  a.attrs.rel === 'modulepreload'
+                              ),
+                      )
+                    : assets;
+                const assetsHtml = renderAssetsToHtml(bodyAssets, cspNonce);
                 const transformHtml = template
                     .replace(
                         '<!--app-head-->',
-                        buildHeadHtml(meta, assetsHtml, cspNonce),
+                        buildHeadHtml(
+                            meta,
+                            assetsHtml,
+                            cspNonce,
+                            !hydrationDisabled,
+                        ),
                     )
                     .replace(
                         '<!--app-body-->',
-                        (html ?? '') + manifestHtml + clientHydrationScript,
+                        (html ?? '') +
+                            (hydrationDisabled
+                                ? ''
+                                : manifestHtml + (clientHydrationScript ?? '')),
                     );
                 push(transformHtml);
                 controller.close();
