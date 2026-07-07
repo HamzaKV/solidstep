@@ -36,7 +36,10 @@ export const singleFlight = <T>(
     const evict = () => {
         if (inflight.get(key) === tracked) inflight.delete(key);
     };
-    const tracked: Promise<T> = fn().finally(() => {
+    // Wrapped in an async IIFE so a synchronously-throwing (non-async) fn
+    // still produces a rejected promise instead of throwing out of
+    // singleFlight itself, matching the always-a-Promise contract.
+    const tracked: Promise<T> = (async () => fn())().finally(() => {
         if (timer !== undefined) clearTimeout(timer);
         evict();
     });

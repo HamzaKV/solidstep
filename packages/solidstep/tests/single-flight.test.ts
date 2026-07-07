@@ -30,6 +30,18 @@ describe('singleFlight', () => {
         expect(fn).toHaveBeenCalledTimes(2);
     });
 
+    it('returns a rejected promise (not a synchronous throw) when fn throws synchronously', async () => {
+        const fn = () => {
+            throw new Error('sync boom');
+        };
+        await expect(singleFlight('sync-throw', fn as any)).rejects.toThrow(
+            'sync boom',
+        );
+        // The key must still be cleared so a retry can run fresh.
+        const retry = vi.fn(async () => 'ok');
+        await expect(singleFlight('sync-throw', retry)).resolves.toBe('ok');
+    });
+
     it('keeps distinct keys independent', async () => {
         const fnA = vi.fn(async () => 'a');
         const fnB = vi.fn(async () => 'b');
