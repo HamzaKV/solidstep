@@ -141,6 +141,19 @@ export class SerovalChunkReader {
             await this.readChunk();
             return await this.next();
         }
+        // The 12-byte header itself can arrive split across reads (e.g. a
+        // network chunk boundary landing inside it), so buffer until it's
+        // fully present before decoding it — otherwise a truncated slice can
+        // parse as a plausible-looking but wrong length.
+        while (this.buffer.length < 12 && !this.done) {
+            await this.readChunk();
+        }
+        if (this.buffer.length < 12) {
+            throw new Error(
+                'Malformed server function stream: truncated header',
+            );
+        }
+
         // Read the "byte header"
         // The byte header tells us how big the expected data is
         // so we know how much data we should wait before we

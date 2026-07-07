@@ -133,6 +133,24 @@ describe('SerovalChunkReader framing', () => {
         expect(first.value).toEqual(value);
     });
 
+    it('reassembles a frame whose 12-byte header itself is split across reads', async () => {
+        const value = { hello: 'world', items: [1, 2, 3] };
+        const bytes = await collectBytes(serializeToStream(nextId(), value));
+        // Split inside the 12-byte header (bytes 0-11), not the payload.
+        const reader = new SerovalChunkReader(
+            streamOf(bytes.subarray(0, 5), bytes.subarray(5)),
+        );
+        const first = await reader.next();
+        await reader.drain();
+        expect(first.value).toEqual(value);
+    });
+
+    it('throws when the stream ends mid-header (fewer than 12 bytes ever arrive)', async () => {
+        const truncated = new TextEncoder().encode(';0x00');
+        const reader = new SerovalChunkReader(streamOf(truncated));
+        await expect(reader.next()).rejects.toThrow(/truncated header/);
+    });
+
     it('reports done on an empty stream', async () => {
         const reader = new SerovalChunkReader(streamOf());
         expect(await reader.next()).toEqual({ done: true, value: undefined });
