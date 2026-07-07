@@ -40,4 +40,21 @@ test.describe('/__solidstep_route envelope', () => {
         const res = await request.get('/__solidstep_route');
         expect(res.status()).toBe(400);
     });
+
+    test('redacts a page loader failure to a generic message + errorId (production build)', async ({
+        request,
+    }) => {
+        const res = await request.get(
+            `/__solidstep_route?url=${encodeURIComponent('/boom')}`,
+        );
+        expect(res.status()).toBe(200);
+        const body = await res.text();
+        expect(body).toContain('"error"');
+        // The raw loader message never reaches the client in production...
+        expect(body).not.toContain('kaboom from the loader');
+        // ...replaced by a generic message correlated to a server-side errorId.
+        expect(body).toMatch(
+            /An unexpected error occurred \(ref: [0-9a-f-]+\)/,
+        );
+    });
 });
