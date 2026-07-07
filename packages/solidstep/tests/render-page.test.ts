@@ -400,6 +400,30 @@ describe('renderPage PPR', () => {
         expect(onResponseStartCalls()[0][3]).toMatchObject({ statusCode: 200 });
     });
 
+    it('warns and ignores hydration.disable on a ppr route', async () => {
+        getCachedModule.mockResolvedValue({
+            options: { render: 'ppr', hydration: { disable: true } },
+        });
+        isPprResult.mockReturnValue(true);
+        render.mockResolvedValue({
+            rendered: '<p>shell</p>',
+            documentMeta: {},
+            documentAssets: [],
+            loaderData: {},
+            pprHoles: { h1: 'pending' },
+        });
+
+        const stream = await renderPage(baseCtx());
+        const { text } = await readStream(stream as ReadableStream);
+
+        expect(logger.warn).toHaveBeenCalledWith(
+            expect.objectContaining({ route: '/p' }),
+            expect.stringContaining('hydration.disable'),
+        );
+        // disable was ignored -> normal hydration script still present
+        expect(text).toContain('HYDRATE[');
+    });
+
     it('recovers via error.tsx when render() returns a non-PPR shape for a ppr route (internal consistency guard)', async () => {
         getCachedModule.mockResolvedValue({ options: { render: 'ppr' } });
         isPprResult.mockReturnValue(false);
@@ -444,6 +468,31 @@ describe('renderPage deferred streaming', () => {
         expect(text).toContain('HYDRATE[');
         expect(text).toContain('</html>');
         expect(onResponseStartCalls()).toHaveLength(1);
+    });
+
+    it('warns and ignores hydration.disable on a route with a deferred loader', async () => {
+        getCachedModule.mockResolvedValue({
+            options: { hydration: { disable: true } },
+        });
+        routeNeedsStreaming.mockResolvedValue(true);
+        isDeferredResult.mockReturnValue(true);
+        render.mockResolvedValue({
+            documentMeta: {},
+            documentAssets: [],
+            loaderData: {},
+            deferredKeys: ['/p'],
+            composed: () => 'tree',
+        });
+
+        const stream = await renderPage(baseCtx());
+        const { text } = await readStream(stream as ReadableStream);
+
+        expect(logger.warn).toHaveBeenCalledWith(
+            expect.objectContaining({ route: '/p' }),
+            expect.stringContaining('hydration.disable'),
+        );
+        // disable was ignored -> normal hydration script still present
+        expect(text).toContain('HYDRATE[');
     });
 
     it('recovers via error.tsx when render() returns a non-deferred shape for a streaming route (internal consistency guard)', async () => {
