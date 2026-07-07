@@ -95,6 +95,31 @@ describe('serveIsr', () => {
         );
     });
 
+    it('coalesces concurrent requests for the same stale entry into one background regeneration', async () => {
+        getCacheEntry.mockResolvedValue({
+            value: '<html>stale</html>',
+            staleAt: Date.now() - 1,
+        });
+        fetchServer.mockResolvedValue({
+            text: async () => '<html>fresh</html>',
+        });
+
+        const results = await Promise.all([
+            serveIsr('https://x.test', '/p', 60),
+            serveIsr('https://x.test', '/p', 60),
+            serveIsr('https://x.test', '/p', 60),
+        ]);
+
+        for (const result of results) {
+            expect(result).toEqual({
+                html: '<html>stale</html>',
+                cacheStatus: 'hit',
+            });
+        }
+        await vi.waitFor(() => expect(setCacheWithOptions).toHaveBeenCalled());
+        expect(fetchServer).toHaveBeenCalledTimes(1);
+    });
+
     it('logs a warning and keeps serving stale when background regeneration fails', async () => {
         getCacheEntry.mockResolvedValue({
             value: '<html>stale</html>',

@@ -63,6 +63,29 @@ describe('getCachedLoaderData', () => {
         expect(loaderFn.loader).toHaveBeenCalledTimes(1);
     });
 
+    it('coalesces concurrent identical cache misses into a single loader run', async () => {
+        let resolveLoader: (v: { data: unknown }) => void;
+        const loader = vi.fn(
+            () => new Promise<{ data: unknown }>((r) => (resolveLoader = r)),
+        );
+        const loaderFn = { loader, options: { cache: {} } };
+        const concurrentReq = req('https://example.com/coalesce-test');
+
+        const calls = [
+            getCachedLoaderData(loaderFn, '/p', concurrentReq),
+            getCachedLoaderData(loaderFn, '/p', concurrentReq),
+            getCachedLoaderData(loaderFn, '/p', concurrentReq),
+        ];
+        // Let the pending cache-read microtasks ahead of the loader call
+        // settle before resolving it.
+        await new Promise((r) => setTimeout(r, 0));
+        resolveLoader!({ data: { n: 6 } });
+        const results = await Promise.all(calls);
+
+        expect(results).toEqual([{ n: 6 }, { n: 6 }, { n: 6 }]);
+        expect(loader).toHaveBeenCalledTimes(1);
+    });
+
     it('expires the cached value after the ttl', async () => {
         vi.useFakeTimers();
         try {
