@@ -9,8 +9,8 @@ For the concrete, version-by-version record see the changelogs:
 
 ## Stability & versioning policy
 
-SolidStep is **pre-1.0**. The framework (`solidstep`) is at `0.4.2` and the
-scaffolding CLI (`@varlabs/create-solidstep`) is at `0.2.0`.
+SolidStep is **pre-1.0**. The framework (`solidstep`) is at `0.5.3` and the
+scaffolding CLI (`@varlabs/create-solidstep`) is at `0.3.0`.
 
 - **Semantic Versioning with a pre-1.0 caveat.** We follow
   [SemVer](https://semver.org/), but per its `0.x` rules **minor versions may
