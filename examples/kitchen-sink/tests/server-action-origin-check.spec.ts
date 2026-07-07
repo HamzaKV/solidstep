@@ -17,6 +17,9 @@ test.describe('built-in /_server origin check', () => {
         request,
     }) => {
         await page.goto('/counter');
+        // Wait for hydration so the click is handled by the client (fetch to
+        // /_server) rather than racing a pre-hydration native form submit.
+        await expect(page.getByTestId('count')).toHaveText('0');
         const [serverReq] = await Promise.all([
             page.waitForRequest((req) => req.url().includes('/_server')),
             page.getByTestId('submit').click(),

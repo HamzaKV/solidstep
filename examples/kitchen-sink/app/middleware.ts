@@ -6,11 +6,32 @@ import {
 } from 'solidstep/utils/csp';
 import { cors } from 'solidstep/utils/cors';
 import { csrf } from 'solidstep/utils/csrf';
+import { bodyLimit } from 'solidstep/utils/body-limit';
+import { rateLimit } from 'solidstep/utils/rate-limit';
 import { randomBytes } from 'node:crypto';
 
 const trustedOrigins = ['https://trusted.example.com'];
 const corsMiddleware = cors(trustedOrigins);
 const csrfMiddleware = csrf(trustedOrigins);
+
+// Scoped to /api/limits-test only (a fixed key, not per-IP, so bursts from
+// the e2e suite's shared local IP behave predictably) so these conservative
+// limits don't affect any other route's traffic. See
+// tests/rate-body-limit.spec.ts.
+const testBodyLimit = bodyLimit({ maxBytes: 100 });
+const testRateLimit = rateLimit({
+    windowMs: 60_000,
+    max: 3,
+    key: () => 'e2e-limits-test',
+});
+const limitsTest: Middleware = {
+    onRequest: (event) => {
+        if (event.path.split('?')[0] !== '/api/limits-test') return;
+        return (
+            testBodyLimit.onRequest?.(event) ?? testRateLimit.onRequest?.(event)
+        );
+    },
+};
 
 // Logs every request. Demonstrates a lightweight composable unit.
 const logger: Middleware = {
@@ -74,4 +95,4 @@ const security: Middleware = {
     },
 };
 
-export default defineMiddleware([logger, security]);
+export default defineMiddleware([logger, limitsTest, security]);
