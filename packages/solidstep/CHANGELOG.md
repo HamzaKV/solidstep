@@ -1,5 +1,49 @@
 # solidstep
 
+## 0.7.0
+
+### Minor Changes
+
+- 82efe1d: Feat/Breaking: dynamic route params and catch-all segments are now
+  percent-decoded.
+
+  `/blog/hello%20world` now yields `slug: 'hello world'` (previously the raw
+  `'hello%20world'`). A catch-all decodes each segment individually, so
+  `/docs/a%2Fb` yields `path: ['a/b']`, not a merged segment. A malformed
+  encoding (e.g. a lone trailing `%`) passes through raw rather than throwing.
+  Static path segments are unaffected — they still match on their raw form.
+
+  If you call `decodeURIComponent` on a route param yourself today, remove
+  that call: decoding an already-decoded value can mangle a param containing
+  a literal `%` (e.g. `100%` becomes `100` if re-decoded, or throws before this
+  change if it's not actually double-encoded).
+
+- da78cca: Feat/Breaking: server functions (`/_server`) now reject cross-origin requests
+  with a 403 by default.
+
+  The check inspects `Sec-Fetch-Site`/`Origin`: a request from another origin
+  that isn't in `security.serverActions.trustedOrigins` is blocked before the
+  action runs. A request with neither header (non-browser clients — curl,
+  mobile apps, server-to-server calls) is unaffected, since a browser sending
+  a cross-origin request always sends at least one of them.
+
+  Configure via `defineConfig`:
+
+  ```ts
+  export default defineConfig({
+    security: {
+      serverActions: {
+        trustedOrigins: ["partner.example.com"],
+        // originCheck: false, // to disable entirely
+      },
+    },
+  });
+  ```
+
+  If you have a legitimate cross-origin caller of your server functions (a
+  mobile app using a browser webview, another site embedding a form), add its
+  host to `trustedOrigins` or set `originCheck: false`.
+
 ## 0.6.0
 
 ### Minor Changes
