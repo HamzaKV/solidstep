@@ -60,6 +60,22 @@ beforeEach(() => {
 
 const hookNames = () => safeExecuteHook.mock.calls.map((c) => c[0]);
 
+describe('handleServerFunction onResponseStart', () => {
+    // The success/no-JS/passthrough return paths all go through
+    // `provideRequestEvent` (solid-js/web/storage), which needs a real
+    // solid-js SSR build context this unit-test environment doesn't set up
+    // (hence this file's coverage-gate exclusion — those paths are
+    // integration-tested). The dispatch-level error paths throw before
+    // reaching that code, so they're the ones testable here.
+    it('fires before the 404 dispatch-error response', async () => {
+        const req = new Request(
+            'https://example.com/_server?id=missing-chunk&name=fn',
+        );
+        await handleServerFunction(makeEvent(req) as any);
+        expect(hookNames()).toContain('onResponseStart');
+    });
+});
+
 describe('handleServerFunction input guards', () => {
     it('returns 404 for an unknown functionId instead of throwing', async () => {
         // no 'missing-chunk' entry registered in `chunks`

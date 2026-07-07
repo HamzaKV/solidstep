@@ -133,6 +133,12 @@ export const renderPage = async (ctx: PageRenderContext) => {
             setResponseStatus(200);
             const respCtx = createResponseContext(reqCtx, 200);
             await safeExecuteHook(
+                'onResponseStart',
+                inst?.onResponseStart,
+                req,
+                respCtx,
+            );
+            await safeExecuteHook(
                 'onResponseEnd',
                 inst?.onResponseEnd,
                 req,
@@ -164,6 +170,20 @@ export const renderPage = async (ctx: PageRenderContext) => {
             const push = (text: string) =>
                 controller.enqueue(encoder.encode(text));
             let streamError: unknown = null;
+            // Fired once per response, right after status/headers are final
+            // but before the first body byte — across whichever of the
+            // branches below (ISR, PPR, deferred, loading-swap, main, error,
+            // 404, dev-overlay) ends up producing the response.
+            const fireResponseStart = () =>
+                safeExecuteHook(
+                    'onResponseStart',
+                    inst?.onResponseStart,
+                    req,
+                    createResponseContext(
+                        reqCtx,
+                        getResponseStatus(event) || 200,
+                    ),
+                );
 
             try {
                 try {
@@ -211,6 +231,7 @@ export const renderPage = async (ctx: PageRenderContext) => {
                         } catch (e) {
                             console.error('404 module not found:', e);
                             setResponseStatus(404);
+                            await fireResponseStart();
                             push('Not Found');
                             controller.close();
                             return;
@@ -276,6 +297,7 @@ export const renderPage = async (ctx: PageRenderContext) => {
                                 nonce: cspNonce,
                             });
                             setResponseStatus(200);
+                            await fireResponseStart();
                             push(
                                 `<!doctype html><html lang="en"><head>${headHtml}</head>${result.rendered}${manifestHtml}${mainScript}</html>`,
                             );
@@ -322,6 +344,7 @@ export const renderPage = async (ctx: PageRenderContext) => {
                                 nonce: cspNonce,
                             });
                             setResponseStatus(200);
+                            await fireResponseStart();
                             push(
                                 `<!doctype html><html lang="en"><head>${headHtml}</head>`,
                             );
@@ -474,6 +497,7 @@ export const renderPage = async (ctx: PageRenderContext) => {
                             // Prod: rethrow → the outer 500.
                             if (import.meta.env.DEV) {
                                 setResponseStatus(500);
+                                await fireResponseStart();
                                 push(
                                     renderDevOverlayDocument(e1, {
                                         method: req.method,
@@ -532,6 +556,8 @@ export const renderPage = async (ctx: PageRenderContext) => {
                         throw e1;
                     }
                 }
+
+                await fireResponseStart();
 
                 if (loading) {
                     const assetsHtml = renderAssetsToHtml(

@@ -10,11 +10,16 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const render = vi.fn();
 const logger = vi.hoisted(() => ({ warn: vi.fn(), error: vi.fn() }));
+const safeExecuteHook = vi.hoisted(() => vi.fn(async () => undefined));
+const getInstrumentation = vi.hoisted(() => vi.fn(() => null as any));
 
+const mockResponseStatus = vi.hoisted(() => ({ current: 200 }));
 vi.mock('vinxi/http', () => ({
-    getResponseStatus: () => 200,
+    getResponseStatus: () => mockResponseStatus.current,
     setHeader: vi.fn(),
-    setResponseStatus: vi.fn(),
+    setResponseStatus: (status: number) => {
+        mockResponseStatus.current = status;
+    },
 }));
 vi.mock('solid-js/web', () => ({
     renderToStream: () => ({ pipe: vi.fn() }),
@@ -36,10 +41,13 @@ vi.mock('../utils/loading-swap', () => ({
     buildLoadingSwapScript: () => '',
 }));
 vi.mock('../utils/instrumentation', () => ({
-    getInstrumentation: () => null,
-    safeExecuteHook: async () => undefined,
+    getInstrumentation: (...a: unknown[]) => getInstrumentation(...a),
+    safeExecuteHook: (...a: unknown[]) => safeExecuteHook(...a),
     createRequestContext: () => ({ metadata: {} }),
-    createResponseContext: () => ({}),
+    createResponseContext: (reqCtx: unknown, statusCode: number) => ({
+        ...(reqCtx as object),
+        statusCode,
+    }),
 }));
 vi.mock('../server/route-manifest', () => ({
     getCachedModule: async () => ({}),
@@ -79,7 +87,13 @@ beforeEach(() => {
     render.mockReset();
     logger.warn.mockClear();
     logger.error.mockClear();
+    safeExecuteHook.mockClear();
+    getInstrumentation.mockReturnValue(null);
+    mockResponseStatus.current = 200;
 });
+
+const onResponseStartCalls = () =>
+    safeExecuteHook.mock.calls.filter((c) => c[0] === 'onResponseStart');
 
 const baseCtx = () => ({
     event: {} as any,
@@ -109,6 +123,47 @@ const baseCtx = () => ({
         json: async () => ({}),
     } as any,
     routeManifest: {} as any,
+});
+
+describe('renderPage onResponseStart', () => {
+    it('fires once with the final status before the body streams (main render)', async () => {
+        render.mockResolvedValue({
+            rendered: '<p>hi</p>',
+            documentMeta: {},
+            documentAssets: [],
+            loaderData: {},
+            cacheStatus: undefined,
+        });
+
+        const stream = await renderPage(baseCtx());
+        const { text, error } = await readStream(stream as ReadableStream);
+
+        expect(error).toBeNull();
+        expect(text).toContain('<p>hi</p>');
+        expect(onResponseStartCalls()).toHaveLength(1);
+        expect(onResponseStartCalls()[0][3]).toMatchObject({
+            statusCode: 200,
+        });
+    });
+
+    it('fires before the body on the hardcoded 404 fallback (no not-found module)', async () => {
+        const ctx = baseCtx();
+        ctx.matched = undefined as any;
+        ctx.routeManifest = {} as any;
+        // matchRoute is the real utils/path-router implementation (unmocked);
+        // an empty routeManifest makes it return undefined, forcing the
+        // "No not-found page configured" -> hardcoded 404 catch branch.
+
+        const stream = await renderPage(ctx);
+        const { text, error } = await readStream(stream as ReadableStream);
+
+        expect(error).toBeNull();
+        expect(text).toBe('Not Found');
+        expect(onResponseStartCalls()).toHaveLength(1);
+        expect(onResponseStartCalls()[0][3]).toMatchObject({
+            statusCode: 404,
+        });
+    });
 });
 
 describe('renderPage error-boundary failure', () => {

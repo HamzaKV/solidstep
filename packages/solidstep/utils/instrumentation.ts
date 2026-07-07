@@ -40,17 +40,6 @@ export interface ResponseContext extends RequestContext {
     duration: number;
 }
 
-export interface ServerInfo {
-    /** Full server URL (e.g., "http://localhost:3001") */
-    url: string;
-    /** Port number */
-    port: number;
-    /** Host (e.g., "localhost" or "0.0.0.0") */
-    host: string;
-    /** Current environment */
-    env: 'development' | 'production';
-}
-
 // ============================================
 // Hook Function Types
 // ============================================
@@ -64,10 +53,15 @@ export type OnRequestFn = (
     context: RequestContext,
 ) => void | Promise<void>;
 
-/** Called when response is ready but before streaming starts */
+/**
+ * Called once per response, right after its status/headers are final but
+ * before the first body byte is written — whether the response is streamed
+ * (SSR/deferred/PPR) or a single cached artifact (ISR). There is no `Response`
+ * object at this point in the pipeline (the body may not exist yet, or is a
+ * stream being constructed), hence no `response` argument.
+ */
 export type OnResponseStartFn = (
     request: Request,
-    response: Response,
     context: ResponseContext,
 ) => void | Promise<void>;
 
@@ -77,10 +71,7 @@ export type OnResponseEndFn = (
     context: ResponseContext,
 ) => void | Promise<void>;
 
-/** Called when server is fully ready and listening */
-export type OnServerReadyFn = (server: ServerInfo) => void | Promise<void>;
-
-/** Called when server is shutting down */
+/** Called when server is shutting down (once, on SIGTERM/SIGINT/beforeExit). */
 export type OnShutdownFn = () => void | Promise<void>;
 
 /** Called when an error occurs during request processing */
@@ -99,7 +90,6 @@ export interface InstrumentationModule {
     onRequest?: OnRequestFn;
     onResponseStart?: OnResponseStartFn;
     onResponseEnd?: OnResponseEndFn;
-    onServerReady?: OnServerReadyFn;
     onShutdown?: OnShutdownFn;
     onRequestError?: OnRequestErrorFn;
 }
@@ -165,7 +155,6 @@ export async function loadInstrumentation(): Promise<InstrumentationModule | nul
                     onRequest: module.onRequest,
                     onResponseStart: module.onResponseStart,
                     onResponseEnd: module.onResponseEnd,
-                    onServerReady: module.onServerReady,
                     onShutdown: module.onShutdown,
                     onRequestError: module.onRequestError,
                 };
@@ -222,6 +211,35 @@ export async function safeExecuteHook<T extends (...args: any[]) => any>(
     } catch (error) {
         console.error(`[instrumentation] Error in ${hookName} hook:`, error);
     }
+}
+
+// ============================================
+// Shutdown Handler
+// ============================================
+
+let shutdownHooked = false;
+
+/**
+ * Wire `onShutdown` to fire once on SIGTERM, SIGINT, or `beforeExit` —
+ * whichever arrives first. Call once at server startup (see `server.ts`'s
+ * `onStart`). No-op if `instrumentation` has no `onShutdown` hook, or if
+ * already registered (repeat calls, e.g. from HMR, are ignored).
+ */
+export function registerShutdownHandler(
+    instrumentation: InstrumentationModule | null,
+): void {
+    if (shutdownHooked || !instrumentation?.onShutdown) return;
+    shutdownHooked = true;
+
+    let fired = false;
+    const run = async () => {
+        if (fired) return;
+        fired = true;
+        await safeExecuteHook('onShutdown', instrumentation.onShutdown);
+    };
+    process.once('SIGTERM', run);
+    process.once('SIGINT', run);
+    process.once('beforeExit', run);
 }
 
 // ============================================

@@ -123,6 +123,16 @@ export async function handleServerFunction(event: HTTPEvent) {
         routeType: 'server-action',
     });
     await safeExecuteHook('onRequest', inst?.onRequest, request, reqCtx);
+    // Fired once per response, right before its body is returned/streamed —
+    // across whichever branch below produces it (dispatch 404/400, the no-JS
+    // redirect, a raw Response passthrough, or the success/error envelope).
+    const fireResponseStart = (status: number) =>
+        safeExecuteHook(
+            'onResponseStart',
+            inst?.onResponseStart,
+            request,
+            createResponseContext(reqCtx, status),
+        );
 
     const serverReference = request.headers.get('X-Server-Id');
     const instance = request.headers.get('X-Server-Instance');
@@ -140,6 +150,7 @@ export async function handleServerFunction(event: HTTPEvent) {
     }
 
     if (!functionId || !name) {
+        await fireResponseStart(404);
         return process.env.NODE_ENV === 'development'
             ? new Response('Server function not found', { status: 404 })
             : new Response(null, { status: 404 });
@@ -271,12 +282,16 @@ export async function handleServerFunction(event: HTTPEvent) {
             const referer = request.headers.get('Referer') || '/';
             setResponseStatus(event, 303);
             setHeader(event, 'Location', referer);
+            await fireResponseStart(303);
             return '';
         }
 
         // handle responses
         if (result instanceof Response) {
-            if (result.headers?.has('X-Content-Raw')) return result;
+            if (result.headers?.has('X-Content-Raw')) {
+                await fireResponseStart(result.status || 200);
+                return result;
+            }
             if (instance) {
                 // forward headers
                 // if (result.headers) mergeResponseHeaders(event, result.headers);
@@ -304,6 +319,7 @@ export async function handleServerFunction(event: HTTPEvent) {
         }
 
         setHeader(event, 'content-type', 'text/javascript');
+        await fireResponseStart(getResponseStatus(event) || 200);
         return serializeToStream(instance as string, result);
     } catch (x) {
         await safeExecuteHook(
@@ -315,11 +331,13 @@ export async function handleServerFunction(event: HTTPEvent) {
         );
 
         if (x instanceof ServerFunctionNotFoundError) {
+            await fireResponseStart(404);
             return process.env.NODE_ENV === 'development'
                 ? new Response(x.message, { status: 404 })
                 : new Response(null, { status: 404 });
         }
         if (x instanceof ServerFunctionBadRequestError) {
+            await fireResponseStart(400);
             return process.env.NODE_ENV === 'development'
                 ? new Response(x.message, { status: 400 })
                 : new Response(null, { status: 400 });
@@ -354,6 +372,7 @@ export async function handleServerFunction(event: HTTPEvent) {
                 setResponseStatus(event, 500);
             }
         }
+        await fireResponseStart(getResponseStatus(event) || 200);
         if (instance) {
             setHeader(event, 'content-type', 'text/javascript');
             return serializeToStream(instance, x);

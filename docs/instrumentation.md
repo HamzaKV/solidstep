@@ -39,9 +39,10 @@ export default defineInstrumentation({
 |------|--------------|-----------|
 | `register` | Once at server startup | None |
 | `onRequest` | Before each request | `(request: Request, context: RequestContext)` |
-| `onResponseStart` | When response is ready, before streaming | `(request: Request, response: Response, context: ResponseContext)` |
+| `onResponseStart` | Once per response, right after status/headers are final but before the first body byte (there is no `Response` object at this point — the body may still be streaming) | `(request: Request, context: ResponseContext)` |
 | `onResponseEnd` | After response stream is complete | `(request: Request, context: ResponseContext)` |
 | `onRequestError` | When an unhandled error occurs | `(error: Error, request: Request, context: RequestContext)` |
+| `onShutdown` | Once, on `SIGTERM`/`SIGINT`/`beforeExit` (whichever arrives first) | None |
 
 ## Context Objects
 

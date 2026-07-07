@@ -26,6 +26,7 @@ import {
     safeExecuteHook,
     createRequestContext,
     createResponseContext,
+    registerShutdownHandler,
 } from './utils/instrumentation.js';
 import {
     createRouteManifest,
@@ -110,6 +111,7 @@ const onStart = async () => {
     if (instrumentation?.register) {
         await safeExecuteHook('register', instrumentation.register);
     }
+    registerShutdownHandler(instrumentation);
 
     // Seed ISR artifacts (written by the build-time crawler) into the active
     // cache store so the first request is warm. Done after register() so a
@@ -159,6 +161,12 @@ const handleApiRoute = async (
                 const respCtx = createResponseContext(
                     reqCtx,
                     getResponseStatus(event) || 200,
+                );
+                await safeExecuteHook(
+                    'onResponseStart',
+                    inst?.onResponseStart,
+                    req,
+                    respCtx,
                 );
                 await safeExecuteHook(
                     'onResponseEnd',

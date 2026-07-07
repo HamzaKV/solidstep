@@ -13,6 +13,8 @@ const handleServerFunction = vi.fn();
 const renderPage = vi.fn();
 const matchRoute = vi.fn();
 const getCachedModule = vi.fn();
+const registerShutdownHandler = vi.hoisted(() => vi.fn());
+const safeExecuteHook = vi.hoisted(() => vi.fn(async () => undefined));
 
 vi.mock('vinxi/http', () => ({
     eventHandler: (fn: any) => fn,
@@ -42,9 +44,10 @@ vi.mock('../utils/path-router', () => ({
 vi.mock('../utils/instrumentation', () => ({
     loadInstrumentation: async () => null,
     getInstrumentation: () => null,
-    safeExecuteHook: async () => undefined,
+    safeExecuteHook: (...a: unknown[]) => safeExecuteHook(...a),
     createRequestContext: () => ({}),
     createResponseContext: () => ({}),
+    registerShutdownHandler: (...a: unknown[]) => registerShutdownHandler(...a),
 }));
 vi.mock('../server/route-manifest', () => ({
     createRouteManifest: async () => ({ rootNode: {}, metadataMap: new Map() }),
@@ -76,6 +79,15 @@ beforeEach(() => {
     renderPage.mockReset();
     matchRoute.mockReset();
     getCachedModule.mockReset();
+    safeExecuteHook.mockClear();
+});
+
+const hookNames = () => safeExecuteHook.mock.calls.map((c) => c[0]);
+
+describe('server startup', () => {
+    it('wires the shutdown handler during onStart', () => {
+        expect(registerShutdownHandler).toHaveBeenCalled();
+    });
 });
 
 describe('server request handler', () => {
@@ -109,6 +121,16 @@ describe('server request handler', () => {
         handleServerFunction.mockResolvedValue(new Response('ok'));
         await handler(makeEvent('https://example.com/_server/?id=x&name=y'));
         expect(handleServerFunction).toHaveBeenCalled();
+    });
+
+    it('fires onResponseStart before returning an API route result', async () => {
+        matchRoute.mockReturnValue({
+            handler: { type: 'route', handler: {}, routePath: '/api/thing' },
+            params: {},
+        });
+        getCachedModule.mockResolvedValue({ GET: async () => 'ok' });
+        await handler(makeEvent('https://example.com/api/thing'));
+        expect(hookNames()).toContain('onResponseStart');
     });
 
     it('maps a rejected API route handler to the 500 response', async () => {
