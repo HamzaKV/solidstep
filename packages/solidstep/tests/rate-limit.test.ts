@@ -7,7 +7,7 @@ vi.mock('vinxi/http', () => ({
 }));
 
 import { checkRateLimit, rateLimit } from '../utils/rate-limit';
-import { clearAllCache } from '../utils/cache';
+import { clearAllCache, getCacheStore, setCacheStore } from '../utils/cache';
 
 beforeEach(async () => {
     await clearAllCache();
@@ -30,6 +30,50 @@ describe('checkRateLimit', () => {
         const opts = { windowMs: 1000, max: 1 };
         expect((await checkRateLimit('a', opts)).limited).toBe(false);
         expect((await checkRateLimit('b', opts)).limited).toBe(false);
+    });
+
+    it('does not lose increments to a read-modify-write race under concurrent same-key calls', async () => {
+        const opts = { windowMs: 1000, max: 5 };
+        const N = 20;
+        const results = await Promise.all(
+            Array.from({ length: N }, () => checkRateLimit('burst', opts)),
+        );
+        const allowed = results.filter((r) => !r.limited).length;
+        expect(allowed).toBe(opts.max);
+        // A final, sequential call should report the count as N + 1 (limited),
+        // proving no increment from the concurrent burst was lost.
+        const final = await checkRateLimit('burst', opts);
+        expect(final.limited).toBe(true);
+    });
+
+    it("doesn't wedge later same-key calls when an earlier one's store operation rejects", async () => {
+        const original = getCacheStore();
+        let failNext = true;
+        const flaky: any = {
+            get: (key: string) => {
+                if (failNext) {
+                    failNext = false;
+                    throw new Error('store down');
+                }
+                return original.get(key);
+            },
+            set: (...a: unknown[]) => (original.set as any)(...a),
+            delete: (...a: unknown[]) => (original.delete as any)(...a),
+            clear: (...a: unknown[]) => (original.clear as any)(...a),
+            invalidateTag: (...a: unknown[]) =>
+                (original.invalidateTag as any)(...a),
+        };
+        setCacheStore(flaky);
+        try {
+            const opts = { windowMs: 1000, max: 5 };
+            await expect(checkRateLimit('flaky-key', opts)).rejects.toThrow(
+                'store down',
+            );
+            const result = await checkRateLimit('flaky-key', opts);
+            expect(result.limited).toBe(false);
+        } finally {
+            setCacheStore(original);
+        }
     });
 
     it('resets after the window expires', async () => {

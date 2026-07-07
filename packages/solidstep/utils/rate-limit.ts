@@ -23,6 +23,37 @@ export type RateLimitOptions = {
     message?: string;
 };
 
+// checkRateLimit's read-modify-write (getCacheEntry then setCacheWithOptions)
+// isn't atomic on its own: two concurrent calls for the same key can both
+// read the same count and one increment is lost. This in-process, per-key
+// lock serializes same-key calls so the read-modify-write can't interleave
+// within a single process/instance. A deployment with multiple instances
+// sharing an external CacheStore (e.g. Redis) still has a residual race
+// across instances unless that store offers an atomic increment — no
+// CacheStore currently does, so that's a known limitation, not fixed here.
+const keyLocks = new Map<string, Promise<unknown>>();
+
+const withKeyLock = async <T>(
+    key: string,
+    fn: () => Promise<T>,
+): Promise<T> => {
+    const prior = keyLocks.get(key) ?? Promise.resolve();
+    // Chain onto the prior call for this key regardless of whether it
+    // succeeded or failed, so one rejection doesn't wedge later callers.
+    const run = prior.then(fn, fn);
+    const guarded = run.catch(() => undefined);
+    keyLocks.set(key, guarded);
+    try {
+        return await run;
+    } finally {
+        // Only the last-in-chain caller for this key clears the entry, so we
+        // don't drop a lock a later call is still waiting behind.
+        if (keyLocks.get(key) === guarded) {
+            keyLocks.delete(key);
+        }
+    }
+};
+
 /**
  * Record one hit against `storeKey` and report whether it exceeds `max` within
  * the current fixed window. Pure of any HTTP plumbing: it reads/writes the
@@ -30,24 +61,25 @@ export type RateLimitOptions = {
  * window doesn't slide forward under continuous traffic) and resetting once the
  * entry has expired.
  */
-export const checkRateLimit = async (
+export const checkRateLimit = (
     storeKey: string,
     opts: { windowMs: number; max: number },
-): Promise<{ limited: boolean; retryAfterSeconds: number }> => {
-    const id = `ratelimit:${storeKey}`;
-    // getCacheEntry enforces hard expiry, so a window that has elapsed reads as a
-    // miss and the counter resets.
-    const entry = await getCacheEntry<number>(id);
-    const count = (entry?.value ?? 0) + 1;
-    const ttl = entry?.expiresAt
-        ? Math.max(1, entry.expiresAt - Date.now())
-        : opts.windowMs;
-    await setCacheWithOptions(id, count, { ttl });
-    return {
-        limited: count > opts.max,
-        retryAfterSeconds: Math.ceil(ttl / 1000),
-    };
-};
+): Promise<{ limited: boolean; retryAfterSeconds: number }> =>
+    withKeyLock(storeKey, async () => {
+        const id = `ratelimit:${storeKey}`;
+        // getCacheEntry enforces hard expiry, so a window that has elapsed reads as a
+        // miss and the counter resets.
+        const entry = await getCacheEntry<number>(id);
+        const count = (entry?.value ?? 0) + 1;
+        const ttl = entry?.expiresAt
+            ? Math.max(1, entry.expiresAt - Date.now())
+            : opts.windowMs;
+        await setCacheWithOptions(id, count, { ttl });
+        return {
+            limited: count > opts.max,
+            retryAfterSeconds: Math.ceil(ttl / 1000),
+        };
+    });
 
 /** Best-effort client IP from the H3 event, used as the default bucket key. */
 const clientIp = (event: H3Event): string => {
