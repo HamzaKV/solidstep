@@ -1,5 +1,56 @@
 # solidstep
 
+## 0.6.0
+
+### Minor Changes
+
+- 407d204: Feat: `<Form>` gains an optional `onError` prop, called when its `action`
+  rejects — previously the error was only logged via `console.error` with no
+  way to surface it in the UI. Pass `onError` to handle it yourself; omit it
+  to keep the previous logging behavior.
+
+  `useActionState`'s `formAction` now returns a `Promise<void>` that resolves
+  once the action settles (whether it succeeds or throws), instead of being
+  fire-and-forget. Await it if you need to know when a submission finished —
+  existing callers that ignore the return value are unaffected.
+
+- 2a7df4b: Feat/Breaking: `options.hydration` gains real behavior:
+
+  - **`fetchPriority`** now sets the `fetchpriority` attribute on the
+    hydration `<script type="module">` (previously typed but ignored).
+  - **`disable`** now ships **true zero framework JS** for a plain,
+    synchronously rendered page: no hydration script, no client-manifest
+    script, no module-preload links. `<Link>`/`<Form>` degrade to native
+    browser behavior (full loads, no-JS form submissions) — both already work
+    server-side. It's incompatible with `render: 'ppr'`, a deferred loader, or
+    a sibling `loading.tsx` (all three need the client runtime); combining
+    them logs a warning and `disable` is ignored for that render. If the
+    render throws and falls back to `error.tsx`, normal hydration resumes.
+
+  **Breaking (type-level):** `options.hydration.blockRender` has been
+  removed. It was typed but had no defined semantics and was never read by
+  the render pipeline.
+
+- 2650df8: Feat/Breaking: instrumentation gets two previously-declared-but-unwired hooks:
+
+  - **`onShutdown`** now actually fires — once, on `SIGTERM`, `SIGINT`, or
+    `beforeExit` (whichever arrives first).
+  - **`onResponseStart`** now actually fires — once per response, right after
+    its status/headers are final but before the first body byte, across every
+    render path (ISR, PPR, deferred streaming, loading boundary, main render,
+    error boundary, 404) and every request kind (page, API route, server
+    action).
+
+  **Breaking (type-level):** `onResponseStart`'s signature dropped its
+  `response: Response` parameter — no such object exists at that point in the
+  pipeline (the body may still be under construction as a stream). It is now
+  `(request: Request, context: ResponseContext) => void | Promise<void>`.
+
+  **Breaking (type-level):** `onServerReady` and its `ServerInfo` type have
+  been removed. The framework has no reliable "server is listening" event to
+  report under vinxi/Nitro's process model, so this hook could never be
+  honestly implemented; it was declared but never invoked.
+
 ## 0.5.4
 
 ### Patch Changes
