@@ -1,5 +1,47 @@
 # solidstep
 
+## 0.5.4
+
+### Patch Changes
+
+- f3afcd9: Fix: the top-level request handler now `await`s its delegated dispatch
+  (`handleServerFunction`, `handleApiRoute`, `renderPage`) instead of returning
+  the promise directly. Returning an unawaited promise from inside a `try` block
+  does not let a later rejection reach that block's `catch` — it only chains
+  onto the outer async function's own returned promise. A rejected server
+  action, API route, or page render therefore surfaced as an unhandled
+  rejection instead of the framework's mapped response: a thrown
+  `RedirectError` never became its 302, and any other error skipped the
+  dev-overlay/500 fallback entirely.
+- 0a75396: Fix: the top-level request handler and `revalidatePath` matched server-action
+  requests with `url.includes('_server')` / `path.includes('_server')` — a
+  substring check. An ordinary page route whose path happened to contain
+  `_server` (e.g. `/page_server`) was misrouted into the server-function
+  dispatcher, and `revalidatePath` could be called from such a page without
+  throwing its "server functions only" guard. Both now match the real
+  `@vinxi/server-functions` mount point exactly: the pathname must equal
+  `/_server` or start with `/_server/`.
+- a0b5244: Fix: `handleServerFunction` resolved the target chunk and parsed the request's
+  arguments (query-string JSON for bound args, `formData()`/`.json()` for a POST
+  body) before the `try` block that runs the action and maps its errors. An
+  unknown `functionId` or malformed input therefore threw unhandled, skipping
+  the `onRequestError`/`onResponseEnd` instrumentation hooks entirely. Both now
+  map to a proper response instead: an unresolvable server-function chunk
+  returns 404, and malformed args/form-data/JSON input returns 400 — both still
+  firing the instrumentation hooks like any other request.
+- 267d20d: Fix: `defineConfig` computed a `middlewarePath` that fell back from
+  `app/middleware.ts` to `app/middleware.js`, but the ssr router config
+  hardcoded the literal `'./app/middleware.ts'` instead of using it. A project
+  with only `app/middleware.js` (or no middleware file at all) silently got
+  the wrong — or a nonexistent — middleware wired in. The resolved path is now
+  actually passed to the router; `middleware` is `undefined` when neither file
+  exists (vinxi's schema marks it optional).
+- 74ce02b: Fix: if a page's own `error.tsx` threw while rendering the fallback for an
+  earlier render failure, the secondary error was silently discarded — only
+  the original error propagated, with no trace of why the error boundary
+  itself never rendered. That secondary failure is now logged via the
+  framework logger before the original error is re-thrown.
+
 ## 0.5.3
 
 ### Patch Changes
