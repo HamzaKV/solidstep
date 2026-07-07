@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { toJSONAsync } from 'seroval';
 import { SEROVAL_PLUGINS } from '../utils/serialize';
 
@@ -559,5 +559,185 @@ describe('handleServerFunction non-Error thrown values (JS client)', () => {
 
         expect(res).toBeInstanceOf(ReadableStream);
         expect(setResponseStatus).toHaveBeenCalledWith(expect.anything(), 500);
+    });
+});
+
+describe('handleServerFunction origin check', () => {
+    afterEach(() => {
+        delete (globalThis as any).__SOLIDSTEP_CONFIG__;
+    });
+
+    it('blocks a cross-origin POST with a 403 by default', async () => {
+        chunks.chunk1 = { import: async () => ({ fn: async () => 'ok' }) };
+        const req = new Request(
+            'https://example.com/_server?id=chunk1&name=fn',
+            {
+                method: 'POST',
+                headers: {
+                    'X-Server-Instance': 'inst-1',
+                    Origin: 'https://evil.test',
+                },
+            },
+        );
+
+        const res = (await handleServerFunction(
+            makeEvent(req) as any,
+        )) as Response;
+
+        expect(res).toBeInstanceOf(Response);
+        expect(res.status).toBe(403);
+    });
+
+    it('passes a same-origin POST (matching Origin header)', async () => {
+        chunks.chunk1 = { import: async () => ({ fn: async () => 'ok' }) };
+        const req = new Request(
+            'https://example.com/_server?id=chunk1&name=fn',
+            {
+                method: 'POST',
+                headers: {
+                    'X-Server-Instance': 'inst-1',
+                    Origin: 'https://example.com',
+                },
+            },
+        );
+
+        const res = await handleServerFunction(makeEvent(req) as any);
+
+        expect(res).toBeInstanceOf(ReadableStream);
+    });
+
+    it('passes a cross-origin Origin header when Sec-Fetch-Site is same-origin', async () => {
+        chunks.chunk1 = { import: async () => ({ fn: async () => 'ok' }) };
+        const req = new Request(
+            'https://example.com/_server?id=chunk1&name=fn',
+            {
+                method: 'POST',
+                headers: {
+                    'X-Server-Instance': 'inst-1',
+                    Origin: 'https://evil.test',
+                    'Sec-Fetch-Site': 'same-origin',
+                },
+            },
+        );
+
+        const res = await handleServerFunction(makeEvent(req) as any);
+
+        expect(res).toBeInstanceOf(ReadableStream);
+    });
+
+    it('passes when Sec-Fetch-Site is none (user-initiated, e.g. typed URL/bookmark)', async () => {
+        chunks.chunk1 = { import: async () => ({ fn: async () => 'ok' }) };
+        const req = new Request(
+            'https://example.com/_server?id=chunk1&name=fn',
+            {
+                method: 'POST',
+                headers: {
+                    'X-Server-Instance': 'inst-1',
+                    'Sec-Fetch-Site': 'none',
+                },
+            },
+        );
+
+        const res = await handleServerFunction(makeEvent(req) as any);
+
+        expect(res).toBeInstanceOf(ReadableStream);
+    });
+
+    it('passes a request with neither Origin nor Sec-Fetch-Site (non-browser client)', async () => {
+        chunks.chunk1 = { import: async () => ({ fn: async () => 'ok' }) };
+        const req = new Request(
+            'https://example.com/_server?id=chunk1&name=fn',
+            { method: 'POST', headers: { 'X-Server-Instance': 'inst-1' } },
+        );
+
+        const res = await handleServerFunction(makeEvent(req) as any);
+
+        expect(res).toBeInstanceOf(ReadableStream);
+    });
+
+    it('passes a cross-origin Origin listed in the trustedOrigins allowlist', async () => {
+        (globalThis as any).__SOLIDSTEP_CONFIG__ = {
+            security: {
+                serverActions: { trustedOrigins: ['trusted.test'] },
+            },
+        };
+        chunks.chunk1 = { import: async () => ({ fn: async () => 'ok' }) };
+        const req = new Request(
+            'https://example.com/_server?id=chunk1&name=fn',
+            {
+                method: 'POST',
+                headers: {
+                    'X-Server-Instance': 'inst-1',
+                    Origin: 'https://trusted.test',
+                },
+            },
+        );
+
+        const res = await handleServerFunction(makeEvent(req) as any);
+
+        expect(res).toBeInstanceOf(ReadableStream);
+    });
+
+    it('fails closed (403) for a cross-site Sec-Fetch-Site with no Origin header', async () => {
+        chunks.chunk1 = { import: async () => ({ fn: async () => 'ok' }) };
+        const req = new Request(
+            'https://example.com/_server?id=chunk1&name=fn',
+            {
+                method: 'POST',
+                headers: {
+                    'X-Server-Instance': 'inst-1',
+                    'Sec-Fetch-Site': 'cross-site',
+                },
+            },
+        );
+
+        const res = (await handleServerFunction(
+            makeEvent(req) as any,
+        )) as Response;
+
+        expect(res).toBeInstanceOf(Response);
+        expect(res.status).toBe(403);
+    });
+
+    it('fails closed (403) when the Origin header is malformed', async () => {
+        chunks.chunk1 = { import: async () => ({ fn: async () => 'ok' }) };
+        const req = new Request(
+            'https://example.com/_server?id=chunk1&name=fn',
+            {
+                method: 'POST',
+                headers: {
+                    'X-Server-Instance': 'inst-1',
+                    Origin: 'not a url',
+                },
+            },
+        );
+
+        const res = (await handleServerFunction(
+            makeEvent(req) as any,
+        )) as Response;
+
+        expect(res).toBeInstanceOf(Response);
+        expect(res.status).toBe(403);
+    });
+
+    it('skips the check entirely when originCheck is set to false', async () => {
+        (globalThis as any).__SOLIDSTEP_CONFIG__ = {
+            security: { serverActions: { originCheck: false } },
+        };
+        chunks.chunk1 = { import: async () => ({ fn: async () => 'ok' }) };
+        const req = new Request(
+            'https://example.com/_server?id=chunk1&name=fn',
+            {
+                method: 'POST',
+                headers: {
+                    'X-Server-Instance': 'inst-1',
+                    Origin: 'https://evil.test',
+                },
+            },
+        );
+
+        const res = await handleServerFunction(makeEvent(req) as any);
+
+        expect(res).toBeInstanceOf(ReadableStream);
     });
 });

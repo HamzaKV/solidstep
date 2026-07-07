@@ -29,6 +29,7 @@ import {
     getInstrumentation,
     safeExecuteHook,
 } from '../utils/instrumentation.js';
+import { isTrustedServerActionOrigin } from './server-action-origin.js';
 
 // Dispatch-level failures (unresolvable function, malformed wire payload) are
 // distinct from the target action itself throwing: they must map to a plain
@@ -139,6 +140,26 @@ export async function handleServerFunction(event: HTTPEvent) {
             request,
             createResponseContext(reqCtx, status),
         );
+
+    const security = (globalThis as any).__SOLIDSTEP_CONFIG__?.security
+        ?.serverActions as
+        | { originCheck?: boolean; trustedOrigins?: string[] }
+        | undefined;
+    if (
+        security?.originCheck !== false &&
+        !isTrustedServerActionOrigin(
+            request,
+            url,
+            security?.trustedOrigins || [],
+        )
+    ) {
+        await fireResponseStart(403);
+        return process.env.NODE_ENV === 'development'
+            ? new Response('Cross-origin server function request blocked', {
+                  status: 403,
+              })
+            : new Response(null, { status: 403 });
+    }
 
     const serverReference = request.headers.get('X-Server-Id');
     const instance = request.headers.get('X-Server-Instance');

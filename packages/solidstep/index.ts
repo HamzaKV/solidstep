@@ -72,6 +72,28 @@ type Config = {
      */
     loaderTimeout?: number;
     /**
+     * Security-related defaults.
+     */
+    security?: {
+        /**
+         * Origin protection for server functions (`/_server`). On by default:
+         * a request whose `Origin` or `Sec-Fetch-Site` header indicates a
+         * cross-origin, untrusted caller is rejected with a 403 before the
+         * action runs. A request with neither header (non-browser clients —
+         * curl, mobile apps, server-to-server calls) is unaffected, since a
+         * browser always sends at least one on a cross-origin request.
+         */
+        serverActions?: {
+            /** Set `false` to disable the check entirely. Default `true`. */
+            originCheck?: boolean;
+            /**
+             * Extra hosts (e.g. `'partner.example.com'`) allowed as
+             * cross-origin callers despite the origin check.
+             */
+            trustedOrigins?: string[];
+        };
+    };
+    /**
      * Extra Vite config merged into each router. Provide a single object to
      * apply it everywhere, or a function receiving the target `router` name to
      * vary config per router.
@@ -132,6 +154,7 @@ export const defineConfig = (
         logger: config.logger || false,
         cache: config.cache,
         loaderTimeout: config.loaderTimeout,
+        security: config.security,
     };
 
     // @ts-expect-error

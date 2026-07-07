@@ -151,6 +151,33 @@ if (!csrfResult.success) {
 }
 ```
 
+## Server function origin check (built-in, on by default)
+
+Every request to a server function (`/_server`) is checked before the action
+runs: if `Sec-Fetch-Site`/`Origin` shows the request came from another,
+untrusted origin, it's rejected with a 403. A request with neither header
+(non-browser clients — curl, mobile apps, server-to-server calls) is
+unaffected, since a browser making a cross-origin request always sends at
+least one of them.
+
+```ts
+// app.config.ts
+export default defineConfig({
+    security: {
+        serverActions: {
+            trustedOrigins: ['partner.example.com'],
+            // originCheck: false, // disable entirely
+        },
+    },
+});
+```
+
+Add a host to `trustedOrigins` if you have a legitimate cross-origin caller
+(a mobile app's webview, another site embedding a form that posts to your
+server functions). This is separate from the `csrf`/`cors` middleware
+helpers above, which you compose yourself for your own API routes — this
+check applies automatically to the server-action transport.
+
 ## Redirects
 
 ```tsx
