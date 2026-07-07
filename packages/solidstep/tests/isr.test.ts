@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // isr.ts serves cached full-HTML artifacts with stale-while-revalidate and
-// seeds them from the build-time prerender manifest at startup. It is
-// excluded from the coverage gate (covered by e2e); these pin its current
-// behavior through `serveIsr` / `seedIsrFromManifest`. `single-flight.ts` is
-// pure logic with no side effects, so it's used for real (not mocked).
+// seeds them from the build-time prerender manifest at startup. These pin
+// its current behavior through `serveIsr` / `seedIsrFromManifest`.
+// `single-flight.ts` is pure logic with no side effects, so it's used for
+// real (not mocked).
 
 const getCacheEntry = vi.fn();
 const setCacheWithOptions = vi.fn(async () => undefined);
@@ -201,6 +201,32 @@ describe('seedIsrFromManifest', () => {
         expect(setCacheWithOptions).toHaveBeenCalledWith(
             'isr:/ok',
             '<html>ok</html>',
+            expect.objectContaining({ ttl: 60_000 }),
+        );
+    });
+
+    it('does nothing when the manifest has no isr entries at all', async () => {
+        readFile.mockResolvedValueOnce(JSON.stringify({}));
+
+        await seedIsrFromManifest('/out');
+
+        expect(setCacheWithOptions).not.toHaveBeenCalled();
+    });
+
+    it('defaults to a 60s revalidate when an entry omits it (falsy)', async () => {
+        readFile
+            .mockResolvedValueOnce(
+                JSON.stringify({
+                    isr: [{ pathname: '/a', revalidate: 0, file: 'a.html' }],
+                }),
+            )
+            .mockResolvedValueOnce('<html>a</html>');
+
+        await seedIsrFromManifest('/out');
+
+        expect(setCacheWithOptions).toHaveBeenCalledWith(
+            'isr:/a',
+            '<html>a</html>',
             expect.objectContaining({ ttl: 60_000 }),
         );
     });

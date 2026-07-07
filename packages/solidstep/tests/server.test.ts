@@ -5,9 +5,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // try/catch that maps RedirectError -> 302 and any other error -> 500. These
 // tests pin that mapping actually applies to the delegated async work (a
 // `return somePromise` inside a try block does NOT let its rejection reach the
-// surrounding catch unless it is awaited — a real, easy-to-miss JS gotcha).
-// server.ts is excluded from the coverage gate (covered by e2e); these are
-// behavioral regression checks for the un-awaited-dispatch bug class.
+// surrounding catch unless it is awaited — a real, easy-to-miss JS gotcha),
+// plus the rest of the top-level handler's behavior (devtools probe, data
+// endpoints, metadata dispatch, API-route method resolution).
 
 const handleServerFunction = vi.fn();
 const renderPage = vi.fn();
@@ -20,6 +20,9 @@ const serveRouteData = vi.hoisted(() => vi.fn(async () => null as unknown));
 const getMetadataManifest = vi.hoisted(() => vi.fn(() => undefined as any));
 const setHeader = vi.hoisted(() => vi.fn());
 const setResponseStatus = vi.hoisted(() => vi.fn());
+const collectPrerenderTargets = vi.hoisted(() =>
+    vi.fn(async () => [] as unknown[]),
+);
 
 vi.mock('vinxi/http', () => ({
     eventHandler: (fn: any) => fn,
@@ -56,7 +59,7 @@ vi.mock('../utils/instrumentation', () => ({
 }));
 vi.mock('../server/route-manifest', () => ({
     createRouteManifest: async () => ({ rootNode: {}, metadataMap: new Map() }),
-    collectPrerenderTargets: async () => [],
+    collectPrerenderTargets: (...a: unknown[]) => collectPrerenderTargets(...a),
     ensureRouteManifest: async () => ({}),
     setRouteManifest: vi.fn(),
     getMetadataManifest: (...a: unknown[]) => getMetadataManifest(...a),
@@ -90,6 +93,8 @@ beforeEach(() => {
     getMetadataManifest.mockReset().mockReturnValue(undefined);
     setHeader.mockClear();
     setResponseStatus.mockClear();
+    collectPrerenderTargets.mockClear();
+    delete process.env.SOLIDSTEP_PRERENDER;
 });
 
 const hookNames = () => safeExecuteHook.mock.calls.map((c) => c[0]);
@@ -253,5 +258,53 @@ describe('dynamic metadata files', () => {
         const res = await handler(makeEvent('https://example.com/sitemap.xml'));
 
         expect(res).toBe(metaResponse);
+    });
+});
+
+describe('API route method dispatch', () => {
+    it('maps a method with no exported handler to a 500 ("not implemented")', async () => {
+        matchRoute.mockReturnValue({
+            handler: {
+                type: 'route',
+                handler: { src: 'x' },
+                routePath: '/api/thing',
+            },
+            params: {},
+        });
+        getCachedModule.mockResolvedValue({}); // no GET export
+        const res = (await handler(
+            makeEvent('https://example.com/api/thing'),
+        )) as Response;
+        expect(res.status).toBe(500);
+    });
+});
+
+describe('build-time prerender discovery endpoint', () => {
+    it('answers with the collected prerender targets when SOLIDSTEP_PRERENDER=1', async () => {
+        process.env.SOLIDSTEP_PRERENDER = '1';
+        collectPrerenderTargets.mockResolvedValue([
+            { pathname: '/a', render: 'static' },
+        ]);
+
+        const res = await handler(
+            makeEvent('https://example.com/__solidstep_prerender'),
+        );
+
+        expect(res).toBe(
+            JSON.stringify([{ pathname: '/a', render: 'static' }]),
+        );
+        expect(setHeader).toHaveBeenCalledWith(
+            'Content-Type',
+            'application/json',
+        );
+    });
+
+    it('is not reachable when SOLIDSTEP_PRERENDER is unset', async () => {
+        matchRoute.mockReturnValue(undefined);
+        renderPage.mockResolvedValue(new Response('ok'));
+
+        await handler(makeEvent('https://example.com/__solidstep_prerender'));
+
+        expect(collectPrerenderTargets).not.toHaveBeenCalled();
     });
 });

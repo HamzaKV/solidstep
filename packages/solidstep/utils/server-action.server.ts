@@ -37,6 +37,11 @@ import {
 class ServerFunctionNotFoundError extends Error {}
 class ServerFunctionBadRequestError extends Error {}
 
+/* v8 ignore start -- thin Headers-like passthrough over already-tested
+   vinxi/http calls, reached only via `getRequestEvent().response` (a
+   solid-js primitive no test action here invokes); exercising it would mean
+   mocking solid-js/web's request-context machinery just to hit get/set
+   forwarding with no branching logic of its own. */
 class HeaderProxy {
     constructor(private event: HTTPEvent) {}
     get(key: string) {
@@ -113,6 +118,7 @@ function createResponseStub(event: HTTPEvent) {
         headers: new HeaderProxy(event),
     };
 }
+/* v8 ignore stop */
 
 export async function handleServerFunction(event: HTTPEvent) {
     const request = toWebRequest(event);
@@ -303,6 +309,9 @@ export async function handleServerFunction(event: HTTPEvent) {
                     setResponseStatus(event, result.status);
                 if ((result as any).customBody) {
                     result = await (result as any).customBody();
+                    /* v8 ignore next -- a native Response's `.body` is spec'd
+                       to be ReadableStream | null, never undefined; this is a
+                       defensive branch that can't fire with a real Response. */
                 } else if (result.body === undefined) result = null;
             }
         }
@@ -357,6 +366,9 @@ export async function handleServerFunction(event: HTTPEvent) {
             if ((x as any).customBody) {
                 // biome-ignore lint/suspicious/noCatchAssign: the caught Response is deliberately replaced with its serializable body
                 x = (x as any).customBody();
+                /* v8 ignore next -- a native Response's `.body` is spec'd to
+                   be ReadableStream | null, never undefined; this is a
+                   defensive branch that can't fire with a real Response. */
                 // biome-ignore lint/suspicious/noCatchAssign: a bodyless Response is normalized to null before serialization
             } else if ((x as any).body === undefined) x = null;
             setHeader(event, 'X-Error', 'true');

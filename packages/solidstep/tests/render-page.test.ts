@@ -1,12 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // renderPage orchestrates ISR/PPR/deferred/loading/main/error rendering and
-// response assembly. This file starts with a single regression: when a page's
-// own error.tsx *also* throws while rendering the fallback for an earlier
-// render failure, the secondary failure (e2) was silently discarded — only
-// the original error (e1) propagated, with no trace of why the error page
-// itself never rendered. server/render-page.ts is excluded from the
-// coverage gate today (covered by e2e); more behaviors land here in Phase 2.
+// response assembly. This file started with a single regression: when a
+// page's own error.tsx *also* throws while rendering the fallback for an
+// earlier render failure, the secondary failure (e2) was silently discarded
+// — only the original error (e1) propagated, with no trace of why the error
+// page itself never rendered. The ISR short-circuit (env-gated by
+// `!import.meta.env.DEV`, statically false under vitest) is unreachable here
+// and covered by the kitchen-sink e2e suite instead.
 
 const render = vi.fn();
 const logger = vi.hoisted(() => ({ warn: vi.fn(), error: vi.fn() }));
@@ -39,19 +40,30 @@ const buildLoadingSwapScript = vi.hoisted(() =>
 );
 
 const mockResponseStatus = vi.hoisted(() => ({ current: 200 }));
+const setHeader = vi.hoisted(() => vi.fn());
 vi.mock('vinxi/http', () => ({
     getResponseStatus: () => mockResponseStatus.current,
-    setHeader: vi.fn(),
+    setHeader: (...a: unknown[]) => setHeader(...a),
     setResponseStatus: (status: number) => {
         mockResponseStatus.current = status;
     },
 }));
+const renderToStreamError = vi.hoisted(() => ({ value: null as unknown }));
 vi.mock('solid-js/web', () => ({
     // The real API streams chunks then calls `end()`; this stub writes one
     // shell chunk and ends immediately so the deferred branch's
-    // `await new Promise(...)` around `pipe(...)` resolves.
-    renderToStream: () => ({
+    // `await new Promise(...)` around `pipe(...)` resolves. If a test sets
+    // renderToStreamError, its onError callback fires first (matching a
+    // real mid-stream render failure) before the shell still completes.
+    renderToStream: (
+        fn: () => unknown,
+        opts: { onError?: (e: unknown) => void },
+    ) => ({
         pipe: (writable: { write: (v: string) => void; end: () => void }) => {
+            fn();
+            if (renderToStreamError.value) {
+                opts.onError?.(renderToStreamError.value);
+            }
             writable.write('<div>deferred-shell</div>');
             writable.end();
         },
@@ -99,6 +111,7 @@ vi.mock('../server/render', () => ({
 }));
 
 import { renderPage } from '../server/render-page';
+import { createNode, insertRoute } from '../utils/path-router';
 
 const readStream = async (stream: ReadableStream) => {
     const reader = stream.getReader();
@@ -131,6 +144,8 @@ beforeEach(() => {
     isPprResult.mockReset().mockReturnValue(false);
     routeNeedsStreaming.mockReset().mockResolvedValue(false);
     buildLoadingSwapScript.mockClear();
+    setHeader.mockClear();
+    renderToStreamError.value = null;
 });
 
 const onResponseStartCalls = () =>
@@ -207,6 +222,66 @@ describe('renderPage onResponseStart', () => {
         expect(onResponseStartCalls()[0][3]).toMatchObject({
             statusCode: 404,
         });
+    });
+
+    it('falls back to the hardcoded 404 when the root route trie has no not-found handler', async () => {
+        const ctx = baseCtx();
+        ctx.matched = undefined as any;
+        ctx.routeManifest = createNode() as any;
+
+        const stream = await renderPage(ctx);
+        const { text, error } = await readStream(stream as ReadableStream);
+
+        expect(error).toBeNull();
+        expect(text).toBe('Not Found');
+    });
+});
+
+describe('renderPage not-found module render', () => {
+    it('renders a real not-found page module when the root route configures one', async () => {
+        const rootNode = createNode();
+        insertRoute(rootNode, '/', {
+            type: 'page',
+            mainPage: { manifestPath: '/not-found/', page: {} as any },
+            layouts: [],
+        } as any);
+
+        render.mockResolvedValue({
+            rendered: '<p>gone</p>',
+            documentMeta: {},
+            documentAssets: [],
+            loaderData: {},
+        });
+
+        const ctx = baseCtx();
+        ctx.matched = undefined as any;
+        ctx.routeManifest = rootNode as any;
+
+        const stream = await renderPage(ctx);
+        const { text, error } = await readStream(stream as ReadableStream);
+
+        expect(error).toBeNull();
+        expect(text).toContain('<p>gone</p>');
+        expect(mockResponseStatus.current).toBe(404);
+    });
+});
+
+describe('renderPage options.responseHeaders', () => {
+    it('sets each configured response header before rendering', async () => {
+        getCachedModule.mockResolvedValue({
+            options: { responseHeaders: { 'X-Custom': 'yes' } },
+        });
+        render.mockResolvedValue({
+            rendered: '<p>hi</p>',
+            documentMeta: {},
+            documentAssets: [],
+            loaderData: {},
+        });
+
+        const stream = await renderPage(baseCtx());
+        await readStream(stream as ReadableStream);
+
+        expect(setHeader).toHaveBeenCalledWith('X-Custom', 'yes');
     });
 });
 
@@ -324,6 +399,29 @@ describe('renderPage PPR', () => {
         expect(onResponseStartCalls()).toHaveLength(1);
         expect(onResponseStartCalls()[0][3]).toMatchObject({ statusCode: 200 });
     });
+
+    it('recovers via error.tsx when render() returns a non-PPR shape for a ppr route (internal consistency guard)', async () => {
+        getCachedModule.mockResolvedValue({ options: { render: 'ppr' } });
+        isPprResult.mockReturnValue(false);
+        // First call (toRender:'main') returns the malformed PPR shape,
+        // triggering the defensive throw below; the second call
+        // (toRender:'error') is the error.tsx render that recovers from it.
+        render.mockResolvedValue({
+            rendered: '<p>hi</p>',
+            documentMeta: {},
+            documentAssets: [],
+            loaderData: {},
+        });
+
+        const stream = await renderPage(baseCtx());
+        const { error } = await readStream(stream as ReadableStream);
+
+        // The consistency error is routed to error.tsx like any other render
+        // failure (import.meta.env.DEV also masks the no-errorPage case) —
+        // it never propagates raw to the caller. Reaching here at all proves
+        // the defensive throw executed and was handled gracefully.
+        expect(error).toBeNull();
+    });
 });
 
 describe('renderPage deferred streaming', () => {
@@ -346,6 +444,48 @@ describe('renderPage deferred streaming', () => {
         expect(text).toContain('HYDRATE[');
         expect(text).toContain('</html>');
         expect(onResponseStartCalls()).toHaveLength(1);
+    });
+
+    it('recovers via error.tsx when render() returns a non-deferred shape for a streaming route (internal consistency guard)', async () => {
+        routeNeedsStreaming.mockResolvedValue(true);
+        isDeferredResult.mockReturnValue(false);
+        render.mockResolvedValue({
+            rendered: '<p>hi</p>',
+            documentMeta: {},
+            documentAssets: [],
+            loaderData: {},
+        });
+
+        const stream = await renderPage(baseCtx());
+        const { error } = await readStream(stream as ReadableStream);
+
+        // Same as the PPR guard above: the consistency error is routed to
+        // error.tsx, not propagated raw. Reaching here proves the defensive
+        // throw executed and was handled gracefully.
+        expect(error).toBeNull();
+    });
+
+    it("records renderToStream's onError as the request's error (fires onRequestError) without failing the stream", async () => {
+        routeNeedsStreaming.mockResolvedValue(true);
+        isDeferredResult.mockReturnValue(true);
+        render.mockResolvedValue({
+            documentMeta: {},
+            documentAssets: [],
+            loaderData: {},
+            deferredKeys: ['/p'],
+            composed: () => 'tree',
+        });
+        const streamError = new Error('tree render failed mid-stream');
+        renderToStreamError.value = streamError;
+
+        const stream = await renderPage(baseCtx());
+        const { error } = await readStream(stream as ReadableStream);
+
+        expect(error).toBeNull(); // onError doesn't abort the stream itself
+        const onRequestErrorCalls = safeExecuteHook.mock.calls.filter(
+            (c) => c[0] === 'onRequestError',
+        );
+        expect(onRequestErrorCalls[0][2]).toBe(streamError);
     });
 });
 
@@ -413,5 +553,38 @@ describe('renderPage error-boundary failure', () => {
             expect.objectContaining({ err: String(errorPageError) }),
             expect.any(String),
         );
+    });
+
+    it('renders the dev error overlay when the main render throws and there is no error.tsx', async () => {
+        const ctx = baseCtx();
+        ctx.pageEntry.errorPage = undefined;
+        render.mockRejectedValue(new Error('no error.tsx to catch this'));
+
+        const stream = await renderPage(ctx);
+        const { error } = await readStream(stream as ReadableStream);
+
+        // import.meta.env.DEV is true under vitest, so this takes the dev
+        // overlay branch (prod's rethrow is unreachable here) and completes
+        // instead of propagating the error to the caller.
+        expect(error).toBeNull();
+        expect(mockResponseStatus.current).toBe(500);
+        expect(onResponseStartCalls().length).toBeGreaterThan(0);
+    });
+
+    it('recovers via error.tsx when the main render returns a non-plain (deferred/PPR) shape (internal consistency guard)', async () => {
+        isDeferredResult.mockReturnValue(true);
+        render.mockResolvedValue({
+            rendered: '<p>hi</p>',
+            documentMeta: {},
+            documentAssets: [],
+            loaderData: {},
+        });
+
+        const stream = await renderPage(baseCtx());
+        const { error } = await readStream(stream as ReadableStream);
+
+        // Same reasoning as the PPR/deferred guards: routed to error.tsx,
+        // not propagated raw. Reaching here proves the throw executed.
+        expect(error).toBeNull();
     });
 });

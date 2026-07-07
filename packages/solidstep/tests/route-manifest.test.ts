@@ -3,8 +3,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // route-manifest.ts turns vinxi's flat `fileRoutes` list (one entry per
 // convention file: page/layout/loading/error/group/metadata/route) into the
 // route trie `server.ts` matches against, plus the metadata-file URL map.
-// It is excluded from the coverage gate (covered by e2e); these pin its
-// current behavior through the public functions this file exports.
+// These pin its current behavior through the public functions this file
+// exports.
 
 vi.mock('vinxi/manifest', () => ({
     getManifest: () => ({ marker: 'client-manifest' }),
@@ -18,6 +18,7 @@ import {
     ensureClientManifest,
     collectPrerenderTargets,
     setRouteManifest,
+    getMetadataManifest,
 } from '../server/route-manifest';
 import { matchRoute } from '../utils/path-router';
 
@@ -64,6 +65,33 @@ const metadataFile = (name: string, src: string) => ({
     $handler: { src, import: async () => ({ default: () => 'meta' }) },
 });
 
+const group = (parent: string, slotPath: string, src: string) => ({
+    type: 'group',
+    parent,
+    path: `/group${slotPath}`,
+    $handler: { src, pick: [] },
+    $component: { src, import: async () => ({ default: () => 'slot' }) },
+    $loader: { src, import: async () => ({ loader: {} }) },
+});
+
+const loadingFile = (path: string, src: string) => ({
+    type: 'loading',
+    path: `/loading${path}`,
+    $component: { src, import: async () => ({ default: () => 'loading' }) },
+});
+
+const errorFile = (path: string, src: string) => ({
+    type: 'error',
+    path: `/error${path}`,
+    $component: { src, import: async () => ({ default: () => 'error' }) },
+});
+
+const notFoundFile = (src: string) => ({
+    type: 'not-found',
+    path: '/not-found/',
+    $component: { src, import: async () => ({ default: () => 'not-found' }) },
+});
+
 beforeEach(() => {
     fileRoutes.length = 0;
 });
@@ -87,6 +115,52 @@ describe('createRouteManifest', () => {
                 (l: { manifestPath: string }) => l.manifestPath,
             ),
         ).toEqual(['/layout/', '/layout/dashboard']);
+    });
+
+    it('attaches an @group parallel-route slot (with its own loading/error boundary) to the page', async () => {
+        fileRoutes.push(
+            page('/dashboard', 'app/dashboard/page.tsx'),
+            group(
+                '/dashboard',
+                '/dashboard/@sidebar',
+                'app/dashboard/@sidebar/page.tsx',
+            ),
+            loadingFile(
+                '/dashboard/@sidebar',
+                'app/dashboard/@sidebar/loading.tsx',
+            ),
+            errorFile(
+                '/dashboard/@sidebar',
+                'app/dashboard/@sidebar/error.tsx',
+            ),
+        );
+
+        const { rootNode } = await createRouteManifest();
+        const match = matchRoute(rootNode, '/dashboard');
+        const handler = match!.handler as any;
+
+        expect(handler.groups['@sidebar']).toBeDefined();
+        expect(handler.groups['@sidebar'].manifestPath).toBe(
+            '/group/dashboard/@sidebar',
+        );
+        expect(handler.groups['@sidebar'].loadingPage).toBeDefined();
+        expect(handler.groups['@sidebar'].errorPage).toBeDefined();
+    });
+
+    it('attaches the root not-found page to the root route only', async () => {
+        fileRoutes.push(
+            page('/', 'app/page.tsx'),
+            page('/about', 'app/about/page.tsx'),
+            notFoundFile('app/not-found.tsx'),
+        );
+
+        const { rootNode } = await createRouteManifest();
+        const root = matchRoute(rootNode, '/')!.handler as any;
+        const about = matchRoute(rootNode, '/about')!.handler as any;
+
+        expect(root.notFoundPage).toBeDefined();
+        expect(root.notFoundPage.manifestPath).toBe('/not-found/');
+        expect(about.notFoundPage).toBeUndefined();
     });
 
     it('classifies a route.ts file as an API route, distinct from a page', async () => {
@@ -127,6 +201,13 @@ describe('ensureRouteManifest / ensureClientManifest', () => {
         const second = ensureClientManifest();
 
         expect(second).toBe(first);
+    });
+
+    it('exposes the metadata map populated by the last (re)build', async () => {
+        fileRoutes.push(metadataFile('sitemap', 'app/sitemap.ts'));
+        await rebuildCachedManifest();
+
+        expect(getMetadataManifest()?.get('/sitemap.xml')).toBeDefined();
     });
 });
 
@@ -177,6 +258,55 @@ describe('collectPrerenderTargets', () => {
                 }),
             ]),
         );
+    });
+
+    it('expands a static catch-all route with generateStaticParams', async () => {
+        fileRoutes.push(
+            page('/docs/[...path]', 'app/docs/[...path]/page.tsx', {
+                $options: {
+                    src: 'opts2',
+                    import: async () => ({ options: { render: 'static' } }),
+                },
+                $generateStaticParams: {
+                    src: 'gsp2',
+                    import: async () => ({
+                        generateStaticParams: async () => [
+                            { path: ['a', 'b'] },
+                        ],
+                    }),
+                },
+            }),
+        );
+        await rebuildCachedManifest();
+
+        const targets = await collectPrerenderTargets();
+
+        expect(targets).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({ pathname: '/docs/a/b' }),
+            ]),
+        );
+    });
+
+    it('warns and skips a dynamic static route with no generateStaticParams', async () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        fileRoutes.push(
+            page('/blog/[slug]', 'app/blog/[slug]/page.tsx', {
+                $options: {
+                    src: 'opts3',
+                    import: async () => ({ options: { render: 'static' } }),
+                },
+            }),
+        );
+        await rebuildCachedManifest();
+
+        const targets = await collectPrerenderTargets();
+
+        expect(targets).toEqual([]);
+        expect(warnSpy).toHaveBeenCalledWith(
+            expect.stringContaining('requires generateStaticParams'),
+        );
+        warnSpy.mockRestore();
     });
 
     it('skips a dynamic route with no options (defaults to dynamic render, not prerendered)', async () => {

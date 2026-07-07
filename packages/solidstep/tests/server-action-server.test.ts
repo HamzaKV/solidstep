@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { toJSONAsync } from 'seroval';
+import { SEROVAL_PLUGINS } from '../utils/serialize';
 
 // handleServerFunction resolves the target chunk and parses the request's
 // arguments (query-string JSON for GET/bound-args, formData/JSON body for
@@ -6,28 +8,35 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // unknown functionId or malformed input therefore threw unhandled, skipping
 // the onRequestError/onResponseEnd instrumentation hooks entirely. These
 // tests pin the fixed behavior: unknown chunk -> 404, malformed input -> 400,
-// both still firing the instrumentation hooks. This file is intentionally
-// excluded from the coverage gate today (see vitest.config.ts) but exercises
-// the module directly through its public entry point.
+// both still firing the instrumentation hooks, plus the success/no-JS/error
+// response-shaping branches. `provideRequestEvent` (solid-js/web/storage) is
+// mocked to run its callback directly — the real implementation needs a full
+// solid-js SSR build context this unit-test environment doesn't set up; that
+// context (async-local request state) isn't what these tests are about.
 
 const chunks: Record<string, { import: () => Promise<any> }> = {};
 const safeExecuteHook = vi.fn(async () => undefined);
 const invalidateCache = vi.fn();
+const responseHeaders = new Map<string, string>();
+const setResponseStatus = vi.fn();
 
 vi.mock('vinxi/http', () => ({
     eventHandler: (fn: any) => fn,
     setHeader: vi.fn(),
-    setResponseStatus: vi.fn(),
+    setResponseStatus: (...a: unknown[]) => setResponseStatus(...a),
     appendResponseHeader: vi.fn(),
     toWebRequest: (event: any) => event.req,
     getWebRequest: (event: any) => event.req,
     getRequestIP: () => '127.0.0.1',
     getResponseStatus: () => 200,
     getResponseStatusText: () => '',
-    getResponseHeader: () => undefined,
+    getResponseHeader: (_event: unknown, name: string) =>
+        responseHeaders.get(name),
     getResponseHeaders: () => ({}),
     removeResponseHeader: vi.fn(),
-    setResponseHeader: vi.fn(),
+    setResponseHeader: (_event: unknown, name: string, value: string) => {
+        responseHeaders.set(name, value);
+    },
 }));
 vi.mock('vinxi/lib/invariant', () => ({ default: () => undefined }));
 vi.mock('vinxi/manifest', () => ({
@@ -41,6 +50,10 @@ vi.mock('../utils/instrumentation', () => ({
     createResponseContext: () => ({}),
     getInstrumentation: () => null,
     safeExecuteHook: (...a: unknown[]) => safeExecuteHook(...a),
+}));
+vi.mock('solid-js', () => ({ sharedConfig: {} }));
+vi.mock('solid-js/web/storage', () => ({
+    provideRequestEvent: async (_ctx: unknown, fn: () => unknown) => fn(),
 }));
 
 import { handleServerFunction } from '../utils/server-action.server';
@@ -56,17 +69,13 @@ beforeEach(() => {
     for (const key of Object.keys(chunks)) delete chunks[key];
     safeExecuteHook.mockClear();
     invalidateCache.mockClear();
+    setResponseStatus.mockClear();
+    responseHeaders.clear();
 });
 
 const hookNames = () => safeExecuteHook.mock.calls.map((c) => c[0]);
 
 describe('handleServerFunction onResponseStart', () => {
-    // The success/no-JS/passthrough return paths all go through
-    // `provideRequestEvent` (solid-js/web/storage), which needs a real
-    // solid-js SSR build context this unit-test environment doesn't set up
-    // (hence this file's coverage-gate exclusion — those paths are
-    // integration-tested). The dispatch-level error paths throw before
-    // reaching that code, so they're the ones testable here.
     it('fires before the 404 dispatch-error response', async () => {
         const req = new Request(
             'https://example.com/_server?id=missing-chunk&name=fn',
@@ -122,5 +131,433 @@ describe('handleServerFunction input guards', () => {
         expect(res.status).toBe(400);
         expect(hookNames()).toContain('onRequestError');
         expect(hookNames()).toContain('onResponseEnd');
+    });
+});
+
+describe('handleServerFunction success path (JS client)', () => {
+    const jsReq = (id: string, name: string) =>
+        new Request(`https://example.com/_server?id=${id}&name=${name}`, {
+            headers: { 'X-Server-Instance': 'inst-1' },
+        });
+
+    it('serializes the action result to a stream and fires onResponseEnd (no error)', async () => {
+        chunks.chunk1 = { import: async () => ({ fn: async () => 'ok' }) };
+
+        const res = await handleServerFunction(
+            makeEvent(jsReq('chunk1', 'fn')) as any,
+        );
+
+        expect(res).toBeInstanceOf(ReadableStream);
+        expect(hookNames()).toContain('onResponseEnd');
+        expect(hookNames()).not.toContain('onRequestError');
+    });
+
+    it('invalidates the cache when the action marks a path via X-Revalidate', async () => {
+        const { setResponseHeader } = await import('vinxi/http');
+        chunks.chunk1 = {
+            import: async () => ({
+                fn: async (event: any) => {
+                    setResponseHeader(event, 'X-Revalidate', '/dashboard');
+                    return 'ok';
+                },
+            }),
+        };
+
+        await handleServerFunction(makeEvent(jsReq('chunk1', 'fn')) as any);
+
+        expect(invalidateCache).toHaveBeenCalledWith('/dashboard');
+    });
+
+    it('passes a Response marked X-Content-Raw straight through unmodified', async () => {
+        const rawResponse = new Response('raw body', {
+            headers: { 'X-Content-Raw': '1' },
+        });
+        chunks.chunk1 = {
+            import: async () => ({ fn: async () => rawResponse }),
+        };
+
+        const res = await handleServerFunction(
+            makeEvent(jsReq('chunk1', 'fn')) as any,
+        );
+
+        expect(res).toBe(rawResponse);
+    });
+
+    it('serializes a thrown error to a stream, sets X-Error and a 500 status', async () => {
+        chunks.chunk1 = {
+            import: async () => ({
+                fn: async () => {
+                    throw new Error('action failed');
+                },
+            }),
+        };
+
+        const res = await handleServerFunction(
+            makeEvent(jsReq('chunk1', 'fn')) as any,
+        );
+
+        expect(res).toBeInstanceOf(ReadableStream);
+        expect(setResponseStatus).toHaveBeenCalledWith(expect.anything(), 500);
+        expect(hookNames()).toContain('onRequestError');
+    });
+
+    it('does not force a 500 status when the thrown error is a RedirectError', async () => {
+        const { RedirectError } = await import('../utils/redirect');
+        chunks.chunk1 = {
+            import: async () => ({
+                fn: async () => {
+                    throw new RedirectError('/login');
+                },
+            }),
+        };
+
+        await handleServerFunction(makeEvent(jsReq('chunk1', 'fn')) as any);
+
+        expect(setResponseStatus).not.toHaveBeenCalledWith(
+            expect.anything(),
+            500,
+        );
+    });
+});
+
+describe('handleServerFunction no-JS form fallback', () => {
+    it('runs the action and redirects back to the referring page with a 303', async () => {
+        chunks.chunk1 = { import: async () => ({ fn: async () => 'ok' }) };
+        const req = new Request(
+            'https://example.com/_server?id=chunk1&name=fn',
+            { headers: { Referer: 'https://example.com/form-page' } },
+        );
+
+        const res = await handleServerFunction(makeEvent(req) as any);
+
+        expect(res).toBe('');
+        expect(setResponseStatus).toHaveBeenCalledWith(expect.anything(), 303);
+    });
+
+    it('returns the raw thrown value when the action fails with no JS client', async () => {
+        const boom = new Error('no-js failure');
+        chunks.chunk1 = {
+            import: async () => ({
+                fn: async () => {
+                    throw boom;
+                },
+            }),
+        };
+        const req = new Request(
+            'https://example.com/_server?id=chunk1&name=fn',
+        );
+
+        const res = await handleServerFunction(makeEvent(req) as any);
+
+        expect(res).toBe(boom);
+    });
+});
+
+describe('handleServerFunction dispatch id resolution', () => {
+    it('resolves functionId/name from the X-Server-Id header (bound-args form)', async () => {
+        chunks.chunk1 = { import: async () => ({ fn: async () => 'ok' }) };
+        const req = new Request('https://example.com/_server', {
+            headers: {
+                'X-Server-Id': 'chunk1#fn',
+                'X-Server-Instance': 'inst-1',
+            },
+        });
+
+        const res = await handleServerFunction(makeEvent(req) as any);
+
+        expect(res).toBeInstanceOf(ReadableStream);
+    });
+});
+
+describe('handleServerFunction body parsing', () => {
+    it('decodes a valid seroval-encoded JSON POST body into the action args', async () => {
+        const envelope = await toJSONAsync(['hello', 42], {
+            plugins: SEROVAL_PLUGINS,
+        });
+        let received: unknown;
+        chunks.chunk1 = {
+            import: async () => ({
+                fn: async (...args: unknown[]) => {
+                    received = args;
+                    return 'ok';
+                },
+            }),
+        };
+        const req = new Request(
+            'https://example.com/_server?id=chunk1&name=fn',
+            {
+                method: 'POST',
+                headers: {
+                    'content-type': 'application/json',
+                    'X-Server-Instance': 'inst-1',
+                },
+                body: JSON.stringify(envelope),
+            },
+        );
+
+        await handleServerFunction(makeEvent(req) as any);
+
+        expect(received).toEqual(['hello', 42]);
+    });
+
+    it('parses a multipart/form-data POST body into a single FormData arg', async () => {
+        const form = new FormData();
+        form.set('name', 'ada');
+        let received: unknown;
+        chunks.chunk1 = {
+            import: async () => ({
+                fn: async (data: FormData) => {
+                    received = data;
+                    return 'ok';
+                },
+            }),
+        };
+        const req = new Request(
+            'https://example.com/_server?id=chunk1&name=fn',
+            {
+                method: 'POST',
+                headers: { 'X-Server-Instance': 'inst-1' },
+                body: form,
+            },
+        );
+
+        await handleServerFunction(makeEvent(req) as any);
+
+        expect(received).toBeInstanceOf(FormData);
+        expect((received as FormData).get('name')).toBe('ada');
+    });
+});
+
+describe('handleServerFunction Response-result forwarding', () => {
+    it('forwards a non-redirect status from a returned Response and unwraps its customBody', async () => {
+        const result = new Response(null, { status: 201 });
+        (result as any).customBody = async () => 'created';
+        chunks.chunk1 = { import: async () => ({ fn: async () => result }) };
+        const req = new Request(
+            'https://example.com/_server?id=chunk1&name=fn',
+            { headers: { 'X-Server-Instance': 'inst-1' } },
+        );
+
+        const res = await handleServerFunction(makeEvent(req) as any);
+
+        expect(res).toBeInstanceOf(ReadableStream);
+        expect(setResponseStatus).toHaveBeenCalledWith(expect.anything(), 201);
+    });
+
+    it('serializes a thrown Response (customBody) as the error envelope', async () => {
+        const thrown = new Response(null, { status: 403 });
+        (thrown as any).customBody = async () => 'forbidden';
+        chunks.chunk1 = {
+            import: async () => ({
+                fn: async () => {
+                    throw thrown;
+                },
+            }),
+        };
+        const req = new Request(
+            'https://example.com/_server?id=chunk1&name=fn',
+            { headers: { 'X-Server-Instance': 'inst-1' } },
+        );
+
+        const res = await handleServerFunction(makeEvent(req) as any);
+
+        expect(res).toBeInstanceOf(ReadableStream);
+        expect(setResponseStatus).toHaveBeenCalledWith(expect.anything(), 403);
+    });
+
+    it('normalizes a bodyless, non-raw Response result to null before serializing', async () => {
+        const result = new Response(null, { status: 200 });
+        chunks.chunk1 = { import: async () => ({ fn: async () => result }) };
+        const req = new Request(
+            'https://example.com/_server?id=chunk1&name=fn',
+            { headers: { 'X-Server-Instance': 'inst-1' } },
+        );
+
+        const res = await handleServerFunction(makeEvent(req) as any);
+
+        expect(res).toBeInstanceOf(ReadableStream);
+    });
+
+    it('normalizes a bodyless, thrown Response to null before serializing', async () => {
+        const thrown = new Response(null, { status: 403 });
+        chunks.chunk1 = {
+            import: async () => ({
+                fn: async () => {
+                    throw thrown;
+                },
+            }),
+        };
+        const req = new Request(
+            'https://example.com/_server?id=chunk1&name=fn',
+            { headers: { 'X-Server-Instance': 'inst-1' } },
+        );
+
+        const res = await handleServerFunction(makeEvent(req) as any);
+
+        expect(res).toBeInstanceOf(ReadableStream);
+    });
+});
+
+describe('handleServerFunction bound-args (GET) parsing', () => {
+    it('decodes a plain JSON args array (no seroval envelope) from the query string', async () => {
+        let received: unknown;
+        chunks.chunk1 = {
+            import: async () => ({
+                fn: async (...args: unknown[]) => {
+                    received = args;
+                    return 'ok';
+                },
+            }),
+        };
+        const args = encodeURIComponent(JSON.stringify(['a', 1]));
+        const req = new Request(
+            `https://example.com/_server?id=chunk1&name=fn&args=${args}`,
+            { headers: { 'X-Server-Instance': 'inst-1' } },
+        );
+
+        await handleServerFunction(makeEvent(req) as any);
+
+        expect(received).toEqual(['a', 1]);
+    });
+
+    it('returns 400 for a malformed multipart/form-data POST body', async () => {
+        chunks.chunk1 = { import: async () => ({ fn: vi.fn() }) };
+        const req = new Request(
+            'https://example.com/_server?id=chunk1&name=fn',
+            {
+                method: 'POST',
+                headers: { 'content-type': 'multipart/form-data; boundary=x' },
+                body: 'not a real multipart body',
+            },
+        );
+
+        const res = (await handleServerFunction(
+            makeEvent(req) as any,
+        )) as Response;
+
+        expect(res.status).toBe(400);
+    });
+
+    it('returns 404 when neither X-Server-Id nor id/name query params are present', async () => {
+        const req = new Request('https://example.com/_server');
+
+        const res = (await handleServerFunction(
+            makeEvent(req) as any,
+        )) as Response;
+
+        expect(res.status).toBe(404);
+    });
+});
+
+describe('handleServerFunction NODE_ENV=development messages', () => {
+    const withDevEnv = async (fn: () => Promise<void>) => {
+        const prev = process.env.NODE_ENV;
+        process.env.NODE_ENV = 'development';
+        try {
+            await fn();
+        } finally {
+            process.env.NODE_ENV = prev;
+        }
+    };
+
+    it('includes the real message in the missing-id 404 response', async () => {
+        await withDevEnv(async () => {
+            const req = new Request('https://example.com/_server');
+            const res = (await handleServerFunction(
+                makeEvent(req) as any,
+            )) as Response;
+            expect(await res.text()).toBe('Server function not found');
+        });
+    });
+
+    it('includes the real message in the unknown-chunk 404 response', async () => {
+        await withDevEnv(async () => {
+            const req = new Request(
+                'https://example.com/_server?id=missing&name=fn',
+            );
+            const res = (await handleServerFunction(
+                makeEvent(req) as any,
+            )) as Response;
+            expect(await res.text()).toContain('Unknown server function chunk');
+        });
+    });
+
+    it('includes the real message in the malformed-args 400 response', async () => {
+        await withDevEnv(async () => {
+            chunks.chunk1 = { import: async () => ({ fn: vi.fn() }) };
+            const req = new Request(
+                'https://example.com/_server?id=chunk1&name=fn&args=not-json',
+            );
+            const res = (await handleServerFunction(
+                makeEvent(req) as any,
+            )) as Response;
+            expect(await res.text()).toBe('Malformed args query parameter');
+        });
+    });
+});
+
+describe('handleServerFunction seroval-encoded bound args (GET)', () => {
+    it('decodes a full seroval envelope (not a plain JSON array) from the query string', async () => {
+        const envelope = await toJSONAsync(['x', 1], {
+            plugins: SEROVAL_PLUGINS,
+        });
+        let received: unknown;
+        chunks.chunk1 = {
+            import: async () => ({
+                fn: async (...args: unknown[]) => {
+                    received = args;
+                    return 'ok';
+                },
+            }),
+        };
+        const args = encodeURIComponent(JSON.stringify(envelope));
+        const req = new Request(
+            `https://example.com/_server?id=chunk1&name=fn&args=${args}`,
+            { headers: { 'X-Server-Instance': 'inst-1' } },
+        );
+
+        await handleServerFunction(makeEvent(req) as any);
+
+        expect(received).toEqual(['x', 1]);
+    });
+});
+
+describe('handleServerFunction non-Error thrown values (JS client)', () => {
+    it('uses the string itself as the X-Error message when a string is thrown', async () => {
+        chunks.chunk1 = {
+            import: async () => ({
+                fn: async () => {
+                    throw 'plain string failure';
+                },
+            }),
+        };
+        const req = new Request(
+            'https://example.com/_server?id=chunk1&name=fn',
+            { headers: { 'X-Server-Instance': 'inst-1' } },
+        );
+
+        const res = await handleServerFunction(makeEvent(req) as any);
+
+        expect(res).toBeInstanceOf(ReadableStream);
+        expect(setResponseStatus).toHaveBeenCalledWith(expect.anything(), 500);
+    });
+
+    it('falls back to a generic X-Error message when a non-Error, non-string value is thrown', async () => {
+        chunks.chunk1 = {
+            import: async () => ({
+                fn: async () => {
+                    throw { code: 'WEIRD' };
+                },
+            }),
+        };
+        const req = new Request(
+            'https://example.com/_server?id=chunk1&name=fn',
+            { headers: { 'X-Server-Instance': 'inst-1' } },
+        );
+
+        const res = await handleServerFunction(makeEvent(req) as any);
+
+        expect(res).toBeInstanceOf(ReadableStream);
+        expect(setResponseStatus).toHaveBeenCalledWith(expect.anything(), 500);
     });
 });
