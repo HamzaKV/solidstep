@@ -9,7 +9,7 @@
     "lint": "biome ci .",
     "format": "biome format --write .",
     "typecheck": "pnpm --filter solidstep exec tsc --noEmit && pnpm --filter @varlabs/create-solidstep exec tsc --noEmit",
-    "test": "pnpm --filter solidstep test",
+    "test": "pnpm --filter solidstep test && pnpm --filter @varlabs/create-solidstep test",
     "test:coverage": "pnpm --filter solidstep test:coverage",
     "test:e2e": "pnpm --filter kitchen-sink test:e2e",
     "build": "pnpm --filter \"./packages/*\" build",
