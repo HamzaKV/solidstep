@@ -518,6 +518,17 @@ export const renderPage = async (ctx: PageRenderContext) => {
                         // statusCode = 500;
                         setResponseStatus(500);
                     } catch (e2) {
+                        // The error boundary (error.tsx) itself failed to
+                        // render while handling e1 — log it so authors don't
+                        // lose the reason error.tsx never rendered, then
+                        // propagate the original error unchanged.
+                        logger.error(
+                            {
+                                route: pathnamePart,
+                                err: String(e2),
+                            },
+                            'Failed to render error boundary (error.tsx)',
+                        );
                         throw e1;
                     }
                 }
