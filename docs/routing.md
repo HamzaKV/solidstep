@@ -78,6 +78,14 @@ export default function BlogPost(props: { routeParams: { slug: string } }) {
 // app/docs/[[...path]]/page.tsx - matches /docs, /docs/a, /docs/a/b, etc.
 ```
 
+> **Params are percent-decoded.** `/blog/hello%20world` yields
+> `slug: 'hello world'`, and each segment of a catch-all is decoded
+> individually (so `/docs/a%2Fb` yields `path: ['a/b']`, not a merged
+> segment). A malformed encoding (e.g. a lone trailing `%`) passes through
+> raw rather than throwing. Static segments still match on their raw,
+> undecoded form. If you decode params yourself today, remove that call —
+> decoding twice can mangle values containing a literal `%`.
+
 ## Parallel Routes (Groups)
 
 Render multiple sections simultaneously:

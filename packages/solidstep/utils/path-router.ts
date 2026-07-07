@@ -272,6 +272,17 @@ type MatchResult = {
  * @param path - The request pathname (leading/trailing/empty segments ignored).
  * @returns The {@link MatchResult}, or `null` if nothing matches.
  */
+// Malformed percent-encoding (e.g. a lone trailing `%`) throws in
+// decodeURIComponent; pass the raw segment through rather than failing the
+// whole match over one unparsable value.
+const tryDecode = (segment: string): string => {
+    try {
+        return decodeURIComponent(segment);
+    } catch {
+        return segment;
+    }
+};
+
 export const matchRoute = (root: RouteNode, path: string): MatchResult => {
     const segments = path.split('/').filter(Boolean);
     const params: Params = {};
@@ -301,7 +312,7 @@ export const matchRoute = (root: RouteNode, path: string): MatchResult => {
 
         // 2. Param
         if (node.paramChild) {
-            params[node.paramChild.name] = segment;
+            params[node.paramChild.name] = tryDecode(segment);
             const res = walk(node.paramChild.node, index + 1);
             if (res) return res;
             delete params[node.paramChild.name];
@@ -309,7 +320,9 @@ export const matchRoute = (root: RouteNode, path: string): MatchResult => {
 
         // 3. Catch-all
         if (node.catchAllChild) {
-            params[node.catchAllChild.name] = segments.slice(index);
+            params[node.catchAllChild.name] = segments
+                .slice(index)
+                .map(tryDecode);
             return node.catchAllChild.node.handler ?? null;
         }
 

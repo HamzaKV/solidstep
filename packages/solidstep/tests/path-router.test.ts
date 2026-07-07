@@ -263,6 +263,37 @@ describe('robustness — collisions, depth, and group segments', () => {
     });
 });
 
+describe('param/catch-all decoding', () => {
+    it('decodes a percent-encoded param value (e.g. a space)', () => {
+        insertRoute(root, '/blog/[slug]', makePageHandler('/blog/[slug]'));
+        const result = matchRoute(root, '/blog/hello%20world');
+        expect(result!.params).toEqual({ slug: 'hello world' });
+    });
+
+    it('decodes each segment of a catch-all', () => {
+        insertRoute(
+            root,
+            '/docs/[...path]',
+            makePageHandler('/docs/[...path]'),
+        );
+        const result = matchRoute(root, '/docs/a%2Fb/c%20d');
+        expect(result!.params).toEqual({ path: ['a/b', 'c d'] });
+    });
+
+    it('passes a malformed percent-encoding through raw rather than throwing', () => {
+        insertRoute(root, '/blog/[slug]', makePageHandler('/blog/[slug]'));
+        const result = matchRoute(root, '/blog/100%');
+        expect(result!.params).toEqual({ slug: '100%' });
+    });
+
+    it('still matches static segments by their raw (undecoded) form', () => {
+        const h = makePageHandler('/blog/new');
+        insertRoute(root, '/blog/new', h);
+        expect(matchRoute(root, '/blog/new')!.handler).toBe(h);
+        expect(matchRoute(root, '/blog/%6Ee%77')).toBeNull();
+    });
+});
+
 describe('parseSearchParams', () => {
     const parse = (qs: string) =>
         parseSearchParams(new URL(`http://x/?${qs}`).searchParams);
