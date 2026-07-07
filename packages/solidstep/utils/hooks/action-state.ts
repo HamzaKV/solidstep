@@ -2,7 +2,7 @@ import { createSignal, type Accessor } from 'solid-js';
 
 export type UseActionStateReturn<T> = [
     state: Accessor<T>,
-    formAction: (formData: FormData) => void,
+    formAction: (formData: FormData) => Promise<void>,
     pending: Accessor<boolean>,
     error: Accessor<Error | null>,
 ];
@@ -25,10 +25,10 @@ const useActionState = <T>(
     const [isPending, setIsPending] = createSignal(false);
     const [error, setError] = createSignal<Error | null>(null);
 
-    const formAction = (formData: FormData) => {
+    const formAction = (formData: FormData): Promise<void> => {
         setIsPending(true);
         setError(null);
-        Promise.resolve(action(state(), formData))
+        return Promise.resolve(action(state(), formData))
             .then((result) => {
                 setState(() => result);
             })

@@ -111,4 +111,24 @@ describe('<Form>', () => {
         await vi.waitFor(() => expect(errSpy).toHaveBeenCalled());
         errSpy.mockRestore();
     });
+
+    it('calls onError instead of console.error when the action throws and onError is provided', async () => {
+        const boom = new Error('nope');
+        const action = vi.fn(async () => {
+            throw boom;
+        });
+        const onError = vi.fn();
+        const errSpy = vi
+            .spyOn(console, 'error')
+            .mockImplementation(() => undefined);
+        const { container } = render(() => (
+            <Form action={action} onError={onError}>
+                <input name='x' />
+            </Form>
+        ));
+        container.querySelector('form')!.requestSubmit();
+        await vi.waitFor(() => expect(onError).toHaveBeenCalledWith(boom));
+        expect(errSpy).not.toHaveBeenCalled();
+        errSpy.mockRestore();
+    });
 });

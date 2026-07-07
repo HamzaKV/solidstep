@@ -130,9 +130,19 @@ export function SubmitButton() {
 }
 ```
 
+**Handling errors outside `useActionState`:** a plain `action` (not wrapped by
+`useActionState`) has no `error()` accessor of its own — `<Form>` only logs a
+rejection via `console.error`. Pass `onError` to handle it yourself:
+
+```tsx
+<Form action={createInvoice} onError={(error) => toast.error(String(error))}>
+  ...
+</Form>
+```
+
 > **Good to know:**
 > - `<Form>` supports progressive enhancement — when JS is disabled, forms submit natively to the server action endpoint.
-> - `useActionState` returns SolidJS accessors: call `state()`, `pending()`, and `error()` to read values. `error()` is `null` until the action throws, and resets to `null` on the next submission.
+> - `useActionState` returns SolidJS accessors: call `state()`, `pending()`, and `error()` to read values. `error()` is `null` until the action throws, and resets to `null` on the next submission. Its `formAction` also returns a `Promise<void>` that resolves once the action settles (whether it succeeds or throws) — await it if you need to know when the submission finished.
 > - `useFormStatus` must be used in a component nested inside `<Form>`.
 
 ## Related

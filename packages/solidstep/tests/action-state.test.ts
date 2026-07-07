@@ -83,6 +83,32 @@ describe('useActionState', () => {
         });
     });
 
+    it('returns a promise that resolves once the action settles, so callers can track its duration', async () => {
+        await withRoot(async () => {
+            const [, formAction, pending] = useActionState(
+                async (prev: number) => prev + 1,
+                0,
+            );
+
+            const result = formAction(fd());
+            expect(result).toBeInstanceOf(Promise);
+            expect(pending()).toBe(true);
+            await result;
+            expect(pending()).toBe(false);
+        });
+    });
+
+    it('the returned promise resolves (not rejects) even when the action throws', async () => {
+        await withRoot(async () => {
+            const [, formAction, , error] = useActionState(async () => {
+                throw new Error('boom');
+            }, null);
+
+            await expect(formAction(fd())).resolves.toBeUndefined();
+            expect(error()).not.toBeNull();
+        });
+    });
+
     it('clears a previous error on the next submission', async () => {
         await withRoot(async () => {
             let shouldThrow = true;

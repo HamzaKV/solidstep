@@ -22,6 +22,11 @@ export type ServerActionFn = {
 export type FormProps = {
     /** Server action or wrapped formAction from useActionState */
     action: ServerActionFn | ((formData: FormData) => void);
+    /**
+     * Called when `action` rejects. Defaults to logging via `console.error`
+     * when omitted.
+     */
+    onError?: (error: unknown) => void;
     /** Form content */
     children?: any;
     /** Additional HTML form attributes are spread onto the <form> element */
@@ -56,7 +61,11 @@ export type FormProps = {
  * ```
  */
 const Form = (props: FormProps) => {
-    const [local, others] = splitProps(props, ['action', 'children']);
+    const [local, others] = splitProps(props, [
+        'action',
+        'onError',
+        'children',
+    ]);
     const [pending, setPending] = createSignal(false);
     const [formData, setFormData] = createSignal<FormData | null>(null);
 
@@ -95,7 +104,11 @@ const Form = (props: FormProps) => {
         try {
             await action(data);
         } catch (error) {
-            console.error('Form action error:', error);
+            if (local.onError) {
+                local.onError(error);
+            } else {
+                console.error('Form action error:', error);
+            }
         } finally {
             setPending(false);
             setFormData(null);
