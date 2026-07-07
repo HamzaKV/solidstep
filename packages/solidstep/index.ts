@@ -116,10 +116,17 @@ export const defineConfig = (
         vite: {},
     },
 ) => {
-    let middlewarePath = join(process.cwd(), 'app', 'middleware.ts');
-    if (!existsSync(middlewarePath)) {
-        middlewarePath = join(process.cwd(), 'app', 'middleware.js');
-    }
+    // The ssr router's `middleware` field is resolved by vinxi relative to the
+    // project root, matching the shape of the hardcoded literal below — not
+    // the absolute `join(process.cwd(), ...)` paths used only for the
+    // existence checks.
+    const middlewarePath = existsSync(
+        join(process.cwd(), 'app', 'middleware.ts'),
+    )
+        ? './app/middleware.ts'
+        : existsSync(join(process.cwd(), 'app', 'middleware.js'))
+          ? './app/middleware.js'
+          : undefined;
 
     const sharedConfig = {
         logger: config.logger || false,
@@ -276,7 +283,7 @@ export const defineConfig = (
                         })(),
                     ),
                 ],
-                middleware: './app/middleware.ts',
+                middleware: middlewarePath,
                 routes: (router, app) => {
                     return new ServerRouter(
                         {
