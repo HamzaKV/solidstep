@@ -312,10 +312,21 @@ export class FilesystemCacheStore implements CacheStore {
     private tagsFile: string;
     private ready?: Promise<void>;
     private tmpSeq = 0;
+    // Serializes every read-modify-write of the tags file (set/delete/
+    // invalidateTag all do one): without this, concurrent writers can
+    // corrupt the swap (Windows' rename() rejects a concurrent rename onto
+    // the same destination, unlike POSIX's atomic replace).
+    private tagsLock: Promise<unknown> = Promise.resolve();
 
     constructor(opts: { dir: string }) {
         this.dir = opts.dir;
         this.tagsFile = join(this.dir, '__tags.json');
+    }
+
+    private withTagsLock<T>(fn: () => Promise<T>): Promise<T> {
+        const run = this.tagsLock.then(fn, fn);
+        this.tagsLock = run.catch(() => undefined);
+        return run;
     }
 
     private ensureDir(): Promise<void> {
@@ -387,17 +398,24 @@ export class FilesystemCacheStore implements CacheStore {
             'utf-8',
         );
         if (options?.tags?.length) {
-            const index = await this.readTags();
-            for (const tag of options.tags) {
-                const keys = index[tag] ?? [];
-                if (!keys.includes(key)) keys.push(key);
-                index[tag] = keys;
-            }
-            await this.writeTags(index);
+            const tags = options.tags;
+            await this.withTagsLock(async () => {
+                const index = await this.readTags();
+                for (const tag of tags) {
+                    const keys = index[tag] ?? [];
+                    if (!keys.includes(key)) keys.push(key);
+                    index[tag] = keys;
+                }
+                await this.writeTags(index);
+            });
         }
     }
 
     async delete(key: string): Promise<void> {
+        // Read the entry first (while it still exists) so a tagged key can be
+        // pruned from the tag index below — otherwise a direct delete (e.g. via
+        // revalidatePath, not invalidateTag) leaves a stale reference forever.
+        const entry = await this.get(key);
         try {
             await unlink(this.fileFor(key));
         } catch (err) {
@@ -407,6 +425,22 @@ export class FilesystemCacheStore implements CacheStore {
                 { err },
                 'FilesystemCacheStore: delete found no file to remove',
             );
+        }
+        if (entry?.tags?.length) {
+            const tags = entry.tags;
+            await this.withTagsLock(async () => {
+                const index = await this.readTags();
+                let changed = false;
+                for (const tag of tags) {
+                    const keys = index[tag];
+                    if (!keys) continue;
+                    const next = keys.filter((k) => k !== key);
+                    changed ||= next.length !== keys.length;
+                    if (next.length > 0) index[tag] = next;
+                    else delete index[tag];
+                }
+                if (changed) await this.writeTags(index);
+            });
         }
     }
 
@@ -420,7 +454,15 @@ export class FilesystemCacheStore implements CacheStore {
         const keys = index[tag];
         if (!keys) return;
         await Promise.all(keys.map((key) => this.delete(key)));
-        delete index[tag];
-        await this.writeTags(index);
+        // Re-read rather than reuse the pre-delete snapshot: each delete()
+        // above already pruned the index for its own key's tags (including
+        // this one), so writing the stale snapshot here would resurrect
+        // those prunes. Re-reading picks up their result before removing
+        // whatever's left of this tag.
+        await this.withTagsLock(async () => {
+            const latest = await this.readTags();
+            delete latest[tag];
+            await this.writeTags(latest);
+        });
     }
 }

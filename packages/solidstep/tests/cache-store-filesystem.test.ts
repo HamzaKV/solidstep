@@ -1,5 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync, readdirSync } from 'node:fs';
+import {
+    mkdtempSync,
+    mkdirSync,
+    rmSync,
+    writeFileSync,
+    readdirSync,
+    readFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { FilesystemCacheStore } from '../utils/cache-store';
@@ -69,6 +76,28 @@ describe('FilesystemCacheStore', () => {
         await store.set('k', 2, { tags: ['t'] }); // key already in tag list
         await store.invalidateTag('t');
         expect(await store.get('k')).toBeNull();
+    });
+
+    it('prunes a key from the tag index when deleted directly (not via invalidateTag)', async () => {
+        await store.set('k', 1, { tags: ['t'] });
+        await store.delete('k');
+        const index = JSON.parse(
+            readFileSync(join(dir, '__tags.json'), 'utf-8'),
+        );
+        expect(index.t).toBeUndefined();
+    });
+
+    it('a failed tag-index write does not wedge later tag-index writes', async () => {
+        // Force the first tag-index write to fail: a directory in place of
+        // the expected __tags.json makes writeFile reject with EISDIR.
+        mkdirSync(join(dir, '__tags.json'));
+        await expect(store.set('k1', 1, { tags: ['t'] })).rejects.toThrow();
+        rmSync(join(dir, '__tags.json'), { recursive: true, force: true });
+        // A later tag-index write (different key) must still go through
+        // rather than hang behind the failed one.
+        await store.set('k2', 2, { tags: ['t'] });
+        await store.invalidateTag('t');
+        expect(await store.get('k2')).toBeNull();
     });
 
     it('is a no-op when invalidating an unknown tag', async () => {
