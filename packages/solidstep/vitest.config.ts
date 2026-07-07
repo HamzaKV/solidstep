@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
 import solid from 'vite-plugin-solid';
 
@@ -5,6 +6,16 @@ export default defineConfig({
     // The Solid plugin compiles JSX/reactivity and resolves `solid-js` to its
     // client/dev build so component & hook tests can render under jsdom.
     plugins: [solid()],
+    resolve: {
+        alias: {
+            // `vinxi/routes` has no runtime `import` condition (Vite-plugin-only
+            // virtual module) — alias it to a fixture so tests/route-manifest.test.ts
+            // can populate it directly. See tests/fixtures/vinxi-routes.ts.
+            'vinxi/routes': fileURLToPath(
+                new URL('./tests/fixtures/vinxi-routes.ts', import.meta.url),
+            ),
+        },
+    },
     test: {
         // Global default; component/hook/serialize specs opt into jsdom with a
         // `// @vitest-environment jsdom` docblock so the pure-logic specs stay
