@@ -15,13 +15,18 @@ const matchRoute = vi.fn();
 const getCachedModule = vi.fn();
 const registerShutdownHandler = vi.hoisted(() => vi.fn());
 const safeExecuteHook = vi.hoisted(() => vi.fn(async () => undefined));
+const serveHoleData = vi.hoisted(() => vi.fn(async () => null as unknown));
+const serveRouteData = vi.hoisted(() => vi.fn(async () => null as unknown));
+const getMetadataManifest = vi.hoisted(() => vi.fn(() => undefined as any));
+const setHeader = vi.hoisted(() => vi.fn());
+const setResponseStatus = vi.hoisted(() => vi.fn());
 
 vi.mock('vinxi/http', () => ({
     eventHandler: (fn: any) => fn,
     toWebRequest: (event: any) => event.req,
     getResponseStatus: () => 200,
-    setHeader: vi.fn(),
-    setResponseStatus: vi.fn(),
+    setHeader: (...a: unknown[]) => setHeader(...a),
+    setResponseStatus: (...a: unknown[]) => setResponseStatus(...a),
 }));
 vi.mock('../utils/cache', () => ({ setCacheStore: vi.fn() }));
 vi.mock('../utils/cache-store', () => ({
@@ -54,13 +59,13 @@ vi.mock('../server/route-manifest', () => ({
     collectPrerenderTargets: async () => [],
     ensureRouteManifest: async () => ({}),
     setRouteManifest: vi.fn(),
-    getMetadataManifest: () => undefined,
+    getMetadataManifest: (...a: unknown[]) => getMetadataManifest(...a),
     ensureClientManifest: () => ({}),
     getCachedModule: (...a: unknown[]) => getCachedModule(...a),
 }));
 vi.mock('../server/data-endpoints', () => ({
-    serveHoleData: async () => null,
-    serveRouteData: async () => null,
+    serveHoleData: (...a: unknown[]) => serveHoleData(...a),
+    serveRouteData: (...a: unknown[]) => serveRouteData(...a),
 }));
 vi.mock('../server/isr', () => ({
     seedIsrFromManifest: async () => undefined,
@@ -80,6 +85,11 @@ beforeEach(() => {
     matchRoute.mockReset();
     getCachedModule.mockReset();
     safeExecuteHook.mockClear();
+    serveHoleData.mockReset().mockResolvedValue(null);
+    serveRouteData.mockReset().mockResolvedValue(null);
+    getMetadataManifest.mockReset().mockReturnValue(undefined);
+    setHeader.mockClear();
+    setResponseStatus.mockClear();
 });
 
 const hookNames = () => safeExecuteHook.mock.calls.map((c) => c[0]);
@@ -152,5 +162,96 @@ describe('server request handler', () => {
             makeEvent('https://example.com/some-page'),
         )) as Response;
         expect(res.status).toBe(500);
+    });
+
+    it('answers the devtools well-known probe with a 204', async () => {
+        const res = await handler(
+            makeEvent(
+                'https://example.com/.well-known/appspecific/com.chrome.devtools.json',
+            ),
+        );
+        expect(setResponseStatus).toHaveBeenCalledWith(204);
+        expect(res).toBeUndefined();
+    });
+});
+
+describe('soft-nav data endpoints', () => {
+    it('serves the PPR hole envelope from the loader endpoint', async () => {
+        serveHoleData.mockResolvedValue('HOLE_ENVELOPE');
+        const res = await handler(
+            makeEvent('https://example.com/__solidstep_loader?manifest=/p'),
+        );
+        expect(res).toBe('HOLE_ENVELOPE');
+        expect(setHeader).toHaveBeenCalledWith('Cache-Control', 'no-store');
+    });
+
+    it('400s the loader endpoint when serveHoleData reports an invalid request', async () => {
+        serveHoleData.mockResolvedValue(null);
+        const res = await handler(
+            makeEvent('https://example.com/__solidstep_loader'),
+        );
+        expect(setResponseStatus).toHaveBeenCalledWith(400);
+        expect(res).toBe('Bad Request');
+    });
+
+    it('serves the soft-navigation route envelope from the route endpoint', async () => {
+        serveRouteData.mockResolvedValue('ROUTE_ENVELOPE');
+        const res = await handler(
+            makeEvent('https://example.com/__solidstep_route?url=/about'),
+        );
+        expect(res).toBe('ROUTE_ENVELOPE');
+    });
+
+    it('400s the route endpoint when serveRouteData reports an invalid request', async () => {
+        serveRouteData.mockResolvedValue(null);
+        const res = await handler(
+            makeEvent('https://example.com/__solidstep_route'),
+        );
+        expect(setResponseStatus).toHaveBeenCalledWith(400);
+        expect(res).toBe('Bad Request');
+    });
+});
+
+describe('dynamic metadata files', () => {
+    it('serves a metadata convention file at its conventional URL with its Content-Type', async () => {
+        getMetadataManifest.mockReturnValue(
+            new Map([
+                [
+                    '/robots.txt',
+                    {
+                        contentType: 'text/plain; charset=utf-8',
+                        handler: { src: 'app/robots.ts' },
+                    },
+                ],
+            ]),
+        );
+        getCachedModule.mockResolvedValue({
+            default: () => 'User-agent: *',
+        });
+
+        const res = await handler(makeEvent('https://example.com/robots.txt'));
+
+        expect(res).toBe('User-agent: *');
+        expect(setHeader).toHaveBeenCalledWith(
+            'Content-Type',
+            'text/plain; charset=utf-8',
+        );
+    });
+
+    it("passes a metadata handler's Response straight through", async () => {
+        const metaResponse = new Response('xml', { status: 200 });
+        getMetadataManifest.mockReturnValue(
+            new Map([
+                [
+                    '/sitemap.xml',
+                    { contentType: 'application/xml', handler: { src: 'x' } },
+                ],
+            ]),
+        );
+        getCachedModule.mockResolvedValue({ default: () => metaResponse });
+
+        const res = await handler(makeEvent('https://example.com/sitemap.xml'));
+
+        expect(res).toBe(metaResponse);
     });
 });
