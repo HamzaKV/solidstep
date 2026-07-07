@@ -38,6 +38,19 @@ test.describe('SSR pages & routing', () => {
         await expect(page.getByTestId('depth')).toHaveText('3');
     });
 
+    test('a percent-encoded dynamic param is decoded', async ({ page }) => {
+        await page.goto('/blog/hello%20world');
+        await expect(page.getByTestId('slug')).toHaveText('hello world');
+    });
+
+    test('a percent-encoded catch-all segment is decoded per-segment', async ({
+        page,
+    }) => {
+        await page.goto('/docs/a%2Fb/c%20d');
+        await expect(page.getByTestId('path')).toHaveText('a/b/c d');
+        await expect(page.getByTestId('depth')).toHaveText('2');
+    });
+
     test('optional catch-all /shop/[[...path]] matches base path', async ({
         page,
     }) => {
