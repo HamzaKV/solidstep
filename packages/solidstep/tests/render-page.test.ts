@@ -31,6 +31,12 @@ const renderAssetsToHtml = vi.hoisted(() =>
             `ASSETS${JSON.stringify(assets)}`,
     ),
 );
+const isDeferredResult = vi.hoisted(() => vi.fn(() => false));
+const isPprResult = vi.hoisted(() => vi.fn(() => false));
+const routeNeedsStreaming = vi.hoisted(() => vi.fn(async () => false));
+const buildLoadingSwapScript = vi.hoisted(() =>
+    vi.fn(() => 'LOADING_SWAP_SCRIPT'),
+);
 
 const mockResponseStatus = vi.hoisted(() => ({ current: 200 }));
 vi.mock('vinxi/http', () => ({
@@ -41,7 +47,15 @@ vi.mock('vinxi/http', () => ({
     },
 }));
 vi.mock('solid-js/web', () => ({
-    renderToStream: () => ({ pipe: vi.fn() }),
+    // The real API streams chunks then calls `end()`; this stub writes one
+    // shell chunk and ends immediately so the deferred branch's
+    // `await new Promise(...)` around `pipe(...)` resolves.
+    renderToStream: () => ({
+        pipe: (writable: { write: (v: string) => void; end: () => void }) => {
+            writable.write('<div>deferred-shell</div>');
+            writable.end();
+        },
+    }),
 }));
 vi.mock('../utils/escape', () => ({ escapeScript: (s: string) => s }));
 vi.mock('../utils/logger', () => ({ logger }));
@@ -57,7 +71,7 @@ vi.mock('../utils/html', () => ({
     createBaseMeta: () => ({}),
 }));
 vi.mock('../utils/loading-swap', () => ({
-    buildLoadingSwapScript: () => '',
+    buildLoadingSwapScript: (...a: unknown[]) => buildLoadingSwapScript(...a),
 }));
 vi.mock('../utils/instrumentation', () => ({
     getInstrumentation: (...a: unknown[]) => getInstrumentation(...a),
@@ -75,12 +89,12 @@ vi.mock('../server/isr', () => ({
     serveIsr: async () => ({ html: '', cacheStatus: 'hit' }),
 }));
 vi.mock('../server/types', () => ({
-    isDeferredResult: () => false,
-    isPprResult: () => false,
+    isDeferredResult: (...a: unknown[]) => isDeferredResult(...a),
+    isPprResult: (...a: unknown[]) => isPprResult(...a),
 }));
 vi.mock('../server/render', () => ({
     render: (...a: unknown[]) => render(...a),
-    routeNeedsStreaming: async () => false,
+    routeNeedsStreaming: (...a: unknown[]) => routeNeedsStreaming(...a),
     template: '<!--app-head--><!--app-body-->',
 }));
 
@@ -113,6 +127,10 @@ beforeEach(() => {
     buildHydrationScript.mockClear();
     buildHeadHtml.mockClear();
     renderAssetsToHtml.mockClear();
+    isDeferredResult.mockReset().mockReturnValue(false);
+    isPprResult.mockReset().mockReturnValue(false);
+    routeNeedsStreaming.mockReset().mockResolvedValue(false);
+    buildLoadingSwapScript.mockClear();
 });
 
 const onResponseStartCalls = () =>
@@ -282,6 +300,96 @@ describe('renderPage hydration options', () => {
         );
         // disable was ignored -> normal hydration script still present
         expect(text).toContain('HYDRATE[');
+    });
+});
+
+describe('renderPage PPR', () => {
+    it('serves a static shell with the hydration script flagging PPR', async () => {
+        getCachedModule.mockResolvedValue({ options: { render: 'ppr' } });
+        isPprResult.mockReturnValue(true);
+        render.mockResolvedValue({
+            rendered: '<p>shell</p>',
+            documentMeta: {},
+            documentAssets: [],
+            loaderData: {},
+            pprHoles: { h1: 'pending' },
+        });
+
+        const stream = await renderPage(baseCtx());
+        const { text, error } = await readStream(stream as ReadableStream);
+
+        expect(error).toBeNull();
+        expect(text).toContain('<p>shell</p>');
+        expect(text).toContain('HYDRATE[');
+        expect(onResponseStartCalls()).toHaveLength(1);
+        expect(onResponseStartCalls()[0][3]).toMatchObject({ statusCode: 200 });
+    });
+});
+
+describe('renderPage deferred streaming', () => {
+    it('streams the shell then the manifest/hydration script after the deferred render ends', async () => {
+        routeNeedsStreaming.mockResolvedValue(true);
+        isDeferredResult.mockReturnValue(true);
+        render.mockResolvedValue({
+            documentMeta: {},
+            documentAssets: [],
+            loaderData: {},
+            deferredKeys: ['/p'],
+            composed: () => 'tree',
+        });
+
+        const stream = await renderPage(baseCtx());
+        const { text, error } = await readStream(stream as ReadableStream);
+
+        expect(error).toBeNull();
+        expect(text).toContain('<div>deferred-shell</div>');
+        expect(text).toContain('HYDRATE[');
+        expect(text).toContain('</html>');
+        expect(onResponseStartCalls()).toHaveLength(1);
+    });
+});
+
+describe('renderPage loading-swap', () => {
+    it('renders the loading boundary, then swaps to the real page via buildLoadingSwapScript', async () => {
+        const ctx = baseCtx();
+        ctx.pageEntry.loadingPage = { manifestPath: '/p/loading' } as any;
+        render.mockImplementation(
+            async ({ toRender }: { toRender: string }) => ({
+                rendered:
+                    toRender === 'loading' ? '<p>loading…</p>' : '<p>hi</p>',
+                documentMeta: {},
+                documentAssets: [],
+                loaderData: {},
+                cacheStatus: undefined,
+            }),
+        );
+
+        const stream = await renderPage(ctx);
+        const { text, error } = await readStream(stream as ReadableStream);
+
+        expect(error).toBeNull();
+        expect(text).toContain(
+            '<template id="__page_html__"><p>hi</p></template>',
+        );
+        expect(text).toContain('LOADING_SWAP_SCRIPT');
+        expect(buildLoadingSwapScript).toHaveBeenCalled();
+    });
+});
+
+describe('renderPage redirects', () => {
+    it('maps a RedirectError from the main render to a 302 with a Location header', async () => {
+        const { RedirectError } = await import('../utils/redirect');
+        render.mockRejectedValue(new RedirectError('/login'));
+
+        const stream = await renderPage(baseCtx());
+        const { text, error } = await readStream(stream as ReadableStream);
+
+        expect(error).toBeNull();
+        expect(text).toBe('');
+        expect(mockResponseStatus.current).toBe(302);
+        // Redirects short-circuit before the response is streamed — no
+        // onResponseStart/onResponseEnd content-producing work happens.
+        expect(onResponseStartCalls()).toHaveLength(0);
     });
 });
 
