@@ -7,6 +7,7 @@ import { getCache, setCacheWithOptions } from '../utils/cache.js';
 import { getCachedLoaderData } from '../utils/loader-cache.js';
 import { runSequentialLoader } from '../utils/loader-error.js';
 import { shouldCachePage, pageCacheKey } from '../utils/page-cache.js';
+import { isPreviewActive } from '../utils/preview.js';
 import type {
     Import,
     RoutePageHandler,
@@ -79,14 +80,17 @@ export async function render(args: RenderArgs): Promise<RenderResult> {
     const isPPR = pageOptions?.render === 'ppr';
     const shouldCache = shouldCachePage(pageOptions);
     const cacheKey = pageCacheKey(url);
-    const cachedEntry = shouldCache
-        ? await getCache<{
-              rendered: string;
-              documentMeta: Meta;
-              documentAssets: RenderAsset[];
-              loaderData: Record<string, unknown>;
-          }>(cacheKey)
-        : null;
+    // Preview mode skips cache *reads* only — the write below still happens,
+    // so a later non-preview visit gets a fresh cache rather than a stale one.
+    const cachedEntry =
+        shouldCache && !isPreviewActive()
+            ? await getCache<{
+                  rendered: string;
+                  documentMeta: Meta;
+                  documentAssets: RenderAsset[];
+                  loaderData: Record<string, unknown>;
+              }>(cacheKey)
+            : null;
 
     if (cachedEntry && toRender === 'main') {
         return {

@@ -22,6 +22,7 @@ export default defineConfig({
         env: {
             PORT: String(PORT),
             SOLIDSTEP_REVALIDATE_TOKEN: 'e2e-test-revalidate-token',
+            SOLIDSTEP_PREVIEW_SECRET: 'e2e-test-preview-secret',
         },
         url: BASE_URL,
         timeout: 120_000,

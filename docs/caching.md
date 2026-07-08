@@ -121,6 +121,49 @@ curl -X POST https://your-app.example.com/__solidstep_revalidate \
   timing-attacked). Any method other than `POST` → `405`. A body with neither
   `path` nor `tag` → `400`.
 
+## Preview mode
+
+Set `SOLIDSTEP_PREVIEW_SECRET` to let editors preview unpublished content
+without waiting for ISR/page-cache to expire. `enablePreview()` sets an
+HMAC-signed cookie (via `node:crypto`, no dependency); while it's present and
+valid, the current visitor's requests **skip reads** (never writes) of:
+
+- the ISR short-circuit (`server/render-page.ts`) — pages render fresh instead
+  of serving the cached artifact,
+- the page-render cache,
+- the loader-data cache.
+
+Because only *reads* are skipped, a preview visit still writes a fresh cache
+entry — a subsequent non-preview visitor gets that fresh render rather than a
+stale one, except for the ISR case, where a preview render bypasses `serveIsr`
+entirely and so never touches the ISR artifact at all.
+
+```ts
+// app/api/preview/enable/route.ts
+import { enablePreview } from 'solidstep/utils/preview';
+
+export async function POST() {
+    enablePreview();
+    return new Response(null, { status: 204 });
+}
+```
+
+```ts
+import { disablePreview } from 'solidstep/utils/preview';
+
+export async function POST() {
+    disablePreview();
+    return new Response(null, { status: 204 });
+}
+```
+
+`enablePreview()` throws if `SOLIDSTEP_PREVIEW_SECRET` is unset — gate these
+routes (e.g. behind your CMS's own auth) before calling it. A tampered or
+unsigned cookie is rejected exactly like preview mode being off.
+
+> **Limitation.** Build-time SSG artifacts are served as static files and
+> can't be bypassed by preview mode — only `dynamic`/`isr` routes benefit.
+
 ## Pluggable cache stores
 
 The page-render and [loader-data](./data-loading.md#caching-loader-data) caches share a

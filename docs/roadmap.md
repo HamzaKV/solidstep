@@ -77,7 +77,10 @@ are the feature set you can build on right now (see the linked guides for detail
   caches, with wall-clock TTL, stale-while-revalidate, cache tags, single-flight
   coalescing, `revalidatePath`, and `invalidateTag`. An optional on-demand
   revalidation HTTP endpoint (`SOLIDSTEP_REVALIDATE_TOKEN`) lets a CMS webhook
-  invalidate a path or tag without a redeploy. See [Caching](./caching.md).
+  invalidate a path or tag without a redeploy. An optional preview mode
+  (`SOLIDSTEP_PREVIEW_SECRET`, `enablePreview`/`disablePreview`) lets an
+  editor bypass ISR/page-cache/loader-cache reads for their session. See
+  [Caching](./caching.md).
 - **Metadata & metadata files** — `generateMeta` / `meta()` for SEO metadata, plus
   dynamic `robots.ts`, `sitemap.ts`, `manifest.ts`, and `llms.ts` convention files.
   See [Metadata](./metadata.md) and [Metadata Files](./metadata-files.md).
@@ -129,8 +132,6 @@ promises.
 - **Deferred *layout* loaders.** `defer` is page- and group-scoped today; layout
   loaders are always awaited. Supporting deferred layouts would unlock more granular
   streaming.
-- **Draft / preview mode** — a signed cookie that bypasses ISR/SSG/PPR caching
-  for a session, for headless-CMS editing workflows.
 - **Parent loader data access** — read an ancestor layout's loader data from a
   child (à la React Router's `useRouteLoaderData`).
 - **Image & font optimization** components.

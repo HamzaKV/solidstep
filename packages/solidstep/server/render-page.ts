@@ -37,6 +37,7 @@ import {
 } from '../utils/instrumentation.js';
 import { getCachedModule } from './route-manifest.js';
 import { serveIsr } from './isr.js';
+import { isPreviewActive } from '../utils/preview.js';
 import { render, routeNeedsStreaming, template } from './render.js';
 import { isDeferredResult, isPprResult } from './types.js';
 import type { OptionsModule } from './types.js';
@@ -100,13 +101,15 @@ export const renderPage = async (ctx: PageRenderContext) => {
     await safeExecuteHook('onRequest', inst?.onRequest, req, reqCtx);
 
     // ISR: serve a cached full-HTML artifact with stale-while-revalidate.
-    // Skipped in dev and for self-fetch/crawler requests (bypass header), so
-    // those render fresh through the normal path below.
+    // Skipped in dev, for self-fetch/crawler requests (bypass header), and
+    // when preview mode is active, so those render fresh through the normal
+    // path below.
     if (
         matched &&
         matched.type === 'page' &&
         !import.meta.env.DEV &&
-        !isrBypass
+        !isrBypass &&
+        !isPreviewActive()
     ) {
         const optionsImport = pageEntry!.mainPage.options;
         const pageOptions = optionsImport

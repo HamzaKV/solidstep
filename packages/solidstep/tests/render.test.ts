@@ -10,6 +10,7 @@ const renderToString = vi.fn(() => '<rendered/>');
 const getCache = vi.fn(async () => null as unknown);
 const setCacheWithOptions = vi.fn(async () => undefined);
 const shouldCachePage = vi.fn(() => false);
+const isPreviewActive = vi.fn(() => false);
 
 vi.mock('vinxi/manifest', () => ({
     // Any input src resolves to a node whose assets() is empty.
@@ -38,6 +39,9 @@ vi.mock('../utils/cache', () => ({
 vi.mock('../utils/page-cache', () => ({
     shouldCachePage: () => shouldCachePage(),
     pageCacheKey: () => 'page:key',
+}));
+vi.mock('../utils/preview', () => ({
+    isPreviewActive: () => isPreviewActive(),
 }));
 // getCachedModule resolves an Import by calling its `import()`.
 vi.mock('../server/route-manifest', () => ({
@@ -74,6 +78,7 @@ beforeEach(() => {
     getCache.mockReset().mockResolvedValue(null);
     setCacheWithOptions.mockClear();
     shouldCachePage.mockReset().mockReturnValue(false);
+    isPreviewActive.mockReset().mockReturnValue(false);
 });
 
 describe('render', () => {
@@ -111,6 +116,33 @@ describe('render', () => {
         expect('rendered' in result && result.rendered).toBe('CACHED');
         expect('cacheStatus' in result && result.cacheStatus).toBe('hit');
         expect(renderToString).not.toHaveBeenCalled();
+    });
+
+    it('skips the page-cache read (but still writes) when preview mode is active', async () => {
+        shouldCachePage.mockReturnValue(true);
+        isPreviewActive.mockReturnValue(true);
+        getCache.mockResolvedValue({
+            rendered: 'CACHED',
+            documentMeta: {},
+            documentAssets: [],
+            loaderData: {},
+        });
+
+        const result = await render({
+            toRender: 'main',
+            entry: baseEntry(),
+            routeParams: {},
+            searchParams: {},
+            req: req(),
+            pageOptions: { cache: { ttl: 1000 } },
+        });
+
+        // A real (non-cached) render happened despite a cache entry existing.
+        expect(renderToString).toHaveBeenCalledTimes(1);
+        expect('rendered' in result && result.rendered).toBe('<rendered/>');
+        // The write path is untouched by preview mode -- still caches the
+        // fresh render for the next non-preview visitor.
+        expect(setCacheWithOptions).toHaveBeenCalled();
     });
 
     it('selects the not-found variant', async () => {

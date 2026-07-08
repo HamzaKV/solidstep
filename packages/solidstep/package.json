@@ -122,6 +122,10 @@
             "types": "./utils/prerender.d.ts",
             "default": "./utils/prerender.js"
         },
+        "./utils/preview": {
+            "types": "./utils/preview.d.ts",
+            "default": "./utils/preview.js"
+        },
         "./utils/rate-limit": {
             "types": "./utils/rate-limit.d.ts",
             "default": "./utils/rate-limit.js"

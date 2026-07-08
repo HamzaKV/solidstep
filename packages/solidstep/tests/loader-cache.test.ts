@@ -5,12 +5,17 @@ vi.mock('vinxi/http', () => ({
     getEvent: vi.fn(),
     setResponseHeader: vi.fn(),
 }));
+const isPreviewActive = vi.fn(() => false);
+vi.mock('../utils/preview', () => ({
+    isPreviewActive: () => isPreviewActive(),
+}));
 
 import { getCachedLoaderData } from '../utils/loader-cache';
 import { clearAllCache } from '../utils/cache';
 
 beforeEach(async () => {
     await clearAllCache();
+    isPreviewActive.mockReset().mockReturnValue(false);
 });
 
 const req = (url = 'https://example.com/page?q=1') => new Request(url);
@@ -53,6 +58,23 @@ describe('getCachedLoaderData', () => {
         const loaderFn = makeLoader({ n: 3 }, {});
         await getCachedLoaderData(loaderFn, '/p', req('https://x.com/a?p=1'));
         await getCachedLoaderData(loaderFn, '/p', req('https://x.com/a?p=2'));
+        expect(loaderFn.loader).toHaveBeenCalledTimes(2);
+    });
+
+    it('skips the cache read (but still writes) when preview mode is active', async () => {
+        const loaderFn = makeLoader({ n: 5 }, {});
+        await getCachedLoaderData(loaderFn, '/p', req());
+        expect(loaderFn.loader).toHaveBeenCalledTimes(1);
+
+        isPreviewActive.mockReturnValue(true);
+        const result = await getCachedLoaderData(loaderFn, '/p', req());
+        expect(result).toEqual({ n: 5 });
+        // Ran again despite a fresh cache entry existing.
+        expect(loaderFn.loader).toHaveBeenCalledTimes(2);
+
+        // The write still happened -- a subsequent non-preview call reuses it.
+        isPreviewActive.mockReturnValue(false);
+        await getCachedLoaderData(loaderFn, '/p', req());
         expect(loaderFn.loader).toHaveBeenCalledTimes(2);
     });
 

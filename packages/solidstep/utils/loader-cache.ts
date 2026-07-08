@@ -5,6 +5,7 @@ import {
     runWithLoaderTimeout,
 } from './loader-timeout.js';
 import type { LoaderContext } from './loader.js';
+import { isPreviewActive } from './preview.js';
 
 type CacheableLoader = {
     loader: (
@@ -99,7 +100,9 @@ export const getCachedLoaderData = async (
         return data;
     };
 
-    const entry = await getCacheEntry<unknown>(key);
+    // Preview mode skips the read only -- `run()` below still writes, so a
+    // later non-preview visit gets fresh data rather than a stale entry.
+    const entry = isPreviewActive() ? null : await getCacheEntry<unknown>(key);
     if (entry) {
         // Fresh (no stale window, or still within it): serve directly.
         if (entry.staleAt === null || Date.now() < entry.staleAt) {
