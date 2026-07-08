@@ -52,6 +52,12 @@ export const isSafeRedirectTarget = (
     allowedHosts: string[] = [],
 ): boolean => {
     if (typeof url !== 'string' || url.length === 0) return false;
+    // The WHATWG URL parser (what `window.location.href =` actually uses)
+    // strips ASCII tab/CR/LF from anywhere in the string before parsing, so
+    // e.g. "/\t/evil.com" would resolve to "https://evil.com/" despite not
+    // literally starting with "//" — reject any control character outright.
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: detecting them is the point
+    if (/[\x00-\x1f]/.test(url)) return false;
     // Protocol-relative ("//evil.com") and backslash variants are absolute to
     // the browser despite starting with a slash — reject them.
     if (/^[/\\]{2}/.test(url)) return false;

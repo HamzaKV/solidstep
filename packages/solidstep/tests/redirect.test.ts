@@ -76,6 +76,17 @@ describe('isSafeRedirectTarget', () => {
         expect(isSafeRedirectTarget('\\\\evil.com')).toBe(false);
     });
 
+    it('rejects control characters that the URL parser strips, defeating the protocol-relative check', () => {
+        // The WHATWG URL parser (what `window.location.href =` actually uses)
+        // strips ASCII tab/CR/LF from anywhere in the string before parsing,
+        // so "/\t/evil.com" resolves to "https://evil.com/" despite not
+        // literally starting with "//".
+        expect(isSafeRedirectTarget('/\t/evil.com')).toBe(false);
+        expect(isSafeRedirectTarget('/\r/evil.com')).toBe(false);
+        expect(isSafeRedirectTarget('/\n/evil.com')).toBe(false);
+        expect(isSafeRedirectTarget('/\t\\evil.com')).toBe(false);
+    });
+
     it('rejects absolute URLs whose host is not allowlisted', () => {
         expect(isSafeRedirectTarget('https://evil.com')).toBe(false);
         expect(
