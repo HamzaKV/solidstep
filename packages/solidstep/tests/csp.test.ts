@@ -22,6 +22,7 @@ import {
     reportUnsafeDirectives,
     createDirective,
     setSources,
+    addSource,
 } from '../utils/csp';
 
 describe('createBasePolicy', () => {
@@ -147,6 +148,59 @@ describe('withCDN', () => {
         expect(hasSource(updated, 'style-src', cdn)).toBe(true);
         expect(hasSource(updated, 'img-src', cdn)).toBe(true);
         expect(hasSource(updated, 'font-src', cdn)).toBe(true);
+    });
+
+    it('rejects a CDN URL smuggling a new directive via a semicolon', () => {
+        // Without validation, joining this source into "script-src <value>"
+        // and then the whole policy with "; " produces a second, attacker-
+        // controlled "script-src *" directive -- verified live before the fix.
+        expect(() =>
+            withCDN(
+                createBasePolicy(),
+                'https://cdn.example.com; script-src *',
+            ),
+        ).toThrow();
+    });
+});
+
+describe('source injection guards', () => {
+    it('createDirective rejects a source containing a semicolon', () => {
+        expect(() =>
+            createDirective('script-src', ['https://ok.com; style-src *']),
+        ).toThrow();
+    });
+
+    it('createDirective rejects a source containing a newline', () => {
+        expect(() =>
+            createDirective('script-src', [
+                'https://ok.com\nStrict-Transport-Security: 0',
+            ]),
+        ).toThrow();
+    });
+
+    it('createDirective rejects a source containing a carriage return', () => {
+        expect(() =>
+            createDirective('script-src', ['https://ok.com\r\nX-Injected: 1']),
+        ).toThrow();
+    });
+
+    it('addSource rejects an adversarial source', () => {
+        const d = createDirective('script-src', ["'self'"]);
+        expect(() => addSource(d, 'https://ok.com; script-src *')).toThrow();
+    });
+
+    it('setSources rejects an adversarial source', () => {
+        const d = createDirective('script-src', ["'self'"]);
+        expect(() => setSources(d, ['https://ok.com; script-src *'])).toThrow();
+    });
+
+    it('still accepts ordinary sources with no special characters', () => {
+        expect(() =>
+            createDirective('script-src', [
+                "'self'",
+                'https://cdn.example.com',
+            ]),
+        ).not.toThrow();
     });
 });
 

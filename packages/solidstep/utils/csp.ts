@@ -45,19 +45,35 @@ type CSPDirective = {
 
 type CSPPolicy = ReadonlyArray<CSPDirective>;
 
+// A real CSP source (keyword, hash, nonce, scheme, or hostname) never
+// legitimately contains a `;` (would smuggle a new directive once the
+// directive/policy strings are joined) or a newline/CR (could smuggle an
+// unrelated header if the serialized policy ever ends up copied into one
+// verbatim). Reject outright rather than silently stripping/truncating.
+const assertSafeSource = (source: string): void => {
+    if (/[;\r\n]/.test(source)) {
+        throw new Error(
+            `Invalid CSP source ${JSON.stringify(source)}: contains a ';' or newline, which could inject an unintended directive.`,
+        );
+    }
+};
+const assertSafeSources = (sources: readonly string[]): void => {
+    for (const source of sources) assertSafeSource(source);
+};
+
 // Core Builder Functions
 const createDirective = (
     name: DirectiveName,
     sources: Source[],
-): CSPDirective => ({
-    name,
-    sources,
-});
+): CSPDirective => {
+    assertSafeSources(sources);
+    return { name, sources };
+};
 
-const addSource = (directive: CSPDirective, source: Source): CSPDirective => ({
-    ...directive,
-    sources: [...directive.sources, source],
-});
+const addSource = (directive: CSPDirective, source: Source): CSPDirective => {
+    assertSafeSource(source);
+    return { ...directive, sources: [...directive.sources, source] };
+};
 
 const removeSource = (
     directive: CSPDirective,
@@ -70,10 +86,10 @@ const removeSource = (
 const setSources = (
     directive: CSPDirective,
     sources: Source[],
-): CSPDirective => ({
-    ...directive,
-    sources,
-});
+): CSPDirective => {
+    assertSafeSources(sources);
+    return { ...directive, sources };
+};
 
 // Policy Manipulation
 const addDirective = (
