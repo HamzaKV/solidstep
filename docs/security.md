@@ -309,6 +309,17 @@ export default defineMiddleware([
   with no `Content-Length` is not caught here — bound those at your
   runtime/proxy. Treat it as a first line of defence, not a hard cap.
 
+> **`X-Forwarded-For` is a trust boundary you must configure.** The default
+> key trusts the request's `x-forwarded-for` header verbatim (its first,
+> left-most hop). A client that talks to your app directly (no proxy in
+> front) can set this header to anything, including someone else's IP —
+> trivially bypassing the limiter or framing another client for a 429. This
+> is only safe once you sit behind a reverse proxy/load balancer that
+> **strips or overwrites** any client-supplied `X-Forwarded-For` before
+> appending the real hop (this is deployment-specific and out of SolidStep's
+> control). If you can't guarantee that, pass your own `key` derived from a
+> value you actually trust (a session id, an API key, `event.node.req.socket.remoteAddress`).
+
 ## Production error messages
 
 When a page loader throws, the framework does **not** leak the raw error message

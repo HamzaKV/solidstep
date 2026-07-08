@@ -113,6 +113,34 @@ describe('rateLimit middleware', () => {
         expect(await mw.onRequest?.(event)).toBeUndefined();
     });
 
+    it('pins the current (spoofable) trust of the client-supplied X-Forwarded-For first hop', async () => {
+        // Without a stripping/overwriting reverse proxy in front, a client
+        // talking to the app directly can set this header to anything --
+        // trivially resetting its own bucket by claiming a new IP each
+        // request. This test documents that as known, intentional behavior
+        // (see docs/security.md), not a regression to silently "fix" later.
+        const mw = rateLimit({ windowMs: 60_000, max: 1 });
+        const requestFrom = (ip: string) =>
+            mw.onRequest?.(
+                fakeEvent({
+                    node: {
+                        req: {
+                            headers: { 'x-forwarded-for': ip },
+                            socket: { remoteAddress: '10.0.0.1' },
+                        },
+                    },
+                }),
+            );
+
+        expect(await requestFrom('1.1.1.1')).toBeUndefined();
+        const limited = await requestFrom('1.1.1.1');
+        expect((limited as Response).status).toBe(429);
+
+        // Same real client, a freely-chosen spoofed header -- bypasses the
+        // limit entirely.
+        expect(await requestFrom('2.2.2.2')).toBeUndefined();
+    });
+
     it('falls back to the socket address, then to "unknown"', async () => {
         const mw = rateLimit({ windowMs: 1000, max: 100 });
         await mw.onRequest?.(
