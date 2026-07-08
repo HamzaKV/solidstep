@@ -102,6 +102,22 @@ describe('handleServerFunction input guards', () => {
         expect(hookNames()).toContain('onResponseEnd');
     });
 
+    it.each([
+        '__proto__',
+        'constructor',
+        'toString',
+        'hasOwnProperty',
+    ])('returns the normal 404 (not a leaked 500) for functionId=%s', async (functionId) => {
+        const req = new Request(
+            `https://example.com/_server?id=${functionId}&name=fn`,
+        );
+        const res = (await handleServerFunction(
+            makeEvent(req) as any,
+        )) as Response;
+        expect(res).toBeInstanceOf(Response);
+        expect(res.status).toBe(404);
+    });
+
     it('returns 400 for a malformed args query parameter instead of throwing', async () => {
         chunks.chunk1 = { import: async () => ({ fn: vi.fn() }) };
         const req = new Request(

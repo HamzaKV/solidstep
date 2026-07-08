@@ -184,9 +184,15 @@ export async function handleServerFunction(event: HTTPEvent) {
     }
 
     try {
-        const chunkEntry = getManifest(import.meta.env.ROUTER_NAME!).chunks[
-            functionId
-        ];
+        const chunks = getManifest(import.meta.env.ROUTER_NAME!).chunks;
+        // A plain object index: functionId values like "__proto__" or
+        // "constructor" would otherwise resolve to Object.prototype members
+        // (truthy), bypassing the 404 guard below and falling into the
+        // generic catch, which -- unlike this file's other dispatch-level
+        // 404/400 paths -- has no dev-only gate on the leaked error message.
+        const chunkEntry = Object.hasOwn(chunks, functionId)
+            ? chunks[functionId]
+            : undefined;
         if (!chunkEntry) {
             throw new ServerFunctionNotFoundError(
                 `Unknown server function chunk: ${functionId}`,
