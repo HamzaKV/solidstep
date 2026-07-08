@@ -184,16 +184,20 @@ export async function handleServerFunction(event: HTTPEvent) {
     }
 
     try {
-        const chunks = getManifest(import.meta.env.ROUTER_NAME!).chunks;
-        // A plain object index: functionId values like "__proto__" or
-        // "constructor" would otherwise resolve to Object.prototype members
-        // (truthy), bypassing the 404 guard below and falling into the
-        // generic catch, which -- unlike this file's other dispatch-level
-        // 404/400 paths -- has no dev-only gate on the leaked error message.
-        const chunkEntry = Object.hasOwn(chunks, functionId)
-            ? chunks[functionId]
-            : undefined;
-        if (!chunkEntry) {
+        // The real manifest's `chunks` is a lazily-resolving object, not a
+        // plain `{}` (`Object.keys`/`Object.hasOwn` don't see its entries —
+        // only indexing does), so guarding the *lookup* isn't viable here.
+        // Instead validate the *shape* of what comes back: a real chunk
+        // always has a callable `.import`, while functionId values like
+        // "__proto__"/"constructor"/"toString" resolve (via normal property
+        // lookup) to Object.prototype members, none of which do — bypassing
+        // the 404 guard below and falling into the generic catch, which
+        // (unlike this file's other dispatch-level 404/400 paths) has no
+        // dev-only gate on the leaked error message.
+        const chunkEntry = getManifest(import.meta.env.ROUTER_NAME!).chunks[
+            functionId
+        ];
+        if (!chunkEntry || typeof chunkEntry.import !== 'function') {
             throw new ServerFunctionNotFoundError(
                 `Unknown server function chunk: ${functionId}`,
             );
