@@ -56,14 +56,19 @@ are the feature set you can build on right now (see the linked guides for detail
 - **Client-side (soft) navigation** — `<Link>` and `useNavigate` navigate without a
   full reload, fetching the route's loader data + metadata in one request and
   re-rendering reactively. Includes prefetch (hover/viewport/eager), scroll
-  restoration, history, automatic `<title>`/metadata updates, and a
-  `navigationPending` signal. Router API: `useNavigate`, `useRouter`, `usePathname`,
+  restoration, history, automatic `<title>`/metadata updates, a `navigationPending`
+  signal, and opt-in View Transitions (`<Link viewTransition>` /
+  `navigate(to, { viewTransition: true })`, skipped automatically under
+  `prefers-reduced-motion`). Router API: `useNavigate`, `useRouter`, `usePathname`,
   `useSearchParams`. See [Routing](./routing.md) and [Utilities](./utilities.md).
 - **Server actions & forms** — server functions with `<Form>`, `useActionState`, and
   `useFormStatus`, progressive-enhancement safe, with seroval serialization so
   `Date` / `Map` / `Set` / `BigInt` round-trip intact. Mutations can revalidate the
-  current route's loader data in place via `revalidatePath`. See
-  [Server Actions & Forms](./server-actions-and-forms.md).
+  current route's loader data in place via `revalidatePath`. Schema-validated input
+  via `parseActionInput` (Standard Schema — Zod, Valibot, ArkType), throwing a
+  `ValidationError` your action's caller narrows via `isValidationError`. See
+  [Server Actions & Forms](./server-actions-and-forms.md) and
+  [Data Validation](./data-validation.md).
 - **Typed routes** — a generated `solidstep-env.d.ts` type-checks `<Link href>` and
   `useNavigate(to)` against your real routes and provides typed
   `PageProps` / `RouteParams`. See [Getting Started](./getting-started.md).
@@ -122,11 +127,6 @@ promises.
 - **Deferred *layout* loaders.** `defer` is page- and group-scoped today; layout
   loaders are always awaited. Supporting deferred layouts would unlock more granular
   streaming.
-- **View Transitions API** integration in the soft-navigation router for animated
-  page transitions.
-- **Schema-validated server actions** — type-safe action input validation layered on
-  the existing `<Form>` / `useActionState` (targeting the Standard Schema spec so
-  Zod / Valibot / ArkType all work).
 - **On-demand revalidation endpoint** — a secured HTTP endpoint so a CMS webhook
   can trigger `revalidatePath` / `invalidateTag` without a deploy.
 - **Draft / preview mode** — a signed cookie that bypasses ISR/SSG/PPR caching

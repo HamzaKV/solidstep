@@ -34,6 +34,10 @@
             "types": "./utils/router-context.d.ts",
             "default": "./utils/router-context.js"
         },
+        "./utils/action-schema": {
+            "types": "./utils/action-schema.d.ts",
+            "default": "./utils/action-schema.js"
+        },
         "./utils/cache": {
             "types": "./utils/cache.d.ts",
             "default": "./utils/cache.js"
@@ -155,6 +159,7 @@
         "framework"
     ],
     "dependencies": {
+        "@standard-schema/spec": "^1.1.0",
         "@vinxi/server-functions": "0.5.1",
         "pino": "^10.3.1",
         "seroval": "^1.5.4",
@@ -173,7 +178,8 @@
         "solid-js": "^1.9.14",
         "typescript": "^6.0.3",
         "vinxi": "0.5.8",
-        "vitest": "^4.1.10"
+        "vitest": "^4.1.10",
+        "zod": "^4.4.3"
     },
     "peerDependencies": {
         "solid-js": "^1.9.14",

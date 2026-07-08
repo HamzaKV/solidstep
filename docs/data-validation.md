@@ -11,12 +11,13 @@ validator works. This guide shows the recommended pattern using the
 ## A tiny Standard Schema helper
 
 Standard Schema exposes a uniform `~standard.validate` method on every compatible
-schema. A small helper turns a failed validation into a thrown error (which a
-loader surfaces through `error.tsx`, or an action returns to the form):
+schema. `solidstep/utils/action-schema` ships a small helper that turns a failed
+validation into a thrown `ValidationError` (which a loader surfaces through
+`error.tsx`, or an action's caller narrows via `useActionState().error()`):
 
 ```ts
-// app/_lib/validate.ts
 import type { StandardSchemaV1 } from '@standard-schema/spec';
+import { ValidationError } from 'solidstep/utils/action-schema';
 
 export async function validate<T extends StandardSchemaV1>(
   schema: T,
@@ -28,14 +29,12 @@ export async function validate<T extends StandardSchemaV1>(
   }
   return result.value;
 }
-
-export class ValidationError extends Error {
-  constructor(public readonly issues: readonly StandardSchemaV1.Issue[]) {
-    super(issues.map((i) => i.message).join(', '));
-    this.name = 'ValidationError';
-  }
-}
 ```
+
+For `FormData` specifically (the common case for server actions), use
+`parseActionInput` — it does the coercion above for you (see
+[Validating form data in a server action](#validating-form-data-in-a-server-action)
+below).
 
 ## Validating search / path params in a loader
 
@@ -66,30 +65,52 @@ export const loader = defineLoader(async (request) => {
 
 ## Validating form data in a server action
 
-Validate `FormData` inside the action and return field errors to the form via
-[`useActionState`](./server-actions-and-forms.md) — no exception needed, so the
-user sees inline messages:
+`parseActionInput(schema, formData)` coerces the `FormData` (repeated keys become
+arrays, `File` values stay `File`) and validates it, throwing `ValidationError`
+on failure. Call it **inside your own `'use server'` action** — validation must
+run there to be enforced; it can't be baked into a wrapping helper, because the
+`'use server'` build transform extracts only the exact function it's attached
+to, discarding any enclosing call. `useActionState().error()` then narrows to it
+via `isValidationError`:
 
 ```ts
+'use server';
 import { z } from 'zod';
+import { parseActionInput } from 'solidstep/utils/action-schema';
 
 const SignUp = z.object({
   email: z.string().email(),
   password: z.string().min(8),
 });
 
-async function signUp(formData: FormData) {
-  'use server';
-  const parsed = await SignUp['~standard'].validate(
-    Object.fromEntries(formData),
-  );
-  if (parsed.issues) {
-    return { ok: false as const, errors: parsed.issues };
-  }
-  await createUser(parsed.value);
+export async function signUp(_prev: { ok?: true }, formData: FormData) {
+  const input = await parseActionInput(SignUp, formData); // throws ValidationError
+  await createUser(input);
   return { ok: true as const };
 }
 ```
+
+```tsx
+import { useActionState } from 'solidstep/hooks/action-state';
+import { isValidationError } from 'solidstep/utils/action-schema';
+import { signUp } from './actions';
+
+const [state, formAction, pending, error] = useActionState(signUp, {});
+
+// error() is `Error | null`; narrow it to read `.issues`:
+<Show when={error() && isValidationError(error())}>
+  <For each={(error() as ReturnType<typeof error> & { issues: { message: string }[] }).issues}>
+    {(issue) => <li>{issue.message}</li>}
+  </For>
+</Show>
+```
+
+`ValidationError` crosses the server-action wire via seroval, which doesn't
+preserve custom `Error` subclasses — it reconstructs a plain `Error` with the
+original's own-enumerable properties (`name`, `issues`) reassigned. So on the
+client it's `.name === 'ValidationError'` but **not** `instanceof ValidationError`;
+`isValidationError` checks `.name` for exactly this reason — always use it
+instead of `instanceof` when narrowing on the client.
 
 ## Notes
 
@@ -99,9 +120,7 @@ async function signUp(formData: FormData) {
   coercion (`z.coerce.number()`, Valibot's `transform`, etc.).
 - A thrown `ValidationError` in a **page** loader renders `error.tsx`; in a
   **layout/group** loader it yields the error sentinel (siblings still render).
-  Returning errors from an action keeps the user on the page with inline feedback.
-- Schema-validated actions as a first-class framework feature are
-  [on the roadmap](./roadmap.md); this pattern works today.
+  In an action, it's caught by `useActionState` and surfaced via `error()`.
 
 ## Related
 
