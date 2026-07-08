@@ -27,7 +27,9 @@ const RootLayout: Component<{ children: () => JSX.Element }> = (props) => {
             </Show>
             <nav data-testid='nav'>
                 <Link href='/'>Home</Link>
-                <Link href='/about'>About</Link>
+                <Link href='/about' viewTransition>
+                    About
+                </Link>
                 <Link href='/counter'>Counter</Link>
                 <Link href='/dashboard'>Dashboard</Link>
                 <Link href='/cache-tags'>Cache Tags</Link>

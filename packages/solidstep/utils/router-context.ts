@@ -292,7 +292,15 @@ const applyMeta = (meta: Record<string, any> | undefined) => {
 // Navigation
 // ---------------------------------------------------------------------------
 
-export type NavigateOptions = { replace?: boolean; scroll?: boolean };
+export type NavigateOptions = {
+    replace?: boolean;
+    scroll?: boolean;
+    /**
+     * Wrap the navigation commit in `document.startViewTransition()`. Ignored
+     * when the API is unsupported or `prefers-reduced-motion: reduce` is set.
+     */
+    viewTransition?: boolean;
+};
 
 const isModifiedHardNav = (url: URL): boolean => url.origin !== location.origin;
 
@@ -302,6 +310,31 @@ const isModifiedHardNav = (url: URL): boolean => url.origin !== location.origin;
 // immediately. `navigationPending` covers the envelope-fetch window; per-hole
 // loading is handled by <Suspense> once the shell is committed.
 const commit = (state: RouteState) => batch(() => setRouteFull(state));
+
+const prefersReducedMotion = (): boolean =>
+    typeof matchMedia === 'function' &&
+    matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/**
+ * Run `fn` inside `document.startViewTransition()` when requested and
+ * supported; otherwise run it directly. `fn` must be synchronous (it performs
+ * the DOM-mutating commit) so the transition can capture the before/after
+ * snapshot correctly.
+ */
+const withViewTransition = (
+    viewTransition: boolean | undefined,
+    fn: () => void,
+): void => {
+    if (
+        viewTransition &&
+        typeof document.startViewTransition === 'function' &&
+        !prefersReducedMotion()
+    ) {
+        document.startViewTransition(() => fn());
+        return;
+    }
+    fn();
+};
 
 const stateFromEnvelope = (
     envelope: Extract<RouteEnvelope, { type: 'page' | 'error' }>,
@@ -375,19 +408,25 @@ export const navigate = async (
             if (match) await preloadHandler(match.handler);
         }
 
+        // Record the view-transition preference on this entry's own history
+        // state so a later back/forward landing back on it (`onPopState`) can
+        // replay the same transition it arrived with.
+        const historyState = { viewTransition: !!opts.viewTransition };
         if (opts.replace) {
-            history.replaceState(history.state, '', target);
+            history.replaceState(historyState, '', target);
         } else {
-            history.pushState(null, '', target);
+            history.pushState(historyState, '', target);
         }
 
-        if (envelope.type === 'not-found') {
-            commit(notFoundState(url));
-        } else {
-            const meta = 'meta' in envelope ? envelope.meta : undefined;
-            commit(stateFromEnvelope(envelope, url));
-            applyMeta(meta);
-        }
+        withViewTransition(opts.viewTransition, () => {
+            if (envelope.type === 'not-found') {
+                commit(notFoundState(url));
+            } else {
+                const meta = 'meta' in envelope ? envelope.meta : undefined;
+                commit(stateFromEnvelope(envelope, url));
+                applyMeta(meta);
+            }
+        });
 
         if (opts.scroll !== false) {
             if (url.hash) {
@@ -418,14 +457,21 @@ const onPopState = async () => {
             location.reload();
             return;
         }
+        const viewTransition = (
+            history.state as { viewTransition?: boolean } | null
+        )?.viewTransition;
         if (envelope.type === 'page' || envelope.type === 'error') {
             const match = matchClientRoute(url.pathname);
             if (match) await preloadHandler(match.handler);
             const meta = 'meta' in envelope ? envelope.meta : undefined;
-            commit(stateFromEnvelope(envelope, url));
-            applyMeta(meta);
+            withViewTransition(viewTransition, () => {
+                commit(stateFromEnvelope(envelope, url));
+                applyMeta(meta);
+            });
         } else {
-            commit(notFoundState(url));
+            withViewTransition(viewTransition, () =>
+                commit(notFoundState(url)),
+            );
         }
         // Restore the saved scroll position for this history entry.
         const saved = scrollPositions.get(target);

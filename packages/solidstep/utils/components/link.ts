@@ -30,6 +30,11 @@ export type LinkProps = Omit<
     prefetch?: boolean | 'hover' | 'viewport';
     /** Scroll to top after navigating (default `true`; ignored for hash links). */
     scroll?: boolean;
+    /**
+     * Wrap the navigation commit in `document.startViewTransition()`. Ignored
+     * when the API is unsupported or `prefers-reduced-motion: reduce` is set.
+     */
+    viewTransition?: boolean;
 };
 
 /** Whether a click should be handled by the router rather than the browser. */
@@ -70,6 +75,7 @@ export const Link = (props: LinkProps): JSX.Element => {
         'replace',
         'prefetch',
         'scroll',
+        'viewTransition',
         'onClick',
         'ref',
         'children',
@@ -108,6 +114,7 @@ export const Link = (props: LinkProps): JSX.Element => {
         void navigate(local.href, {
             replace: local.replace,
             scroll: local.scroll,
+            viewTransition: local.viewTransition,
         });
     };
 
