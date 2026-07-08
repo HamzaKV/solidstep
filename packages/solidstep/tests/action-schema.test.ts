@@ -106,6 +106,28 @@ describe('parseActionInput', () => {
         expect(result.upload.name).toBe('test.txt');
     });
 
+    it('does not let a __proto__-named field hijack the coerced object and inject other fields', async () => {
+        // A plain `{}` inherits Object.prototype's `__proto__` setter, so
+        // `result['__proto__'] = someFile` (a File IS an object, unlike a
+        // string value) replaces the coerced object's own prototype with the
+        // File instance instead of storing it as a normal own property.
+        // Every other property lookup (`input.name`, `input.type`, ...) then
+        // silently falls through to the attacker-chosen File's own
+        // properties -- e.g. a schema requiring `name` would incorrectly
+        // validate using the File's filename, even though `name` was never
+        // actually submitted as a field.
+        const schema = z.object({ name: z.string() });
+        const formData = new FormData();
+        const evilFile = new File(['x'], 'attacker-supplied-name', {
+            type: 'text/plain',
+        });
+        formData.set('__proto__', evilFile);
+
+        await expect(parseActionInput(schema, formData)).rejects.toThrow(
+            ValidationError,
+        );
+    });
+
     it('awaits an async Standard Schema validator', async () => {
         const formData = new FormData();
         formData.set('name', 'ADA');

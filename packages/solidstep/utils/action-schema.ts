@@ -31,9 +31,18 @@ export const isValidationError = (
 /**
  * Coerce a `FormData` into a plain object: a single value per key stays a
  * scalar, repeated keys become an array. `File` values are kept as `File`.
+ *
+ * Built with `Object.create(null)`, not `{}` — a plain object literal
+ * inherits `Object.prototype`'s `__proto__` accessor, so a form field
+ * literally named `__proto__` (trivial for an attacker to submit directly,
+ * bypassing any client-side form) would replace `result`'s own prototype
+ * with the submitted value instead of storing it as a normal property
+ * whenever that value is an object (e.g. a `File`) — silently exposing the
+ * File's own properties (`name`, `type`, `size`, ...) through every other
+ * field lookup on `result`.
  */
 const formDataToObject = (formData: FormData): Record<string, unknown> => {
-    const result: Record<string, unknown> = {};
+    const result: Record<string, unknown> = Object.create(null);
     for (const key of new Set(formData.keys())) {
         const values = formData.getAll(key);
         result[key] = values.length > 1 ? values : values[0];
