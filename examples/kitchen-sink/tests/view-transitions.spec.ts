@@ -148,4 +148,48 @@ test.describe('view transitions', () => {
             ),
         ).toBe(2);
     });
+
+    // The real API rejects `updateCallbackDone`/`finished` if the transition
+    // callback throws -- nobody awaited those promises, so that rejection was
+    // unhandled. Simulate it directly via a stub that rejects immediately.
+    test("a view-transition callback's exception does not surface as an unhandled promise rejection", async ({
+        page,
+    }) => {
+        await page.addInitScript(() => {
+            (window as Window & { __unhandled?: string | null }).__unhandled =
+                null;
+            window.addEventListener('unhandledrejection', (e) => {
+                (
+                    window as Window & { __unhandled?: string | null }
+                ).__unhandled = String(e.reason);
+            });
+            (
+                document as Document & { startViewTransition?: unknown }
+            ).startViewTransition = (callback: () => void | Promise<void>) => {
+                callback();
+                const updateCallbackDone = Promise.reject(
+                    new Error('transition callback boom'),
+                );
+                return {
+                    ready: Promise.resolve(),
+                    finished: Promise.resolve(),
+                    updateCallbackDone,
+                    skipTransition: () => undefined,
+                };
+            };
+        });
+
+        await page.goto('/');
+        await page.getByRole('link', { name: 'About' }).click();
+        await expect(page.getByTestId('heading')).toHaveText('About');
+        await page.waitForTimeout(100);
+
+        expect(
+            await page.evaluate(
+                () =>
+                    (window as Window & { __unhandled?: string | null })
+                        .__unhandled,
+            ),
+        ).toBeNull();
+    });
 });

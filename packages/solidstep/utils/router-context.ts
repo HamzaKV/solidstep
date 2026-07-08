@@ -330,7 +330,16 @@ const withViewTransition = (
         typeof document.startViewTransition === 'function' &&
         !prefersReducedMotion()
     ) {
-        document.startViewTransition(() => fn());
+        const transition = document.startViewTransition(() => fn());
+        // The commit already happened synchronously above; this only stops an
+        // exception thrown inside it (which the browser reports by rejecting
+        // this promise) from surfacing as an unhandled rejection.
+        transition.updateCallbackDone.catch((error: unknown) => {
+            console.error(
+                '[solidstep] view transition callback failed:',
+                error,
+            );
+        });
         return;
     }
     fn();
