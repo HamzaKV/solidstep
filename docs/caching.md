@@ -115,6 +115,12 @@ curl -X POST https://your-app.example.com/__solidstep_revalidate \
 - `{ "path": "/some/route" }` — invalidates that path's page-render cache and,
   if it's an `isr` route, its ISR artifact. It does **not** reach the
   loader-data cache (keyed by manifest path, not URL) — use `{ tag }` for that.
+  This is intentional key design, not a bug: the ISR artifact key is the bare
+  pathname (ISR doesn't vary by query string), while the page-render cache
+  key includes the search string. So `{ "path": "/blog/my-post" }` clears
+  both, but `{ "path": "/blog/my-post?ref=twitter" }` only reaches the
+  page-render cache's entry for that exact query — pass the bare path to also
+  clear the route's ISR artifact.
 - `{ "tag": "some-tag" }` — calls `invalidateTag`, dropping every page/loader
   cache entry written with that tag (same as calling it from a server action).
 - Missing/wrong token → `401` (constant-time compared, so it can't be
@@ -126,17 +132,18 @@ curl -X POST https://your-app.example.com/__solidstep_revalidate \
 Set `SOLIDSTEP_PREVIEW_SECRET` to let editors preview unpublished content
 without waiting for ISR/page-cache to expire. `enablePreview()` sets an
 HMAC-signed cookie (via `node:crypto`, no dependency); while it's present and
-valid, the current visitor's requests **skip reads** (never writes) of:
+valid, the current visitor's requests read from and write to a cache
+namespace **isolated** from the published one, for:
 
 - the ISR short-circuit (`server/render-page.ts`) — pages render fresh instead
   of serving the cached artifact,
 - the page-render cache,
 - the loader-data cache.
 
-Because only *reads* are skipped, a preview visit still writes a fresh cache
-entry — a subsequent non-preview visitor gets that fresh render rather than a
-stale one, except for the ISR case, where a preview render bypasses `serveIsr`
-entirely and so never touches the ISR artifact at all.
+Isolation runs both directions: a preview visitor never sees a published
+visitor's cached render (or vice versa), and a preview render never warms the
+published cache — so a loader branching on `isPreviewActive()` to fetch draft
+content can't leak that draft to a subsequent non-preview visitor.
 
 ```ts
 // app/api/preview/enable/route.ts
