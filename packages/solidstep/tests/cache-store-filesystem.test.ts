@@ -100,6 +100,19 @@ describe('FilesystemCacheStore', () => {
         expect(await store.get('k2')).toBeNull();
     });
 
+    it('tolerates a tag missing from the index when deleting an entry that references it (desync recovery)', async () => {
+        await store.set('k', 1, { tags: ['t'] });
+        // Simulate the tags index having lost this tag's entry (e.g. a prior
+        // partial write) by removing it directly, out of band.
+        const index = JSON.parse(
+            readFileSync(join(dir, '__tags.json'), 'utf-8'),
+        );
+        delete index.t;
+        writeFileSync(join(dir, '__tags.json'), JSON.stringify(index), 'utf-8');
+
+        await expect(store.delete('k')).resolves.toBeUndefined();
+    });
+
     it('is a no-op when invalidating an unknown tag', async () => {
         await expect(store.invalidateTag('none')).resolves.toBeUndefined();
     });

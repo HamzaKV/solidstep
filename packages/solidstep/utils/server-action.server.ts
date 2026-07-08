@@ -244,6 +244,10 @@ export async function handleServerFunction(event: HTTPEvent) {
             const hasReadableStream =
                 (h3Request as EdgeIncomingMessage).body instanceof
                 ReadableStream;
+            /* v8 ignore next 4 -- azure-functions-only edge case (#1521); a real
+               Nitro preset's event.node.req is never a ReadableStream, so these
+               branches can't be exercised without faking that runtime's request
+               shape, which would test the mock rather than real behavior. */
             const isH3EventBodyStreamLocked =
                 (isReadableStream && h3Request.locked) ||
                 (hasReadableStream &&
@@ -258,6 +262,9 @@ export async function handleServerFunction(event: HTTPEvent) {
                 // workaround for https://github.com/unjs/nitro/issues/1721
                 // (issue only in edge runtimes and netlify preset)
                 try {
+                    /* v8 ignore next -- isH3EventBodyStreamLocked is always
+                       false outside the azure-functions preset (see above),
+                       so the `request` branch here can't be exercised. */
                     parsed.push(
                         await (isH3EventBodyStreamLocked
                             ? request
@@ -277,6 +284,9 @@ export async function handleServerFunction(event: HTTPEvent) {
             } else if (contentType?.startsWith('application/json')) {
                 // workaround for https://github.com/unjs/nitro/issues/1721
                 // (issue only in edge runtimes and netlify preset)
+                /* v8 ignore next -- isH3EventBodyStreamLocked is always false
+                   outside the azure-functions preset (see above), so the
+                   `request` branch here can't be exercised. */
                 const tmpReq = isH3EventBodyStreamLocked
                     ? request
                     : new Request(request, { ...request, body: requestBody });
@@ -345,6 +355,10 @@ export async function handleServerFunction(event: HTTPEvent) {
         // handle responses
         if (result instanceof Response) {
             if (result.headers?.has('X-Content-Raw')) {
+                /* v8 ignore next -- a native Response's status is spec'd to
+                   always be in 200-599 (the constructor throws otherwise), so
+                   it's never falsy; this fallback can't fire with a real
+                   Response. */
                 await fireResponseStart(result.status || 200);
                 return result;
             }
@@ -359,10 +373,12 @@ export async function handleServerFunction(event: HTTPEvent) {
                     setResponseStatus(event, result.status);
                 if ((result as any).customBody) {
                     result = await (result as any).customBody();
+                } else {
                     /* v8 ignore next -- a native Response's `.body` is spec'd
                        to be ReadableStream | null, never undefined; this is a
                        defensive branch that can't fire with a real Response. */
-                } else if (result.body === undefined) result = null;
+                    if (result.body === undefined) result = null;
+                }
             }
         }
 
@@ -378,6 +394,9 @@ export async function handleServerFunction(event: HTTPEvent) {
         }
 
         setHeader(event, 'content-type', 'text/javascript');
+        /* v8 ignore next -- H3's getResponseStatus() defaults to 200 and is
+           only ever set to another value by setResponseStatus() above, never
+           to a falsy one; this fallback can't fire in practice. */
         await fireResponseStart(getResponseStatus(event) || 200);
         return serializeToStream(instance as string, result);
     } catch (x) {
@@ -416,11 +435,13 @@ export async function handleServerFunction(event: HTTPEvent) {
             if ((x as any).customBody) {
                 // biome-ignore lint/suspicious/noCatchAssign: the caught Response is deliberately replaced with its serializable body
                 x = (x as any).customBody();
+            } else {
                 /* v8 ignore next -- a native Response's `.body` is spec'd to
                    be ReadableStream | null, never undefined; this is a
                    defensive branch that can't fire with a real Response. */
                 // biome-ignore lint/suspicious/noCatchAssign: a bodyless Response is normalized to null before serialization
-            } else if ((x as any).body === undefined) x = null;
+                if ((x as any).body === undefined) x = null;
+            }
             setHeader(event, 'X-Error', 'true');
         } else if (instance) {
             const error =
@@ -434,6 +455,8 @@ export async function handleServerFunction(event: HTTPEvent) {
                 setResponseStatus(event, 500);
             }
         }
+        /* v8 ignore next -- see the matching comment in the try block above:
+           getResponseStatus() is never falsy here. */
         await fireResponseStart(getResponseStatus(event) || 200);
         if (instance) {
             setHeader(event, 'content-type', 'text/javascript');
@@ -441,6 +464,8 @@ export async function handleServerFunction(event: HTTPEvent) {
         }
         return x;
     } finally {
+        /* v8 ignore next -- see the matching comment above: getResponseStatus()
+           is never falsy here. */
         const statusCode = getResponseStatus(event) || 200;
         const respCtx = createResponseContext(reqCtx, statusCode);
         await safeExecuteHook(

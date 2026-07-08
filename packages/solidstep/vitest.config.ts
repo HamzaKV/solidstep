@@ -64,32 +64,35 @@ export default defineConfig({
                 // its behavior.
                 'server/render.ts',
             ],
-            // Global thresholds sit just below 100% to make room for a
-            // small, fully-itemized set of branches that are genuinely
-            // unreachable from a unit test in this environment (each is
-            // documented in-source at its exact location) — vitest's
-            // per-glob threshold overrides don't help here: the global
-            // aggregate always includes every file regardless of any
+            // Global thresholds sit just below 100% to make room for
+            // branches that are genuinely unreachable from a unit test in
+            // this environment — each has its own `/* v8 ignore */` (or
+            // equivalent) comment in-source at its exact location explaining
+            // why, so this list is a summary/pointer, not the source of
+            // truth; if it and the source ever disagree, trust the source.
+            // Vitest's per-glob threshold overrides don't help here: the
+            // global aggregate always includes every file regardless of any
             // glob-specific entry, so a file can't be "exempted" from it.
-            // Functions are still held to 100%. Remaining gaps, all
-            // covered by the kitchen-sink e2e suite instead:
+            // Functions are still held to 100%. Remaining gaps, all covered
+            // by the kitchen-sink e2e suite instead:
             //   - server.ts: a Windows/Nitro-bundle path fallback, a
             //     defensive empty-method guard, and the production-only 500
             //     fallback (import.meta.env.DEV is statically true here).
             //   - server/render-page.ts: the ISR short-circuit (same DEV
-            //     gate), one dead branch impossible under path-router's
-            //     actual matchRoute contract, and the same DEV-gated
-            //     production rethrow.
+            //     gate), a dead branch impossible under path-router's actual
+            //     matchRoute contract, and the same DEV-gated production
+            //     rethrow.
             //   - server/route-manifest.ts: getCachedModule's production
             //     (non-DEV) module-cache branch.
             //   - server/data-endpoints.ts: the production (non-DEV)
             //     correlation-id logger.error branch for a soft-nav page
             //     loader failure.
-            //   - utils/server-action.server.ts: two defensive
-            //     `.body === undefined` checks (a native Response's `.body`
-            //     is spec'd to be ReadableStream | null, never undefined)
-            //     and the `getResponseStatus() || 200` fallback's truthy
-            //     side.
+            //   - utils/server-action.server.ts: the azure-functions-only
+            //     ReadableStream request-body workaround (#1521/#1721, not
+            //     exercisable under any other Nitro preset), a defensive
+            //     `.body === undefined` check and an equally-defensive
+            //     `status || 200` / `getResponseStatus() || 200` fallback (a
+            //     native Response's status is spec'd to always be truthy).
             thresholds: {
                 lines: 97,
                 functions: 100,

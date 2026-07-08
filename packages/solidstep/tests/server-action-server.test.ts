@@ -397,6 +397,37 @@ describe('handleServerFunction Response-result forwarding', () => {
         expect(setResponseStatus).toHaveBeenCalledWith(expect.anything(), 201);
     });
 
+    it('forwards a >=400 status too (the other half of the non-redirect range check)', async () => {
+        // The 201 case above satisfies `status < 300` alone; this exercises
+        // the `status >= 400` side of the OR for a status that is neither.
+        const result = new Response(null, { status: 500 });
+        chunks.chunk1 = { import: async () => ({ fn: async () => result }) };
+        const req = new Request(
+            'https://example.com/_server?id=chunk1&name=fn',
+            { headers: { 'X-Server-Instance': 'inst-1' } },
+        );
+
+        await handleServerFunction(makeEvent(req) as any);
+
+        expect(setResponseStatus).toHaveBeenCalledWith(expect.anything(), 500);
+    });
+
+    it('does not forward a redirect-range status (300-399)', async () => {
+        const result = new Response(null, { status: 302 });
+        chunks.chunk1 = { import: async () => ({ fn: async () => result }) };
+        const req = new Request(
+            'https://example.com/_server?id=chunk1&name=fn',
+            { headers: { 'X-Server-Instance': 'inst-1' } },
+        );
+
+        await handleServerFunction(makeEvent(req) as any);
+
+        expect(setResponseStatus).not.toHaveBeenCalledWith(
+            expect.anything(),
+            302,
+        );
+    });
+
     it('serializes a thrown Response (customBody) as the error envelope', async () => {
         const thrown = new Response(null, { status: 403 });
         (thrown as any).customBody = async () => 'forbidden';
@@ -545,6 +576,22 @@ describe('handleServerFunction NODE_ENV=development messages', () => {
                 makeEvent(req) as any,
             )) as Response;
             expect(await res.text()).toBe('Malformed args query parameter');
+        });
+    });
+
+    it('includes the real message in the cross-origin-blocked 403 response', async () => {
+        await withDevEnv(async () => {
+            const req = new Request(
+                'https://example.com/_server?id=chunk1&name=fn',
+                { headers: { origin: 'https://evil.example.com' } },
+            );
+            const res = (await handleServerFunction(
+                makeEvent(req) as any,
+            )) as Response;
+            expect(res.status).toBe(403);
+            expect(await res.text()).toBe(
+                'Cross-origin server function request blocked',
+            );
         });
     });
 });
