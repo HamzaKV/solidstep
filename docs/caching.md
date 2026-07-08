@@ -112,10 +112,11 @@ curl -X POST https://your-app.example.com/__solidstep_revalidate \
   -d '{"path": "/blog/my-post"}'
 ```
 
-- `{ "path": "/some/route" }` — invalidates that path's page-render cache and,
-  if it's an `isr` route, its ISR artifact. It does **not** reach the
-  loader-data cache (keyed by manifest path, not URL) — use `{ tag }` for that.
-  This is intentional key design, not a bug: the ISR artifact key is the bare
+- `{ "path": "/some/route" }` — invalidates that path's page-render cache
+  (published **and** preview namespaces) and, if it's an `isr` route, its ISR
+  artifact. It does **not** reach the loader-data cache (keyed by manifest
+  path, not URL) — use `{ tag }` for that. The ISR-vs-page-cache split is
+  intentional key design, not a bug: the ISR artifact key is the bare
   pathname (ISR doesn't vary by query string), while the page-render cache
   key includes the search string. So `{ "path": "/blog/my-post" }` clears
   both, but `{ "path": "/blog/my-post?ref=twitter" }` only reaches the

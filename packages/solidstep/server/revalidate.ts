@@ -60,11 +60,15 @@ export const handleRevalidate = async (
         result.tag = payload.tag as string;
     }
     if (hasPath) {
-        // Two namespaces: the plain page-render cache (bare `path+search`)
-        // and the ISR artifact cache (`isr:` prefixed) — see `page-cache.ts`
-        // and `server/isr.ts`. The loader-data cache is keyed by manifest
-        // path, not URL path, so it's unreachable here; use `{ tag }` for it.
+        // Three namespaces: the plain page-render cache (bare `path+search`),
+        // its preview-mode counterpart (`preview:` prefixed — one shared
+        // draft namespace across every preview session, see
+        // `render.ts`/`isPreviewActive`), and the ISR artifact cache (`isr:`
+        // prefixed) — see `page-cache.ts` and `server/isr.ts`. The
+        // loader-data cache is keyed by manifest path, not URL path, so it's
+        // unreachable here; use `{ tag }` for it.
         await invalidateCache(payload.path as string);
+        await invalidateCache(`preview:${payload.path}`);
         await invalidateCache(`isr:${payload.path}`);
         result.path = payload.path as string;
     }

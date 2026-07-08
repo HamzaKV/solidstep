@@ -90,6 +90,26 @@ describe('handleRevalidate', () => {
         expect(invalidateCache).toHaveBeenCalledWith('isr:/products');
     });
 
+    it('with a valid token and { path }, also invalidates the preview-namespaced page-cache entry', async () => {
+        // Preview mode's page-render cache write uses a `preview:`-prefixed
+        // key (see render.ts/isPreviewActive), sharing the same one draft
+        // namespace across every preview session -- without this, an
+        // editor's draft stays stale in preview after a { path } revalidate
+        // call, defeating preview mode's whole "see your edit immediately"
+        // purpose.
+        const { handleRevalidate } = await import('../server/revalidate');
+        const { invalidateCache } = await import('../utils/cache.js');
+        const req = new Request('http://localhost/__solidstep_revalidate', {
+            method: 'POST',
+            headers: { authorization: 'Bearer the-real-token' },
+            body: JSON.stringify({ path: '/products' }),
+        });
+
+        await handleRevalidate(req);
+
+        expect(invalidateCache).toHaveBeenCalledWith('preview:/products');
+    });
+
     it('with a valid token and { tag }, calls invalidateTag', async () => {
         const { handleRevalidate } = await import('../server/revalidate');
         const { invalidateTag } = await import('../utils/cache.js');
