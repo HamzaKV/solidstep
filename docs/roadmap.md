@@ -75,7 +75,9 @@ are the feature set you can build on right now (see the linked guides for detail
 - **Pluggable caching** — a swappable `CacheStore` (in-memory LRU default,
   filesystem, or external such as Redis) powering both the page-render and loader
   caches, with wall-clock TTL, stale-while-revalidate, cache tags, single-flight
-  coalescing, `revalidatePath`, and `invalidateTag`. See [Caching](./caching.md).
+  coalescing, `revalidatePath`, and `invalidateTag`. An optional on-demand
+  revalidation HTTP endpoint (`SOLIDSTEP_REVALIDATE_TOKEN`) lets a CMS webhook
+  invalidate a path or tag without a redeploy. See [Caching](./caching.md).
 - **Metadata & metadata files** — `generateMeta` / `meta()` for SEO metadata, plus
   dynamic `robots.ts`, `sitemap.ts`, `manifest.ts`, and `llms.ts` convention files.
   See [Metadata](./metadata.md) and [Metadata Files](./metadata-files.md).
@@ -127,8 +129,6 @@ promises.
 - **Deferred *layout* loaders.** `defer` is page- and group-scoped today; layout
   loaders are always awaited. Supporting deferred layouts would unlock more granular
   streaming.
-- **On-demand revalidation endpoint** — a secured HTTP endpoint so a CMS webhook
-  can trigger `revalidatePath` / `invalidateTag` without a deploy.
 - **Draft / preview mode** — a signed cookie that bypasses ISR/SSG/PPR caching
   for a session, for headless-CMS editing workflows.
 - **Parent loader data access** — read an ancestor layout's loader data from a

@@ -23,6 +23,9 @@ const setResponseStatus = vi.hoisted(() => vi.fn());
 const collectPrerenderTargets = vi.hoisted(() =>
     vi.fn(async () => [] as unknown[]),
 );
+const handleRevalidate = vi.hoisted(() =>
+    vi.fn(async () => ({ status: 200, body: '{}' })),
+);
 
 vi.mock('vinxi/http', () => ({
     eventHandler: (fn: any) => fn,
@@ -70,6 +73,9 @@ vi.mock('../server/data-endpoints', () => ({
     serveHoleData: (...a: unknown[]) => serveHoleData(...a),
     serveRouteData: (...a: unknown[]) => serveRouteData(...a),
 }));
+vi.mock('../server/revalidate', () => ({
+    handleRevalidate: (...a: unknown[]) => handleRevalidate(...a),
+}));
 vi.mock('../server/isr', () => ({
     seedIsrFromManifest: async () => undefined,
 }));
@@ -81,6 +87,9 @@ import handler from '../server';
 import { RedirectError } from '../utils/redirect';
 
 const makeEvent = (url: string) => ({ req: new Request(url) });
+const makePostEvent = (url: string, init?: RequestInit) => ({
+    req: new Request(url, { method: 'POST', ...init }),
+});
 
 beforeEach(() => {
     handleServerFunction.mockReset();
@@ -94,7 +103,9 @@ beforeEach(() => {
     setHeader.mockClear();
     setResponseStatus.mockClear();
     collectPrerenderTargets.mockClear();
+    handleRevalidate.mockReset().mockResolvedValue({ status: 200, body: '{}' });
     delete process.env.SOLIDSTEP_PRERENDER;
+    delete process.env.SOLIDSTEP_REVALIDATE_TOKEN;
 });
 
 const hookNames = () => safeExecuteHook.mock.calls.map((c) => c[0]);
@@ -306,5 +317,60 @@ describe('build-time prerender discovery endpoint', () => {
         await handler(makeEvent('https://example.com/__solidstep_prerender'));
 
         expect(collectPrerenderTargets).not.toHaveBeenCalled();
+    });
+});
+
+describe('on-demand revalidation endpoint', () => {
+    it('is not reachable when SOLIDSTEP_REVALIDATE_TOKEN is unset', async () => {
+        matchRoute.mockReturnValue(undefined);
+        renderPage.mockResolvedValue(new Response('ok'));
+
+        await handler(
+            makePostEvent('https://example.com/__solidstep_revalidate'),
+        );
+
+        expect(handleRevalidate).not.toHaveBeenCalled();
+    });
+
+    it('delegates to handleRevalidate and relays its status/body when configured', async () => {
+        process.env.SOLIDSTEP_REVALIDATE_TOKEN = 'the-token';
+        handleRevalidate.mockResolvedValue({
+            status: 200,
+            body: '{"revalidated":true}',
+        });
+
+        const res = await handler(
+            makePostEvent('https://example.com/__solidstep_revalidate', {
+                headers: { authorization: 'Bearer the-token' },
+                body: JSON.stringify({ path: '/foo' }),
+            }),
+        );
+
+        expect(handleRevalidate).toHaveBeenCalled();
+        expect(res).toBe('{"revalidated":true}');
+        expect(setResponseStatus).toHaveBeenCalledWith(200);
+        expect(setHeader).toHaveBeenCalledWith(
+            'Content-Type',
+            'application/json',
+        );
+    });
+
+    it('relays a non-200 status from handleRevalidate as plain text', async () => {
+        process.env.SOLIDSTEP_REVALIDATE_TOKEN = 'the-token';
+        handleRevalidate.mockResolvedValue({
+            status: 401,
+            body: 'Unauthorized',
+        });
+
+        const res = await handler(
+            makePostEvent('https://example.com/__solidstep_revalidate'),
+        );
+
+        expect(res).toBe('Unauthorized');
+        expect(setResponseStatus).toHaveBeenCalledWith(401);
+        expect(setHeader).toHaveBeenCalledWith(
+            'Content-Type',
+            'text/plain; charset=utf-8',
+        );
     });
 });

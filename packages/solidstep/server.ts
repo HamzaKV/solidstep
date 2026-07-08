@@ -38,6 +38,7 @@ import {
     getCachedModule,
 } from './server/route-manifest.js';
 import { serveHoleData, serveRouteData } from './server/data-endpoints.js';
+import { handleRevalidate } from './server/revalidate.js';
 import { seedIsrFromManifest } from './server/isr.js';
 import type { RouteApiModule, RouteMethodHandler } from './server/types.js';
 import { renderPage } from './server/render-page.js';
@@ -47,6 +48,7 @@ import {
     LOADER_ENDPOINT,
     ROUTE_ENDPOINT,
     SERVER_FN_BASE,
+    REVALIDATE_ENDPOINT,
 } from './server/constants.js';
 
 /**
@@ -244,6 +246,24 @@ const handler = eventHandler(async (event) => {
         ) {
             setHeader('Content-Type', 'application/json');
             return JSON.stringify(await collectPrerenderTargets());
+        }
+
+        // On-demand cache revalidation: only reachable when configured (an
+        // unset token means the `if` never fires — falls through to a normal
+        // 404), matching PRERENDER_ENDPOINT's convention above.
+        if (
+            process.env.SOLIDSTEP_REVALIDATE_TOKEN &&
+            new URL(req.url).pathname === REVALIDATE_ENDPOINT
+        ) {
+            const { status, body } = await handleRevalidate(req);
+            setResponseStatus(status);
+            setHeader(
+                'Content-Type',
+                status === 200
+                    ? 'application/json'
+                    : 'text/plain; charset=utf-8',
+            );
+            return body;
         }
 
         const routeManifest = await ensureRouteManifest();

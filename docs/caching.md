@@ -98,6 +98,29 @@ const action = async () => {
 > `getCacheResult(key)`, which returns `{ hit, value }` — `hit` is `true` even
 > when the cached `value` is `null`.
 
+## On-demand revalidation endpoint
+
+Set `SOLIDSTEP_REVALIDATE_TOKEN` to expose an HTTP endpoint a CMS webhook or
+deploy hook can call to invalidate the cache without a redeploy — the endpoint
+is **only reachable when the env var is set**; otherwise it 404s like any
+other unmatched route (no separate flag needed).
+
+```bash
+curl -X POST https://your-app.example.com/__solidstep_revalidate \
+  -H "Authorization: Bearer $SOLIDSTEP_REVALIDATE_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"path": "/blog/my-post"}'
+```
+
+- `{ "path": "/some/route" }` — invalidates that path's page-render cache and,
+  if it's an `isr` route, its ISR artifact. It does **not** reach the
+  loader-data cache (keyed by manifest path, not URL) — use `{ tag }` for that.
+- `{ "tag": "some-tag" }` — calls `invalidateTag`, dropping every page/loader
+  cache entry written with that tag (same as calling it from a server action).
+- Missing/wrong token → `401` (constant-time compared, so it can't be
+  timing-attacked). Any method other than `POST` → `405`. A body with neither
+  `path` nor `tag` → `400`.
+
 ## Pluggable cache stores
 
 The page-render and [loader-data](./data-loading.md#caching-loader-data) caches share a

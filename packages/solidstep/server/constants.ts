@@ -16,3 +16,7 @@ export const ROUTE_ENDPOINT = '/__solidstep_route';
 // nested under another route — match it precisely, not as a substring, so an
 // ordinary page path (e.g. `/page_server`) is never misrouted as an action.
 export const SERVER_FN_BASE = '/_server';
+// Internal, env-gated endpoint (`SOLIDSTEP_REVALIDATE_TOKEN`) a CMS webhook or
+// deploy hook POSTs to, to invalidate a page's cache (`{ path }`) or every
+// entry tagged with a cache tag (`{ tag }`) without a redeploy.
+export const REVALIDATE_ENDPOINT = '/__solidstep_revalidate';

@@ -19,7 +19,10 @@ export default defineConfig({
     // which builds the framework and the app). This just starts it.
     webServer: {
         command: 'node .output/server/index.mjs',
-        env: { PORT: String(PORT) },
+        env: {
+            PORT: String(PORT),
+            SOLIDSTEP_REVALIDATE_TOKEN: 'e2e-test-revalidate-token',
+        },
         url: BASE_URL,
         timeout: 120_000,
         reuseExistingServer: !process.env.CI,
