@@ -19,10 +19,11 @@ const safeExecuteHook = vi.fn(async () => undefined);
 const invalidateCache = vi.fn();
 const responseHeaders = new Map<string, string>();
 const setResponseStatus = vi.fn();
+const setHeader = vi.fn();
 
 vi.mock('vinxi/http', () => ({
     eventHandler: (fn: any) => fn,
-    setHeader: vi.fn(),
+    setHeader: (...a: unknown[]) => setHeader(...a),
     setResponseStatus: (...a: unknown[]) => setResponseStatus(...a),
     appendResponseHeader: vi.fn(),
     toWebRequest: (event: any) => event.req,
@@ -70,6 +71,7 @@ beforeEach(() => {
     safeExecuteHook.mockClear();
     invalidateCache.mockClear();
     setResponseStatus.mockClear();
+    setHeader.mockClear();
     responseHeaders.clear();
 });
 
@@ -232,6 +234,41 @@ describe('handleServerFunction no-JS form fallback', () => {
 
         expect(res).toBe('');
         expect(setResponseStatus).toHaveBeenCalledWith(expect.anything(), 303);
+    });
+
+    it('falls back to "/" for a cross-origin Referer instead of redirecting off-site', async () => {
+        chunks.chunk1 = { import: async () => ({ fn: async () => 'ok' }) };
+        const req = new Request(
+            'https://example.com/_server?id=chunk1&name=fn',
+            { headers: { Referer: 'https://evil.example.com/phish' } },
+        );
+
+        const res = await handleServerFunction(makeEvent(req) as any);
+
+        expect(res).toBe('');
+        expect(setResponseStatus).toHaveBeenCalledWith(expect.anything(), 303);
+        expect(setHeader).toHaveBeenCalledWith(
+            expect.anything(),
+            'Location',
+            '/',
+        );
+    });
+
+    it('falls back to "/" for a malformed Referer', async () => {
+        chunks.chunk1 = { import: async () => ({ fn: async () => 'ok' }) };
+        const req = new Request(
+            'https://example.com/_server?id=chunk1&name=fn',
+            { headers: { Referer: 'not a url' } },
+        );
+
+        const res = await handleServerFunction(makeEvent(req) as any);
+
+        expect(res).toBe('');
+        expect(setHeader).toHaveBeenCalledWith(
+            expect.anything(),
+            'Location',
+            '/',
+        );
     });
 
     it('returns the raw thrown value when the action fails with no JS client', async () => {

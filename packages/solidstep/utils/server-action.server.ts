@@ -306,9 +306,28 @@ export async function handleServerFunction(event: HTTPEvent) {
         // When there's no X-Server-Instance header, this is a plain form POST.
         // Execute the action and redirect back to the referring page.
         if (!instance) {
-            const referer = request.headers.get('Referer') || '/';
+            // The Referer is always an absolute URL (unlike `?next=`-style
+            // user-supplied redirect targets, which are usually relative) --
+            // validate it's same-origin as this request rather than reusing
+            // `isSafeRedirectTarget`'s relative-path-oriented allowlist, and
+            // fall back to `/` for a cross-origin or malformed value so a
+            // non-browser caller can't turn a real action into an open
+            // redirect to an arbitrary URL.
+            const referer = request.headers.get('Referer');
+            let location = '/';
+            if (referer) {
+                try {
+                    if (
+                        new URL(referer).origin === new URL(request.url).origin
+                    ) {
+                        location = referer;
+                    }
+                } catch {
+                    // malformed Referer -- keep the '/' fallback
+                }
+            }
             setResponseStatus(event, 303);
-            setHeader(event, 'Location', referer);
+            setHeader(event, 'Location', location);
             await fireResponseStart(303);
             return '';
         }
