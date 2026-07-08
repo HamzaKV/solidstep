@@ -27,6 +27,30 @@ const asyncUppercaseSchema: StandardSchemaV1<
     },
 };
 
+/** A non-compliant Standard Schema whose validate() returns neither
+ * `{issues}` nor `{value}` -- simulates a buggy/misbehaving schema. */
+const nonCompliantSchema: StandardSchemaV1<Record<string, unknown>, unknown> = {
+    '~standard': {
+        version: 1,
+        vendor: 'test',
+        // biome-ignore lint/suspicious/noExplicitAny: deliberately non-compliant return shape for the test.
+        validate: () => ({}) as any,
+    },
+};
+
+/** A schema whose validate() throws synchronously (non-async, non-Promise)
+ * instead of returning `{issues}` -- simulates a misbehaving schema that
+ * doesn't follow the Standard Schema contract at all. */
+const throwingSchema: StandardSchemaV1<Record<string, unknown>, unknown> = {
+    '~standard': {
+        version: 1,
+        vendor: 'test',
+        validate: () => {
+            throw new Error('schema blew up');
+        },
+    },
+};
+
 describe('parseActionInput', () => {
     it('returns the schema-validated value for valid FormData', async () => {
         const schema = z.object({ name: z.string(), age: z.coerce.number() });
@@ -89,6 +113,35 @@ describe('parseActionInput', () => {
         const result = await parseActionInput(asyncUppercaseSchema, formData);
 
         expect(result).toEqual({ name: 'ADA' });
+    });
+
+    it('throws when a non-compliant schema returns neither issues nor value, instead of silently succeeding with undefined', async () => {
+        const formData = new FormData();
+        formData.set('name', 'anything');
+
+        await expect(
+            parseActionInput(nonCompliantSchema, formData),
+        ).rejects.toThrow();
+    });
+
+    it("propagates a synchronously-throwing schema's raw error, not masquerading as ValidationError", async () => {
+        // Pins current (already-correct) behavior: a schema that doesn't
+        // follow the Standard Schema contract at all (throws instead of
+        // returning {issues}) fails loudly with its own error, rather than
+        // being swallowed or silently reported as a ValidationError -- so a
+        // future refactor can't accidentally start masking this class of bug.
+        const formData = new FormData();
+        formData.set('name', 'anything');
+
+        let caught: unknown;
+        try {
+            await parseActionInput(throwingSchema, formData);
+        } catch (e) {
+            caught = e;
+        }
+        expect(caught).toBeInstanceOf(Error);
+        expect((caught as Error).message).toBe('schema blew up');
+        expect(isValidationError(caught)).toBe(false);
     });
 
     it('throws ValidationError when an async validator rejects the input', async () => {

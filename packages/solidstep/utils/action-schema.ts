@@ -60,5 +60,10 @@ export const parseActionInput = async <Schema extends StandardSchemaV1>(
     if (result.issues) {
         throw new ValidationError(result.issues);
     }
+    if (!('value' in result)) {
+        throw new Error(
+            "Schema validation returned neither 'issues' nor 'value' -- this schema does not implement the Standard Schema V1 contract correctly.",
+        );
+    }
     return result.value;
 };
