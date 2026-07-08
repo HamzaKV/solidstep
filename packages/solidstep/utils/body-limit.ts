@@ -7,20 +7,37 @@
 import type { Middleware } from './middleware.js';
 import type { H3Event } from 'vinxi/http';
 
-/** Parse a `Content-Length` header value into a non-negative integer, or null. */
+/**
+ * Parse a `Content-Length` header value.
+ *
+ * - `null` — the header is genuinely absent (e.g. a chunked-transfer
+ *   request), which isn't a red flag on its own.
+ * - `NaN` — the header is *present* but doesn't parse cleanly (garbage, a
+ *   negative number, or a comma-joined duplicate value like
+ *   `"10, 999999999"` — a classic request-smuggling technique). Distinct
+ *   from `null` so callers can fail closed on it instead of treating it the
+ *   same as "unknown."
+ * - otherwise the parsed non-negative integer.
+ */
 export const parseContentLength = (
     header: string | null | undefined,
 ): number | null => {
     if (!header) return null;
     const n = Number(header);
-    return Number.isFinite(n) && n >= 0 ? n : null;
+    return Number.isFinite(n) && n >= 0 ? n : Number.NaN;
 };
 
-/** Whether a known content length exceeds `maxBytes` (unknown length → false). */
+/**
+ * Whether a body should be rejected: over `maxBytes`, or the length is
+ * present but malformed/ambiguous (fail closed). A genuinely unknown length
+ * (`null` — header absent) is not itself rejected.
+ */
 export const isOverBodyLimit = (
     contentLength: number | null,
     maxBytes: number,
-): boolean => contentLength !== null && contentLength > maxBytes;
+): boolean =>
+    contentLength !== null &&
+    (Number.isNaN(contentLength) || contentLength > maxBytes);
 
 /**
  * A {@link Middleware} that rejects with `413 Payload Too Large` when the
