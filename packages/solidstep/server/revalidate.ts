@@ -1,5 +1,11 @@
 import { invalidateCache, invalidateTag } from '../utils/cache.js';
 import { timingSafeEqualString } from '../utils/crypto.js';
+import { isOverBodyLimit, parseContentLength } from '../utils/body-limit.js';
+
+/** This endpoint is dispatched before the app's own middleware pipeline (see
+ * `server.ts`), so a configured `bodyLimit()` never protects it -- guard it
+ * inline instead. The body is just `{ path }`/`{ tag }`, so this can be tiny. */
+const MAX_REVALIDATE_BODY_BYTES = 10_000;
 
 /**
  * Handle a request to `REVALIDATE_ENDPOINT`. The caller is expected to have
@@ -17,11 +23,17 @@ export const handleRevalidate = async (
 
     const token = process.env.SOLIDSTEP_REVALIDATE_TOKEN ?? '';
     const authHeader = req.headers.get('authorization') ?? '';
-    const provided = authHeader.startsWith('Bearer ')
+    // RFC 7235: the auth scheme name is case-insensitive.
+    const provided = /^bearer /i.test(authHeader)
         ? authHeader.slice('Bearer '.length)
         : '';
     if (!provided || !timingSafeEqualString(provided, token)) {
         return { status: 401, body: 'Unauthorized' };
+    }
+
+    const contentLength = parseContentLength(req.headers.get('content-length'));
+    if (isOverBodyLimit(contentLength, MAX_REVALIDATE_BODY_BYTES)) {
+        return { status: 413, body: 'Payload Too Large' };
     }
 
     let payload: { path?: unknown; tag?: unknown };
@@ -31,25 +43,30 @@ export const handleRevalidate = async (
         return { status: 400, body: 'Bad Request' };
     }
 
-    if (typeof payload.tag === 'string') {
-        await invalidateTag(payload.tag);
+    const hasTag = typeof payload.tag === 'string';
+    const hasPath = typeof payload.path === 'string';
+    if (!hasTag && !hasPath) {
         return {
-            status: 200,
-            body: JSON.stringify({ revalidated: true, tag: payload.tag }),
+            status: 400,
+            body: 'Bad Request: expected { path } or { tag }',
         };
     }
-    if (typeof payload.path === 'string') {
+
+    const result: { revalidated: true; path?: string; tag?: string } = {
+        revalidated: true,
+    };
+    if (hasTag) {
+        await invalidateTag(payload.tag as string);
+        result.tag = payload.tag as string;
+    }
+    if (hasPath) {
         // Two namespaces: the plain page-render cache (bare `path+search`)
         // and the ISR artifact cache (`isr:` prefixed) — see `page-cache.ts`
         // and `server/isr.ts`. The loader-data cache is keyed by manifest
         // path, not URL path, so it's unreachable here; use `{ tag }` for it.
-        await invalidateCache(payload.path);
+        await invalidateCache(payload.path as string);
         await invalidateCache(`isr:${payload.path}`);
-        return {
-            status: 200,
-            body: JSON.stringify({ revalidated: true, path: payload.path }),
-        };
+        result.path = payload.path as string;
     }
-
-    return { status: 400, body: 'Bad Request: expected { path } or { tag }' };
+    return { status: 200, body: JSON.stringify(result) };
 };
