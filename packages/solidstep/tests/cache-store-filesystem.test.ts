@@ -104,6 +104,38 @@ describe('FilesystemCacheStore', () => {
         await expect(store.invalidateTag('none')).resolves.toBeUndefined();
     });
 
+    it('contract: every key is hashed to a filename inside the store dir, closing path traversal', async () => {
+        // Every key -- including one crafted to escape `dir` via `../`, one
+        // with an embedded null byte, and a very long one -- is SHA-256-hashed
+        // before use as a filename, so none of these can write outside `dir`
+        // or produce a human-readable/collidable filename. This pins that
+        // design as a contract so a future "human-readable cache filenames"
+        // refactor can't silently reintroduce traversal.
+        const adversarialKeys = [
+            '../../../etc/passwd',
+            '..\\..\\windows\\system32\\config',
+            `null\0byte`,
+            'a'.repeat(10_000),
+        ];
+        for (const key of adversarialKeys) {
+            await store.set(key, `value for ${key}`);
+        }
+
+        const files = readdirSync(dir).filter((f) => f.endsWith('.cache'));
+        expect(files).toHaveLength(adversarialKeys.length);
+        for (const file of files) {
+            // Filename is exactly `${64-char hex sha256}.cache` -- nothing
+            // derived verbatim from the key, and no path separators.
+            expect(file).toMatch(/^[0-9a-f]{64}\.cache$/);
+        }
+
+        for (const key of adversarialKeys) {
+            expect((await store.get<string>(key))?.value).toBe(
+                `value for ${key}`,
+            );
+        }
+    });
+
     it('clears the directory and can be reused afterwards', async () => {
         await store.set('a', 1);
         await store.clear();
