@@ -1,5 +1,5 @@
 import { hydrate, createComponent } from 'solid-js/web';
-import { Suspense, ErrorBoundary, untrack } from 'solid-js';
+import { Suspense, ErrorBoundary, createUniqueId, untrack } from 'solid-js';
 import { deserialize } from 'seroval';
 import 'vinxi/client';
 import { createDeferredResource } from './utils/deferred.js';
@@ -101,6 +101,16 @@ const buildSlots = (handler: ClientPageHandler, st: RouteStructure) => {
                             searchParams: st.searchParams,
                         }),
                     get children() {
+                        // `ErrorBoundary` reads its own hydration-restore data
+                        // via a *non-incrementing* id peek (getContextId()).
+                        // Without something between it and the nested
+                        // Suspense/resource to consume an id first, the
+                        // resource's own (incrementing) id lands on that same
+                        // unconsumed slot, so the boundary picks up the raw
+                        // resource hydration entry as its "error" instead of
+                        // its own (usually absent) one. `createUniqueId()`
+                        // burns one id here to keep the two apart.
+                        createUniqueId();
                         return inner();
                     },
                 });
@@ -148,21 +158,43 @@ const renderLeaf = (handler: ClientPageHandler, st: RouteStructure) => {
         const Loading = handler.loadingPage
             ? comp(handler.loadingPage.page)
             : null;
-        return createComponent(Suspense, {
-            fallback: Loading
-                ? createComponent(Loading, {
-                      routeParams: st.params,
-                      searchParams: st.searchParams,
-                  })
-                : undefined,
-            get children() {
-                return Page({
-                    routeParams: st.params,
-                    searchParams: st.searchParams,
-                    loaderData: resource,
-                });
-            },
-        });
+        const PageError = handler.errorPage
+            ? comp(handler.errorPage.page)
+            : null;
+        const inner = () =>
+            createComponent(Suspense, {
+                fallback: Loading
+                    ? createComponent(Loading, {
+                          routeParams: st.params,
+                          searchParams: st.searchParams,
+                      })
+                    : undefined,
+                get children() {
+                    return Page({
+                        routeParams: st.params,
+                        searchParams: st.searchParams,
+                        loaderData: resource,
+                    });
+                },
+            });
+        if (PageError) {
+            return createComponent(ErrorBoundary, {
+                fallback: (err: any) =>
+                    createComponent(PageError, {
+                        error: err,
+                        routeParams: st.params,
+                        searchParams: st.searchParams,
+                    }),
+                get children() {
+                    // See buildSlots' matching comment: burn one id here so
+                    // the boundary's own hydration-restore peek doesn't
+                    // collide with the nested resource's id.
+                    createUniqueId();
+                    return inner();
+                },
+            });
+        }
+        return inner();
     }
     return Page({
         routeParams: st.params,

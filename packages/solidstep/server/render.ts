@@ -1,6 +1,6 @@
 import { getManifest } from 'vinxi/manifest';
 import { renderToString, createComponent } from 'solid-js/web';
-import { Suspense, ErrorBoundary } from 'solid-js';
+import { Suspense, ErrorBoundary, createUniqueId } from 'solid-js';
 import { createDeferredResource } from '../utils/deferred.js';
 import type { Meta } from '../utils/meta.js';
 import { getCache, setCacheWithOptions } from '../utils/cache.js';
@@ -374,6 +374,22 @@ export async function render(args: RenderArgs): Promise<RenderResult> {
                                                 searchParams,
                                             }),
                                         get children() {
+                                            // `ErrorBoundary` reads its own
+                                            // hydration-restore data via a
+                                            // *non-incrementing* id peek. With
+                                            // nothing between it and the
+                                            // nested Suspense/resource to
+                                            // consume an id first, the
+                                            // resource's own (incrementing) id
+                                            // lands on that same unconsumed
+                                            // slot, so the client's boundary
+                                            // picks up the raw resource
+                                            // hydration entry as its "error"
+                                            // instead of its own (usually
+                                            // absent) one. Mirror the client's
+                                            // `createUniqueId()` burn here so
+                                            // both sides assign the same ids.
+                                            createUniqueId();
                                             return inner();
                                         },
                                     });
@@ -453,19 +469,53 @@ export async function render(args: RenderArgs): Promise<RenderResult> {
                     );
                     LoadingFallback = lf;
                 }
+                let PageError: ComponentFn | null = null;
+                if (entry.errorPage) {
+                    const errorSrc = `${entry.errorPage.page.src}&pick=$css`;
+                    const errorAssets =
+                        await clientManifest.inputs[errorSrc].assets();
+                    assets.push(...errorAssets);
+                    const { default: ef } = await getCachedModule<PageModule>(
+                        entry.errorPage.page,
+                    );
+                    PageError = ef;
+                }
                 return () => {
                     const resource = createDeferredResource(deferredPromise);
-                    return createComponent(Suspense, {
-                        fallback: LoadingFallback
-                            ? createComponent(LoadingFallback, {
-                                  routeParams,
-                                  searchParams,
-                              })
-                            : undefined,
-                        get children() {
-                            return page({ ...props, loaderData: resource });
-                        },
-                    });
+                    const inner = () =>
+                        createComponent(Suspense, {
+                            fallback: LoadingFallback
+                                ? createComponent(LoadingFallback, {
+                                      routeParams,
+                                      searchParams,
+                                  })
+                                : undefined,
+                            get children() {
+                                return page({
+                                    ...props,
+                                    loaderData: resource,
+                                });
+                            },
+                        });
+                    if (PageError) {
+                        return createComponent(ErrorBoundary, {
+                            fallback: (err: unknown) =>
+                                createComponent(PageError, {
+                                    error: err,
+                                    routeParams,
+                                    searchParams,
+                                }),
+                            get children() {
+                                // See the matching group-level comment above:
+                                // burn one id here so the boundary's own
+                                // hydration-restore peek doesn't collide with
+                                // the nested resource's id.
+                                createUniqueId();
+                                return inner();
+                            },
+                        });
+                    }
+                    return inner();
                 };
             }
             return () => page(props);

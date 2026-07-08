@@ -16,6 +16,19 @@ test.describe('per-group loading & error boundaries', () => {
         );
     });
 
+    test('a deferred group whose loader rejects renders its error.tsx with the thrown message', async ({
+        page,
+    }) => {
+        // The loader rejects after the shell has already streamed past this
+        // group's boundary — the client must self-heal via the resource's own
+        // (reactive) error state, not solid's throw-catch (which is gated by
+        // an internal `firstFlushed` flag for post-flush rejections).
+        await page.goto('/groups');
+        await expect(page.getByTestId('group-boomdeferred-error')).toHaveText(
+            'group error: boom-deferred-group-failed',
+        );
+    });
+
     test('soft-navigating to a deferred group streams its loading.tsx then content', async ({
         page,
     }) => {

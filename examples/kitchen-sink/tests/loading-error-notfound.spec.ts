@@ -30,6 +30,18 @@ test.describe('loading, error, and not-found boundaries', () => {
         );
     });
 
+    test('a deferred page loader that rejects renders error.tsx with the thrown message', async ({
+        page,
+    }) => {
+        // The loader rejects ~100ms after the shell streams, past the point
+        // solid's ErrorBoundary/Suspense throw-catch can propagate it — the
+        // page must self-heal via the resource's own (reactive) error state.
+        await page.goto('/deferred-fail');
+        await expect(page.getByTestId('deferred-fail-error')).toHaveText(
+            'page error: deferred-page-failed',
+        );
+    });
+
     test('unknown route returns 404 and renders the custom not-found page', async ({
         page,
         request,
