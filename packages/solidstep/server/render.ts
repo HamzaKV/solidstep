@@ -26,6 +26,25 @@ import type {
     RenderResult,
 } from './types.js';
 
+/**
+ * Wrap `inner` in an `ErrorBoundary` using `fallback`, burning one
+ * `createUniqueId()` id first. `ErrorBoundary` reads its own hydration-restore
+ * data via a *non-incrementing* id peek; with nothing between it and the
+ * nested Suspense/resource to consume an id first, the resource's own
+ * (incrementing) id would land on that same unconsumed slot, so the client's
+ * boundary would pick up the raw resource hydration entry as its "error"
+ * instead of its own (usually absent) one. `client.ts`'s `idSafeErrorBoundary`
+ * mirrors this exactly so both sides assign the same ids.
+ */
+const idSafeErrorBoundary = (fallback: (err: any) => any, inner: () => any) =>
+    createComponent(ErrorBoundary, {
+        fallback,
+        get children() {
+            createUniqueId();
+            return inner();
+        },
+    });
+
 /** Arguments for {@link render}. */
 type RenderArgs = {
     toRender: 'main' | 'loading' | 'error' | 'not-found';
@@ -369,33 +388,15 @@ export async function render(args: RenderArgs): Promise<RenderResult> {
                                     });
                                 };
                                 if (GroupError) {
-                                    return createComponent(ErrorBoundary, {
-                                        fallback: (err: unknown) =>
+                                    return idSafeErrorBoundary(
+                                        (err: unknown) =>
                                             createComponent(GroupError, {
                                                 error: err,
                                                 routeParams,
                                                 searchParams,
                                             }),
-                                        get children() {
-                                            // `ErrorBoundary` reads its own
-                                            // hydration-restore data via a
-                                            // *non-incrementing* id peek. With
-                                            // nothing between it and the
-                                            // nested Suspense/resource to
-                                            // consume an id first, the
-                                            // resource's own (incrementing) id
-                                            // lands on that same unconsumed
-                                            // slot, so the client's boundary
-                                            // picks up the raw resource
-                                            // hydration entry as its "error"
-                                            // instead of its own (usually
-                                            // absent) one. Mirror the client's
-                                            // `createUniqueId()` burn here so
-                                            // both sides assign the same ids.
-                                            createUniqueId();
-                                            return inner();
-                                        },
-                                    });
+                                        inner,
+                                    );
                                 }
                                 return inner();
                             };
@@ -458,22 +459,15 @@ export async function render(args: RenderArgs): Promise<RenderResult> {
                             },
                         });
                     if (LayoutError) {
-                        return createComponent(ErrorBoundary, {
-                            fallback: (err: unknown) =>
+                        return idSafeErrorBoundary(
+                            (err: unknown) =>
                                 createComponent(LayoutError, {
                                     error: err,
                                     routeParams,
                                     searchParams,
                                 }),
-                            get children() {
-                                // See the matching comments elsewhere in this
-                                // file: burn one id here so the boundary's own
-                                // hydration-restore peek doesn't collide with
-                                // the nested resource's id.
-                                createUniqueId();
-                                return inner();
-                            },
-                        });
+                            inner,
+                        );
                     }
                     return inner();
                 };
@@ -576,22 +570,15 @@ export async function render(args: RenderArgs): Promise<RenderResult> {
                             },
                         });
                     if (PageError) {
-                        return createComponent(ErrorBoundary, {
-                            fallback: (err: unknown) =>
+                        return idSafeErrorBoundary(
+                            (err: unknown) =>
                                 createComponent(PageError, {
                                     error: err,
                                     routeParams,
                                     searchParams,
                                 }),
-                            get children() {
-                                // See the matching group-level comment above:
-                                // burn one id here so the boundary's own
-                                // hydration-restore peek doesn't collide with
-                                // the nested resource's id.
-                                createUniqueId();
-                                return inner();
-                            },
-                        });
+                            inner,
+                        );
                     }
                     return inner();
                 };

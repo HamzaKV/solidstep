@@ -40,6 +40,25 @@ const fetchHole = (manifest: string): Promise<any> =>
 const comp = (imp: { src: string }) => getModule(imp.src)?.default;
 
 /**
+ * Wrap `inner` in an `ErrorBoundary` using `fallback`, burning one
+ * `createUniqueId()` id first. `ErrorBoundary` reads its own hydration-restore
+ * data via a *non-incrementing* id peek (`getContextId()`); without something
+ * between it and the nested Suspense/resource to consume an id first, the
+ * resource's own (incrementing) id lands on that same unconsumed slot, so the
+ * boundary picks up the raw resource hydration entry as its "error" instead
+ * of its own (usually absent) one. `server/render.ts`'s `idSafeErrorBoundary`
+ * mirrors this exactly so both sides assign the same ids.
+ */
+const idSafeErrorBoundary = (fallback: (err: any) => any, inner: () => any) =>
+    createComponent(ErrorBoundary, {
+        fallback,
+        get children() {
+            createUniqueId();
+            return inner();
+        },
+    });
+
+/**
  * Resolve the loader-data accessor a deferred node should receive.
  * - first load, streamed (`!ppr`): `undefined` → the Solid resource reads the
  *   streamed value from `_$HY` at the matching tree position.
@@ -94,27 +113,15 @@ const buildSlots = (handler: ClientPageHandler, st: RouteStructure) => {
                 });
             };
             if (GroupError) {
-                return createComponent(ErrorBoundary, {
-                    fallback: (err: any) =>
+                return idSafeErrorBoundary(
+                    (err: any) =>
                         createComponent(GroupError, {
                             error: err,
                             routeParams: st.params,
                             searchParams: st.searchParams,
                         }),
-                    get children() {
-                        // `ErrorBoundary` reads its own hydration-restore data
-                        // via a *non-incrementing* id peek (getContextId()).
-                        // Without something between it and the nested
-                        // Suspense/resource to consume an id first, the
-                        // resource's own (incrementing) id lands on that same
-                        // unconsumed slot, so the boundary picks up the raw
-                        // resource hydration entry as its "error" instead of
-                        // its own (usually absent) one. `createUniqueId()`
-                        // burns one id here to keep the two apart.
-                        createUniqueId();
-                        return inner();
-                    },
-                });
+                    inner,
+                );
             }
             return inner();
         };
@@ -179,21 +186,15 @@ const renderLeaf = (handler: ClientPageHandler, st: RouteStructure) => {
                 },
             });
         if (PageError) {
-            return createComponent(ErrorBoundary, {
-                fallback: (err: any) =>
+            return idSafeErrorBoundary(
+                (err: any) =>
                     createComponent(PageError, {
                         error: err,
                         routeParams: st.params,
                         searchParams: st.searchParams,
                     }),
-                get children() {
-                    // See buildSlots' matching comment: burn one id here so
-                    // the boundary's own hydration-restore peek doesn't
-                    // collide with the nested resource's id.
-                    createUniqueId();
-                    return inner();
-                },
-            });
+                inner,
+            );
         }
         return inner();
     }
@@ -278,21 +279,15 @@ const renderLayoutNode = (
             },
         });
     if (LayoutError) {
-        return createComponent(ErrorBoundary, {
-            fallback: (err: any) =>
+        return idSafeErrorBoundary(
+            (err: any) =>
                 createComponent(LayoutError, {
                     error: err,
                     routeParams: st.params,
                     searchParams: st.searchParams,
                 }),
-            get children() {
-                // See buildSlots'/renderLeaf's matching comment: burn one id
-                // here so the boundary's own hydration-restore peek doesn't
-                // collide with the nested resource's id.
-                createUniqueId();
-                return inner();
-            },
-        });
+            inner,
+        );
     }
     return inner();
 };
@@ -396,8 +391,8 @@ const renderTree = () => {
             },
         });
     if (RootError) {
-        return createComponent(ErrorBoundary, {
-            fallback: (err: any) =>
+        return idSafeErrorBoundary(
+            (err: any) =>
                 createComponent(RootError, {
                     error: err,
                     get routeParams() {
@@ -407,11 +402,8 @@ const renderTree = () => {
                         return routeStructure().searchParams;
                     },
                 }),
-            get children() {
-                createUniqueId();
-                return inner();
-            },
-        });
+            inner,
+        );
     }
     return inner();
 };
