@@ -88,6 +88,24 @@ describe('custom methods and headers', () => {
     });
 });
 
+describe('trustedOrigins case normalization', () => {
+    // An uppercase character anywhere in a configured trustedOrigins entry
+    // would otherwise silently and permanently fail to match the browser's
+    // (always-lowercase-host) Origin header -- a production misconfiguration
+    // trap, not exploitable, but a real footgun.
+    const mixedCaseCheck = cors(['https://Example.com']);
+
+    it('matches a trusted origin despite mixed-case configuration', () => {
+        const headers = mixedCaseCheck('https://example.com', false) as Record<
+            string,
+            string
+        >;
+        expect(headers['Access-Control-Allow-Origin']).toBe(
+            'https://example.com',
+        );
+    });
+});
+
 describe('credentialed CORS', () => {
     const credCheck = cors(trustedOrigins, undefined, undefined, {
         allowCredentials: true,

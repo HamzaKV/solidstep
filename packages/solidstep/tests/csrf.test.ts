@@ -112,6 +112,33 @@ describe('malformed headers fail closed (no unhandled throw)', () => {
     });
 });
 
+describe('trustedOrigins case normalization', () => {
+    // `URL.host` is always lowercase, so an uppercase character anywhere in a
+    // configured trustedOrigins entry would otherwise silently and
+    // permanently fail to match -- a footgun, not exploitable, but a real
+    // production misconfiguration trap.
+    const mixedCaseCheck = csrf(['Trusted.Example.com']);
+
+    it('matches a trusted origin despite mixed-case configuration', () => {
+        const result = mixedCaseCheck(
+            'POST',
+            httpsUrl,
+            'https://trusted.example.com',
+        );
+        expect(result.success).toBe(true);
+    });
+
+    it('matches a trusted referer despite mixed-case configuration', () => {
+        const result = mixedCaseCheck(
+            'POST',
+            httpsUrl,
+            undefined,
+            'https://trusted.example.com/form',
+        );
+        expect(result.success).toBe(true);
+    });
+});
+
 describe('custom safe methods', () => {
     it('respects a custom safe methods list', () => {
         const strictCheck = csrf([], ['GET']);

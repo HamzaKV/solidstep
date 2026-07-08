@@ -1,5 +1,11 @@
 const SAFE_METHODS = ['GET', 'OPTIONS', 'HEAD', 'TRACE'];
 
+// `URL.host` is always lowercase, so compare case-insensitively -- otherwise
+// an uppercase character anywhere in a configured trustedOrigins entry would
+// silently and permanently fail to match.
+const isTrustedHost = (trustedOrigins: string[], host: string): boolean =>
+    trustedOrigins.some((trusted) => trusted.toLowerCase() === host);
+
 /**
  * Create a CSRF check bound to an allowlist of trusted origins.
  *
@@ -40,7 +46,7 @@ export const csrf =
                 }
                 if (
                     parsedOrigin.origin !== requestUrl.origin &&
-                    !trustedOrigins.includes(parsedOrigin.host)
+                    !isTrustedHost(trustedOrigins, parsedOrigin.host)
                 ) {
                     return {
                         success: false,
@@ -80,7 +86,7 @@ export const csrf =
 
                 if (
                     parsedReferer.host !== requestUrl.host &&
-                    !trustedOrigins.includes(parsedReferer.host)
+                    !isTrustedHost(trustedOrigins, parsedReferer.host)
                 ) {
                     return {
                         success: false,

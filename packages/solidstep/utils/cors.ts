@@ -41,7 +41,14 @@ export const cors =
         options: CorsOptions = {},
     ) =>
     (origin: string, isPreflight: boolean) => {
-        if (trustedOrigins.includes(origin)) {
+        // Compare case-insensitively: an uppercase character anywhere in a
+        // configured trustedOrigins entry would otherwise silently and
+        // permanently fail to match the browser's Origin header.
+        if (
+            trustedOrigins.some(
+                (trusted) => trusted.toLowerCase() === origin.toLowerCase(),
+            )
+        ) {
             const credentialHeaders = options.allowCredentials
                 ? { 'Access-Control-Allow-Credentials': 'true' }
                 : {};
