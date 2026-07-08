@@ -61,21 +61,72 @@ describe('getCachedLoaderData', () => {
         expect(loaderFn.loader).toHaveBeenCalledTimes(2);
     });
 
-    it('skips the cache read (but still writes) when preview mode is active', async () => {
-        const loaderFn = makeLoader({ n: 5 }, {});
-        await getCachedLoaderData(loaderFn, '/p', req());
+    it('isolates preview reads/writes into their own cache namespace, in both directions', async () => {
+        // A loader whose result depends on when it actually ran, so distinct
+        // cache entries are distinguishable by value.
+        let n = 0;
+        const loaderFn = {
+            loader: vi.fn(async () => ({ data: { n: ++n } })),
+            options: { cache: {} },
+        };
+
+        // Warm the published (non-preview) cache.
+        const published = await getCachedLoaderData(loaderFn, '/p', req());
+        expect(published).toEqual({ n: 1 });
         expect(loaderFn.loader).toHaveBeenCalledTimes(1);
 
+        // A preview request must NOT read the published entry -- it gets its
+        // own fresh render, in its own namespace.
         isPreviewActive.mockReturnValue(true);
-        const result = await getCachedLoaderData(loaderFn, '/p', req());
-        expect(result).toEqual({ n: 5 });
-        // Ran again despite a fresh cache entry existing.
+        const preview1 = await getCachedLoaderData(loaderFn, '/p', req());
+        expect(preview1).toEqual({ n: 2 });
         expect(loaderFn.loader).toHaveBeenCalledTimes(2);
 
-        // The write still happened -- a subsequent non-preview call reuses it.
-        isPreviewActive.mockReturnValue(false);
-        await getCachedLoaderData(loaderFn, '/p', req());
+        // A second preview request reuses PREVIEW's own cache entry (not the
+        // published one) -- preview mode still benefits from caching, it's
+        // just isolated, not "never cache."
+        const preview2 = await getCachedLoaderData(loaderFn, '/p', req());
+        expect(preview2).toEqual({ n: 2 });
         expect(loaderFn.loader).toHaveBeenCalledTimes(2);
+
+        // Back to non-preview: still the original published value, untouched
+        // by anything the preview requests wrote.
+        isPreviewActive.mockReturnValue(false);
+        const publishedAgain = await getCachedLoaderData(loaderFn, '/p', req());
+        expect(publishedAgain).toEqual({ n: 1 });
+        expect(loaderFn.loader).toHaveBeenCalledTimes(2);
+    });
+
+    it('never coalesces a preview call and a non-preview call sharing the same key onto one in-flight execution', async () => {
+        let resolvePublished: (v: { data: unknown }) => void;
+        let resolvePreview: (v: { data: unknown }) => void;
+        let callCount = 0;
+        const loader = vi.fn(() => {
+            callCount += 1;
+            return new Promise<{ data: unknown }>((r) => {
+                if (callCount === 1) resolvePublished = r;
+                else resolvePreview = r;
+            });
+        });
+        const loaderFn = { loader, options: { cache: {} } };
+        const sameReq = req('https://example.com/coalesce-preview-test');
+
+        isPreviewActive.mockReturnValue(false);
+        const publishedPromise = getCachedLoaderData(loaderFn, '/p', sameReq);
+        await new Promise((r) => setTimeout(r, 0));
+
+        isPreviewActive.mockReturnValue(true);
+        const previewPromise = getCachedLoaderData(loaderFn, '/p', sameReq);
+        await new Promise((r) => setTimeout(r, 0));
+
+        // Both calls actually ran the loader -- the preview call did not
+        // coalesce onto the published call's in-flight promise.
+        expect(loader).toHaveBeenCalledTimes(2);
+
+        resolvePublished!({ data: { who: 'published' } });
+        resolvePreview!({ data: { who: 'preview' } });
+        expect(await publishedPromise).toEqual({ who: 'published' });
+        expect(await previewPromise).toEqual({ who: 'preview' });
     });
 
     it('shares one cached value across URLs when an explicit key is given', async () => {

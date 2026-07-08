@@ -118,17 +118,12 @@ describe('render', () => {
         expect(renderToString).not.toHaveBeenCalled();
     });
 
-    it('skips the page-cache read (but still writes) when preview mode is active', async () => {
+    it('reads and writes a separate, preview-prefixed cache key when preview mode is active', async () => {
         shouldCachePage.mockReturnValue(true);
         isPreviewActive.mockReturnValue(true);
-        getCache.mockResolvedValue({
-            rendered: 'CACHED',
-            documentMeta: {},
-            documentAssets: [],
-            loaderData: {},
-        });
+        getCache.mockResolvedValue(null);
 
-        const result = await render({
+        await render({
             toRender: 'main',
             entry: baseEntry(),
             routeParams: {},
@@ -137,12 +132,38 @@ describe('render', () => {
             pageOptions: { cache: { ttl: 1000 } },
         });
 
-        // A real (non-cached) render happened despite a cache entry existing.
-        expect(renderToString).toHaveBeenCalledTimes(1);
-        expect('rendered' in result && result.rendered).toBe('<rendered/>');
-        // The write path is untouched by preview mode -- still caches the
-        // fresh render for the next non-preview visitor.
-        expect(setCacheWithOptions).toHaveBeenCalled();
+        // Neither the read nor the write touched the published key -- both
+        // used a distinct preview-namespaced key, so a preview render can
+        // never see (or pollute) what a non-preview visitor gets served.
+        expect(getCache).toHaveBeenCalledWith('preview:page:key');
+        expect(getCache).not.toHaveBeenCalledWith('page:key');
+        expect(setCacheWithOptions).toHaveBeenCalledWith(
+            'preview:page:key',
+            expect.anything(),
+            expect.anything(),
+        );
+    });
+
+    it('uses the plain (unprefixed) cache key when preview mode is not active', async () => {
+        shouldCachePage.mockReturnValue(true);
+        isPreviewActive.mockReturnValue(false);
+        getCache.mockResolvedValue(null);
+
+        await render({
+            toRender: 'main',
+            entry: baseEntry(),
+            routeParams: {},
+            searchParams: {},
+            req: req(),
+            pageOptions: { cache: { ttl: 1000 } },
+        });
+
+        expect(getCache).toHaveBeenCalledWith('page:key');
+        expect(setCacheWithOptions).toHaveBeenCalledWith(
+            'page:key',
+            expect.anything(),
+            expect.anything(),
+        );
     });
 
     it('selects the not-found variant', async () => {

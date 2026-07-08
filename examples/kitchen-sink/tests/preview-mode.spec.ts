@@ -45,4 +45,47 @@ test.describe('preview mode', () => {
 
         expect(tampered).toBe(before);
     });
+
+    // /cached (app/cached/page.tsx) bumps a module-level counter on each real
+    // loader run and caches the result via the LOADER's own `options.cache`
+    // (loader-cache.ts) -- a different code path than /isr's ISR short-circuit
+    // above, exercising the page/loader-cache preview-isolation fix directly.
+    const cachedValue = (html: string) => html.match(/value:(\d+)/)?.[1];
+
+    test('preview reads/writes a namespace isolated from the published loader cache', async ({
+        request,
+    }) => {
+        const published1 = cachedValue(
+            await (await request.get('/cached')).text(),
+        );
+        const published2 = cachedValue(
+            await (await request.get('/cached')).text(),
+        );
+        // Published cache is warm: unchanged across requests.
+        expect(published1).toBe(published2);
+
+        await request.post('/api/preview/enable');
+
+        const preview1 = cachedValue(
+            await (await request.get('/cached')).text(),
+        );
+        // Preview does not read the published cache -- a fresh value.
+        expect(preview1).not.toBe(published1);
+
+        const preview2 = cachedValue(
+            await (await request.get('/cached')).text(),
+        );
+        // A second preview request reuses PREVIEW's own cache entry --
+        // preview still benefits from caching, it's just isolated.
+        expect(preview2).toBe(preview1);
+
+        await request.post('/api/preview/disable');
+
+        // Back to non-preview: still the original published value, untouched
+        // by anything the preview requests wrote.
+        const publishedAgain = cachedValue(
+            await (await request.get('/cached')).text(),
+        );
+        expect(publishedAgain).toBe(published1);
+    });
 });

@@ -79,18 +79,20 @@ export async function render(args: RenderArgs): Promise<RenderResult> {
     // `?q=b` don't collide. See `utils/page-cache`.
     const isPPR = pageOptions?.render === 'ppr';
     const shouldCache = shouldCachePage(pageOptions);
-    const cacheKey = pageCacheKey(url);
-    // Preview mode skips cache *reads* only — the write below still happens,
-    // so a later non-preview visit gets a fresh cache rather than a stale one.
-    const cachedEntry =
-        shouldCache && !isPreviewActive()
-            ? await getCache<{
-                  rendered: string;
-                  documentMeta: Meta;
-                  documentAssets: RenderAsset[];
-                  loaderData: Record<string, unknown>;
-              }>(cacheKey)
-            : null;
+    // Preview mode reads and writes an entirely separate cache namespace, so
+    // a preview render can never see (or pollute) what a non-preview visitor
+    // gets served — see the matching comment in `utils/loader-cache.ts`.
+    const cacheKey = isPreviewActive()
+        ? `preview:${pageCacheKey(url)}`
+        : pageCacheKey(url);
+    const cachedEntry = shouldCache
+        ? await getCache<{
+              rendered: string;
+              documentMeta: Meta;
+              documentAssets: RenderAsset[];
+              loaderData: Record<string, unknown>;
+          }>(cacheKey)
+        : null;
 
     if (cachedEntry && toRender === 'main') {
         return {

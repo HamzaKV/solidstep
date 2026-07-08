@@ -87,7 +87,14 @@ export const getCachedLoaderData = async (
 
     const url = new URL(req.url);
     const keySuffix = cacheOpts.key ?? `${url.pathname}${url.search}`;
-    const key = `loader:${manifestPath}:${keySuffix}`;
+    const baseKey = `loader:${manifestPath}:${keySuffix}`;
+    // Preview mode reads and writes an entirely separate cache namespace (and
+    // therefore a separate singleFlight key below), so a preview render can
+    // never see published data, never coalesce onto a published request's
+    // in-flight execution (or vice versa), and never pollutes the published
+    // cache with draft content. Preview still benefits from caching -- it's
+    // isolated, not disabled.
+    const key = isPreviewActive() ? `preview:${baseKey}` : baseKey;
 
     const run = async () => {
         const result = await invokeLoader(loaderFn, req, invocation);
@@ -100,9 +107,7 @@ export const getCachedLoaderData = async (
         return data;
     };
 
-    // Preview mode skips the read only -- `run()` below still writes, so a
-    // later non-preview visit gets fresh data rather than a stale entry.
-    const entry = isPreviewActive() ? null : await getCacheEntry<unknown>(key);
+    const entry = await getCacheEntry<unknown>(key);
     if (entry) {
         // Fresh (no stale window, or still within it): serve directly.
         if (entry.staleAt === null || Date.now() < entry.staleAt) {
