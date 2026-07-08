@@ -42,6 +42,7 @@ const RootLayout: Component<{ children: () => JSX.Element }> = (props) => {
                 <Link href='/signup'>Signup</Link>
                 <Link href='/deferred-layout'>Layout Streaming</Link>
                 <Link href='/deferred-layout-fail'>Layout Streaming Fail</Link>
+                <Link href='/deferred-combo'>Layout+Page Streaming</Link>
             </nav>
             <main>{props.children()}</main>
         </body>

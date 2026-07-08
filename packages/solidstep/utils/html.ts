@@ -56,6 +56,31 @@ export const generateHtmlHead = (meta: Meta): string =>
  * @param includeScripts - The loading head-swap re-appends existing `<script>`
  *   elements itself, so it asks for link/style only to avoid duplicating scripts.
  */
+/**
+ * Dedupe identical assets, keeping the first occurrence's order. Deferred
+ * page and layout loaders each independently resolve the route's
+ * `loading.tsx`/`error.tsx` assets (see `server/render.ts`), so a route with
+ * more than one deferred boundary would otherwise emit the same
+ * `<link>`/`<script>` tag once per boundary.
+ */
+const dedupeAssets = <
+    T extends {
+        tag: string;
+        attrs: Record<string, unknown>;
+        children?: string;
+    },
+>(
+    assets: T[],
+): T[] => {
+    const seen = new Set<string>();
+    return assets.filter((asset) => {
+        const key = JSON.stringify(asset);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
+};
+
 export const renderAssetsToHtml = (
     assets: {
         tag: string;
@@ -65,7 +90,7 @@ export const renderAssetsToHtml = (
     cspNonce?: string,
     includeScripts = true,
 ): string =>
-    assets
+    dedupeAssets(assets)
         .map((asset) => {
             const attributeString = serializeAttributes(asset.attrs);
             if (asset.tag === 'script') {

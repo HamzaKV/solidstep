@@ -101,6 +101,15 @@ describe('renderAssetsToHtml', () => {
             '<style ></style>',
         );
     });
+
+    it('dedupes identical assets (e.g. when a page and its layout are both deferred and both pull in the same loading.tsx/error.tsx bundle)', () => {
+        const dup = {
+            tag: 'link',
+            attrs: { rel: 'modulepreload', href: '/loading.js' },
+        };
+        const out = renderAssetsToHtml([dup, dup]);
+        expect(out.split('/loading.js').length - 1).toBe(1);
+    });
 });
 
 describe('serializeForScript', () => {
