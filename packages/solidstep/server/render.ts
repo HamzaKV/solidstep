@@ -157,11 +157,8 @@ export async function render(args: RenderArgs): Promise<RenderResult> {
             const { loader: loaderFn } =
                 await getCachedModule<LoaderModule>(loader);
             if (!loaderFn) return;
-            // Only the page loader supports `defer` for now; layout loaders are
-            // always awaited (sequential).
-            const isDeferred =
-                loaderFn.options?.type === 'defer' &&
-                manifestPath === pageToRender?.manifestPath;
+            // Page and layout loaders both support `defer`.
+            const isDeferred = loaderFn.options?.type === 'defer';
             if (isDeferred) {
                 // PPR: don't run the loader at build/shell time — leave the hole
                 // pending so `renderToString` emits its fallback. The client
@@ -405,6 +402,81 @@ export async function render(args: RenderArgs): Promise<RenderResult> {
                 }
             }
             const [childrenRendered] = await Promise.all(slotPromises);
+
+            // Deferred layout loader: stream its data in under <Suspense>,
+            // matching the page-level pattern. Falls back to the route's own
+            // loading.tsx/error.tsx (layouts have no per-node equivalent).
+            const deferredLayoutPromise = deferredLoaderData.get(
+                layout.manifestPath,
+            );
+            if (deferredLayoutPromise) {
+                let LoadingFallback: ComponentFn | null = null;
+                if (entry.loadingPage) {
+                    const loadingSrc = `${entry.loadingPage.page.src}&pick=$css`;
+                    const loadingAssets =
+                        await clientManifest.inputs[loadingSrc].assets();
+                    assets.push(...loadingAssets);
+                    const { default: lf } = await getCachedModule<PageModule>(
+                        entry.loadingPage.page,
+                    );
+                    LoadingFallback = lf;
+                }
+                let LayoutError: ComponentFn | null = null;
+                if (entry.errorPage) {
+                    const errorSrc = `${entry.errorPage.page.src}&pick=$css`;
+                    const errorAssets =
+                        await clientManifest.inputs[errorSrc].assets();
+                    assets.push(...errorAssets);
+                    const { default: ef } = await getCachedModule<PageModule>(
+                        entry.errorPage.page,
+                    );
+                    LayoutError = ef;
+                }
+                return () => {
+                    const resource = createDeferredResource(
+                        deferredLayoutPromise,
+                    );
+                    const inner = () =>
+                        createComponent(Suspense, {
+                            fallback: LoadingFallback
+                                ? createComponent(LoadingFallback, {
+                                      routeParams,
+                                      searchParams,
+                                  })
+                                : undefined,
+                            get children() {
+                                return layoutModule({
+                                    children: childrenRendered,
+                                    routeParams,
+                                    searchParams,
+                                    loaderData: resource,
+                                    slots: slots,
+                                    locals: loaderInvocation.locals,
+                                });
+                            },
+                        });
+                    if (LayoutError) {
+                        return createComponent(ErrorBoundary, {
+                            fallback: (err: unknown) =>
+                                createComponent(LayoutError, {
+                                    error: err,
+                                    routeParams,
+                                    searchParams,
+                                }),
+                            get children() {
+                                // See the matching comments elsewhere in this
+                                // file: burn one id here so the boundary's own
+                                // hydration-restore peek doesn't collide with
+                                // the nested resource's id.
+                                createUniqueId();
+                                return inner();
+                            },
+                        });
+                    }
+                    return inner();
+                };
+            }
+
             return () =>
                 layoutModule({
                     children: childrenRendered,
@@ -587,8 +659,9 @@ export async function render(args: RenderArgs): Promise<RenderResult> {
 }
 
 // Whether a matched page route needs the streaming (renderToStream) path: the
-// page loader is deferred, or any parallel-route group has a loading/error
-// boundary or a deferred loader. Loader modules are cached, so imports are cheap.
+// page or a layout loader is deferred, or any parallel-route group has a
+// loading/error boundary or a deferred loader. Loader modules are cached, so
+// imports are cheap.
 export const routeNeedsStreaming = async (
     entry: RoutePageHandler,
 ): Promise<boolean> => {
@@ -596,6 +669,13 @@ export const routeNeedsStreaming = async (
     if (pageLoader) {
         const { loader: loaderFn } =
             await getCachedModule<LoaderModule>(pageLoader);
+        if (loaderFn?.options?.type === 'defer') return true;
+    }
+    for (const layout of entry.layouts) {
+        if (!layout.loader) continue;
+        const { loader: loaderFn } = await getCachedModule<LoaderModule>(
+            layout.loader,
+        );
         if (loaderFn?.options?.type === 'defer') return true;
     }
     for (const group of Object.values(entry.groups || {})) {

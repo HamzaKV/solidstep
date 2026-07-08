@@ -41,11 +41,13 @@ are the feature set you can build on right now (see the linked guides for detail
     filled per visit.
   - Dynamic routes use `generateStaticParams` to enumerate prerendered paths.
   See [Rendering Strategies](./rendering.md).
-- **Streaming SSR & deferred loaders** — mark a page or parallel-group loader
-  `type: 'defer'` to stream its shell immediately (with `loading.tsx` as the
-  `<Suspense>` fallback) and stream the data in afterward. Per-group `loading.tsx` /
-  `error.tsx` boundaries isolate parallel-route slots. See
-  [Data Loading](./data-loading.md) and [Routing](./routing.md).
+- **Streaming SSR & deferred loaders** — mark a page, layout, or parallel-group
+  loader `type: 'defer'` to stream its shell immediately (with `loading.tsx` as
+  the `<Suspense>` fallback) and stream the data in afterward. Per-group
+  `loading.tsx` / `error.tsx` boundaries isolate parallel-route slots; a
+  deferred layout falls back to the route's own `loading.tsx`/`error.tsx`
+  (layouts have no per-node equivalent). See [Data Loading](./data-loading.md)
+  and [Routing](./routing.md).
 - **Loader context, timeouts & cancellation** — loaders receive a second
   argument, `{ locals, signal }`: the middleware-populated `event.locals` (typed
   via the augmentable `Locals` interface) and a combined abort signal. A
@@ -129,9 +131,6 @@ These are ideas we may pursue after the path-to-1.0 work. **They are not committ
 not scheduled, and may change or be dropped** — listed here for transparency, not as
 promises.
 
-- **Deferred *layout* loaders.** `defer` is page- and group-scoped today; layout
-  loaders are always awaited. Supporting deferred layouts would unlock more granular
-  streaming.
 - **Parent loader data access** — read an ancestor layout's loader data from a
   child (à la React Router's `useRouteLoaderData`).
 - **Image & font optimization** components.

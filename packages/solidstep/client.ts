@@ -7,6 +7,7 @@ import {
     matchClientRoute,
     getNotFoundHandler,
     type ClientPageHandler,
+    type ClientImport,
 } from './utils/client-manifest.js';
 import { getModule, preloadHandler } from './utils/client-modules.js';
 import type { SearchParams } from './utils/path-router.js';
@@ -233,6 +234,69 @@ const handlerFor = (st: RouteStructure): ClientPageHandler | null => {
  * thunk. Slots attach to the last layout. Components are called directly (matching
  * the server) so hydration is consistent; loader data flows via reactive getters.
  */
+/** Render a single layout node, deferring to its own `<Suspense>`/`<ErrorBoundary>`
+ * (falling back to the route's `loading.tsx`/`error.tsx` -- layouts have no
+ * per-node equivalent) when its loader is deferred. Mirrors the server's
+ * per-layout block in `server/render.ts`'s compose loop. */
+const renderLayoutNode = (
+    handler: ClientPageHandler,
+    st: RouteStructure,
+    layout: { manifestPath: string; layout: ClientImport },
+    childThunk: () => any,
+    slots: Record<string, () => any>,
+): any => {
+    const LayoutComp = comp(layout.layout);
+    if (!LayoutComp) return childThunk();
+    const buildProps = (loaderData: unknown) => ({
+        children: childThunk,
+        routeParams: st.params,
+        searchParams: st.searchParams,
+        slots,
+        loaderData,
+    });
+    if (!st.deferredKeys.includes(layout.manifestPath)) {
+        return LayoutComp({
+            ...buildProps(undefined),
+            get loaderData() {
+                return routeLoaderData()[layout.manifestPath] ?? {};
+            },
+        });
+    }
+    const resource = deferredResourceFor(layout.manifestPath, st);
+    const Loading = handler.loadingPage ? comp(handler.loadingPage.page) : null;
+    const LayoutError = handler.errorPage ? comp(handler.errorPage.page) : null;
+    const inner = () =>
+        createComponent(Suspense, {
+            fallback: Loading
+                ? createComponent(Loading, {
+                      routeParams: st.params,
+                      searchParams: st.searchParams,
+                  })
+                : undefined,
+            get children() {
+                return LayoutComp(buildProps(resource));
+            },
+        });
+    if (LayoutError) {
+        return createComponent(ErrorBoundary, {
+            fallback: (err: any) =>
+                createComponent(LayoutError, {
+                    error: err,
+                    routeParams: st.params,
+                    searchParams: st.searchParams,
+                }),
+            get children() {
+                // See buildSlots'/renderLeaf's matching comment: burn one id
+                // here so the boundary's own hydration-restore peek doesn't
+                // collide with the nested resource's id.
+                createUniqueId();
+                return inner();
+            },
+        });
+    }
+    return inner();
+};
+
 const composeFrom = (
     handler: ClientPageHandler,
     st: RouteStructure,
@@ -242,21 +306,9 @@ const composeFrom = (
     const layouts = handler.layouts;
     for (let i = layouts.length - 1; i >= startIndex; i--) {
         const layout = layouts[i];
-        const LayoutComp = comp(layout.layout);
         const childThunk = acc;
         const slots = i === layouts.length - 1 ? buildSlots(handler, st) : {};
-        acc = () => {
-            if (!LayoutComp) return childThunk();
-            return LayoutComp({
-                children: childThunk,
-                routeParams: st.params,
-                searchParams: st.searchParams,
-                slots,
-                get loaderData() {
-                    return routeLoaderData()[layout.manifestPath] ?? {};
-                },
-            });
-        };
+        acc = () => renderLayoutNode(handler, st, layout, childThunk, slots);
     }
     return acc;
 };
@@ -297,8 +349,7 @@ const renderTree = () => {
             ? buildSlots(handler, st)
             : {};
     };
-
-    return RootComp({
+    const rootBaseProps = {
         children: belowRoot,
         get routeParams() {
             return routeStructure().params;
@@ -309,10 +360,60 @@ const renderTree = () => {
         get slots() {
             return rootSlots();
         },
-        get loaderData() {
-            return routeLoaderData()[rootLayout.manifestPath] ?? {};
-        },
-    });
+    };
+
+    // The root layout is rendered once (not inside `belowRoot`'s reactive
+    // re-run), so a deferred root loader needs its own Suspense/ErrorBoundary
+    // wrap here -- it can't reuse `renderLayoutNode` (built for the reactive,
+    // re-run-per-navigation layouts in `composeFrom`).
+    if (!st0.deferredKeys.includes(rootLayout.manifestPath)) {
+        return RootComp({
+            ...rootBaseProps,
+            get loaderData() {
+                return routeLoaderData()[rootLayout.manifestPath] ?? {};
+            },
+        });
+    }
+    const resource = deferredResourceFor(rootLayout.manifestPath, st0);
+    const Loading = handler0.loadingPage
+        ? comp(handler0.loadingPage.page)
+        : null;
+    const RootError = handler0.errorPage ? comp(handler0.errorPage.page) : null;
+    const inner = () =>
+        createComponent(Suspense, {
+            fallback: Loading
+                ? createComponent(Loading, {
+                      get routeParams() {
+                          return routeStructure().params;
+                      },
+                      get searchParams() {
+                          return routeStructure().searchParams;
+                      },
+                  })
+                : undefined,
+            get children() {
+                return RootComp({ ...rootBaseProps, loaderData: resource });
+            },
+        });
+    if (RootError) {
+        return createComponent(ErrorBoundary, {
+            fallback: (err: any) =>
+                createComponent(RootError, {
+                    error: err,
+                    get routeParams() {
+                        return routeStructure().params;
+                    },
+                    get searchParams() {
+                        return routeStructure().searchParams;
+                    },
+                }),
+            get children() {
+                createUniqueId();
+                return inner();
+            },
+        });
+    }
+    return inner();
 };
 
 /**

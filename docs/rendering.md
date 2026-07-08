@@ -105,7 +105,8 @@ build.
 
 A PPR page serves a **static prerendered shell** instantly (like SSG) with
 **dynamic "holes"** that stay fresh per visit. Mark the holes with deferred
-loaders (`type: 'defer'`) — on the page itself and/or on parallel-route groups.
+loaders (`type: 'defer'`) — on the page itself, a layout, and/or on
+parallel-route groups.
 
 ```tsx
 export const options = defineOptions({ render: 'ppr' });

@@ -48,7 +48,7 @@ vi.mock('../server/route-manifest', () => ({
     getCachedModule: (imp: { import: () => unknown }) => imp.import(),
 }));
 
-import { render } from '../server/render';
+import { render, routeNeedsStreaming } from '../server/render';
 import type { RoutePageHandler } from '../utils/path-router';
 
 const imp = (mod: unknown) => ({
@@ -198,6 +198,75 @@ describe('render', () => {
         });
     });
 
+    it('returns a deferred result when a layout loader defers', async () => {
+        const result = await render({
+            toRender: 'main',
+            entry: baseEntry({
+                layouts: [
+                    {
+                        manifestPath: '__root',
+                        layout: imp({
+                            default: (p: { children: unknown }) => p.children,
+                        }),
+                        loader: imp({
+                            loader: {
+                                loader: async () => ({ data: { x: 1 } }),
+                                options: { type: 'defer' },
+                            },
+                        }),
+                    },
+                ],
+            }),
+            routeParams: {},
+            searchParams: {},
+            req: req(),
+        });
+        expect('deferred' in result && result.deferred).toBe(true);
+        expect(
+            'deferredKeys' in result &&
+                (result.deferredKeys as string[]).includes('__root'),
+        ).toBe(true);
+        // The deferred layout is wrapped in <Suspense> (mocked as the plain
+        // string 'Suspense' by createComponent's mock).
+        const composed = (
+            result as unknown as { composed: () => { c: unknown } }
+        ).composed;
+        expect(composed()).toMatchObject({ c: 'Suspense' });
+    });
+
+    it('wraps a deferred layout in <ErrorBoundary> when the route has an error.tsx', async () => {
+        const result = await render({
+            toRender: 'main',
+            entry: baseEntry({
+                errorPage: {
+                    manifestPath: '/error',
+                    page: imp({ default: () => 'ERROR' }),
+                },
+                layouts: [
+                    {
+                        manifestPath: '__root',
+                        layout: imp({
+                            default: (p: { children: unknown }) => p.children,
+                        }),
+                        loader: imp({
+                            loader: {
+                                loader: async () => ({ data: {} }),
+                                options: { type: 'defer' },
+                            },
+                        }),
+                    },
+                ],
+            }),
+            routeParams: {},
+            searchParams: {},
+            req: req(),
+        });
+        const composed = (
+            result as unknown as { composed: () => { c: unknown } }
+        ).composed;
+        expect(composed()).toMatchObject({ c: 'ErrorBoundary' });
+    });
+
     it('returns a deferred result when the page loader defers', async () => {
         const result = await render({
             toRender: 'main',
@@ -219,5 +288,67 @@ describe('render', () => {
         });
         expect('deferred' in result && result.deferred).toBe(true);
         expect('composed' in result).toBe(true);
+    });
+});
+
+describe('routeNeedsStreaming', () => {
+    it('returns false for a plain route with no defer/groups', async () => {
+        expect(await routeNeedsStreaming(baseEntry())).toBe(false);
+    });
+
+    it('returns true when the page loader is deferred', async () => {
+        const entry = baseEntry({
+            mainPage: {
+                manifestPath: '/',
+                page: imp({ default: () => 'PAGE' }),
+                loader: imp({
+                    loader: {
+                        loader: async () => ({ data: {} }),
+                        options: { type: 'defer' },
+                    },
+                }),
+            },
+        });
+        expect(await routeNeedsStreaming(entry)).toBe(true);
+    });
+
+    it('returns true when a layout loader is deferred', async () => {
+        const entry = baseEntry({
+            layouts: [
+                {
+                    manifestPath: '__root',
+                    layout: imp({
+                        default: (p: { children: unknown }) => p.children,
+                    }),
+                    loader: imp({
+                        loader: {
+                            loader: async () => ({ data: {} }),
+                            options: { type: 'defer' },
+                        },
+                    }),
+                },
+            ],
+        });
+        expect(await routeNeedsStreaming(entry)).toBe(true);
+    });
+
+    it('returns false when a layout loader is sequential (not deferred)', async () => {
+        const entry = baseEntry({
+            layouts: [
+                {
+                    manifestPath: '__root',
+                    layout: imp({
+                        default: (p: { children: unknown }) => p.children,
+                    }),
+                    loader: imp({
+                        loader: {
+                            loader: async () => ({ data: {} }),
+                            options: {},
+                        },
+                    }),
+                },
+            ],
+        });
+        expect(await routeNeedsStreaming(entry)).toBe(false);
     });
 });
