@@ -343,8 +343,17 @@ export class FilesystemCacheStore implements CacheStore {
     }
 
     private async readTags(): Promise<Record<string, string[]>> {
+        // Built on Object.create(null): a plain `{}` (from JSON.parse or the
+        // catch fallback below) inherits Object.prototype's `__proto__`
+        // accessor, so a tag literally named "__proto__" would read/write
+        // through the prototype chain instead of as a normal own property --
+        // `index['__proto__']` would resolve to the real Object.prototype
+        // object (truthy, not an array) rather than `undefined`.
         try {
-            return JSON.parse(await readFile(this.tagsFile, 'utf-8'));
+            return Object.assign(
+                Object.create(null),
+                JSON.parse(await readFile(this.tagsFile, 'utf-8')),
+            );
         } catch (err) {
             // A missing index is normal (first run). Anything else (a truncated
             // or corrupt index) would silently break invalidateTag, so log it.
@@ -352,7 +361,7 @@ export class FilesystemCacheStore implements CacheStore {
                 { err },
                 'FilesystemCacheStore: tag index unreadable; treating as empty',
             );
-            return {};
+            return Object.create(null);
         }
     }
 

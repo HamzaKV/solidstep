@@ -117,6 +117,19 @@ describe('FilesystemCacheStore', () => {
         await expect(store.invalidateTag('none')).resolves.toBeUndefined();
     });
 
+    it('does not crash when a tag is literally named __proto__', async () => {
+        // The tag index is a plain JSON object; `index['__proto__']` on a
+        // fresh/plain object resolves via the prototype chain to the real
+        // `Object.prototype` (truthy, but not an array), not `undefined` --
+        // both writing and later invalidating/deleting a "__proto__" tag
+        // must not crash trying to treat that as an array.
+        await store.set('k', 1, { tags: ['__proto__'] });
+        await expect(store.get('k')).resolves.not.toBeNull();
+
+        await expect(store.invalidateTag('__proto__')).resolves.toBeUndefined();
+        expect(await store.get('k')).toBeNull();
+    });
+
     it('contract: every key is hashed to a filename inside the store dir, closing path traversal', async () => {
         // Every key -- including one crafted to escape `dir` via `../`, one
         // with an embedded null byte, and a very long one -- is SHA-256-hashed
