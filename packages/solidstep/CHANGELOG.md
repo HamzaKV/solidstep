@@ -1,5 +1,80 @@
 # solidstep
 
+## 0.8.0
+
+### Minor Changes
+
+- 4746014: Fix deferred-loader errors not reliably reaching `error.tsx`.
+
+  A deferred (`type: 'defer'`) group or page loader that rejects after the
+  shell's first flush previously left its `<ErrorBoundary>` fallback empty
+  (no error message) once hydrated, even though the raw SSR HTML fragment
+  did carry the rejection. Root cause: `ErrorBoundary` restores its own
+  hydration state via a non-incrementing id read
+  (`sharedConfig.getContextId()`), while the resource it wraps consumes an
+  id via the incrementing `sharedConfig.getNextContextId()`. When
+  `ErrorBoundary` directly wraps a `<Suspense>` around a single resource
+  read — exactly the shape used for deferred groups/pages — both calls
+  land on the same id, so the boundary picks up the resource's raw
+  hydration-restore entry (a `{state, value}` wrapper, not an `Error`) as
+  its own caught error. A `createUniqueId()` call between the boundary and
+  the resource burns one id so they no longer collide.
+
+  Also adds an `<ErrorBoundary>` around page-level (non-group) deferred
+  loaders — previously a rejection there had no `error.tsx` path at all;
+  only `renderToStream`'s `onError` logged it.
+
+### Patch Changes
+
+- 02eaf3e: Fix `FilesystemCacheStore.delete()` leaving stale references in the tag
+  index (`__tags.json`). Deleting a key directly (e.g. via `revalidatePath`/
+  `invalidateCache`, not `invalidateTag`) previously only removed its value
+  file, so the tag index kept referencing an already-deleted key forever.
+  `delete()` now prunes the key from every tag it was registered under.
+
+  Also serializes every read-modify-write of the tag index (in `set`,
+  `delete`, and `invalidateTag`) through a per-store-instance lock: without
+  it, concurrent writers (e.g. `invalidateTag`'s parallel per-key deletes)
+  could corrupt the index's atomic-rename swap on Windows.
+
+- 91f7c7a: Fix two h3 CVEs in the transitive dependency tree via a pnpm override.
+
+  `vinxi@0.5.8` pins an exact `h3@1.15.3`, which is vulnerable to:
+
+  - [GHSA-wr4h-v87w-p3r7](https://github.com/advisories/GHSA-wr4h-v87w-p3r7) — path traversal via percent-encoded dot segments in `serveStatic()` (fixed in 1.15.6).
+  - [GHSA-4hxc-9384-m385](https://github.com/advisories/GHSA-4hxc-9384-m385) — SSE event injection via unsanitized `\r` (fixed in 1.15.9).
+
+  The monorepo root `package.json` now sets `pnpm.overrides.h3` to `1.15.11`
+  (already resolved elsewhere in the dependency graph, so no new version is
+  introduced), forcing every dependent — including vinxi — onto the patched
+  release. If you consume solidstep directly via npm/yarn, add an equivalent
+  override/resolution for `h3` until vinxi itself bumps its pinned version.
+
+- 08c7cbb: Fix a race in `rateLimit`/`checkRateLimit`: concurrent requests for the same
+  bucket key could each read the same pre-increment count before any of them
+  wrote back, losing increments and letting traffic exceed `max`. Same-key
+  calls are now serialized through an in-process lock so the read-modify-write
+  can't interleave within a single process/instance.
+
+  A deployment running multiple instances behind a shared external
+  `CacheStore` (e.g. Redis) still has a small residual race across instances,
+  since no `CacheStore` currently exposes an atomic increment — this fixes the
+  single-process case, which covers the default in-memory store and any
+  single-instance deployment.
+
+- 42b4ce8: Fix `SerovalChunkReader` corrupting a frame when the 12-byte length header
+  itself arrives split across two stream reads (a network chunk boundary
+  landing inside the header rather than the payload). Previously this could
+  parse a truncated header as a plausible-looking but wrong byte length,
+  misaligning that frame and every one after it in the same stream. Now the
+  reader buffers until the full header is present before decoding it, and
+  throws a clear "truncated header" error if the stream ends first.
+- a725339: Fix `singleFlight` throwing synchronously instead of returning a rejected
+  promise when `fn` throws synchronously (a non-`async` function). It's typed
+  and documented to always return a `Promise<T>`; every current caller passes
+  an `async` function so this wasn't reachable in practice, but it's now
+  correct for any `fn`.
+
 ## 0.7.0
 
 ### Minor Changes

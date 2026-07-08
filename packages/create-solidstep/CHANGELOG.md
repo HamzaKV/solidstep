@@ -1,5 +1,15 @@
 # @varlabs/create-solidstep
 
+## 0.3.2
+
+### Patch Changes
+
+- a4fa4a8: Add the package's first automated test suite: a Vitest test that scaffolds
+  a real app via `bin/main.ts` into a temp directory and asserts the expected
+  files exist, `package.json` has the right dependencies, and the generated
+  `app/middleware.ts` is syntactically valid TypeScript. Wired into `pnpm test`
+  at the repo root.
+
 ## 0.3.1
 
 ### Patch Changes
