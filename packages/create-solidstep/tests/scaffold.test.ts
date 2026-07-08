@@ -66,4 +66,58 @@ describe('create-solidstep scaffold', () => {
         });
         expect(diagnostics ?? []).toEqual([]);
     });
+
+    describe('scaffolded middleware security defaults', () => {
+        // Regression coverage for the template's actual security posture, not
+        // just its existence -- so deleting/weakening a default silently in
+        // the template fails CI instead of only showing up when a real app
+        // ships without protection.
+        let source: string;
+        beforeAll(() => {
+            source = readFileSync(join(appDir, 'app/middleware.ts'), 'utf-8');
+        });
+
+        it('wires bodyLimit with a sane (non-zero, non-Infinity) maxBytes', () => {
+            const match = source.match(
+                /bodyLimit\(\s*\{\s*maxBytes:\s*([\d_]+)/,
+            );
+            expect(match).not.toBeNull();
+            const maxBytes = Number(match![1].replace(/_/g, ''));
+            expect(maxBytes).toBeGreaterThan(0);
+            expect(Number.isFinite(maxBytes)).toBe(true);
+        });
+
+        it('wires rateLimit with sane (non-zero, non-Infinity) windowMs and max', () => {
+            const match = source.match(
+                /rateLimit\(\s*\{\s*windowMs:\s*([\d_]+),\s*max:\s*([\d_]+)/,
+            );
+            expect(match).not.toBeNull();
+            const windowMs = Number(match![1].replace(/_/g, ''));
+            const max = Number(match![2].replace(/_/g, ''));
+            expect(windowMs).toBeGreaterThan(0);
+            expect(max).toBeGreaterThan(0);
+            expect(Number.isFinite(windowMs)).toBe(true);
+            expect(Number.isFinite(max)).toBe(true);
+        });
+
+        it('seeds a non-empty default trustedOrigins list for cors/csrf', () => {
+            const match = source.match(
+                /const trustedOrigins[^;]*\[\s*([^\]]*)\]/s,
+            );
+            expect(match).not.toBeNull();
+            const entries = match![1]
+                .split(',')
+                .map((s) => s.trim())
+                .filter(Boolean);
+            expect(entries.length).toBeGreaterThan(0);
+            expect(source).toMatch(/cors\(trustedOrigins\)/);
+            expect(source).toMatch(/csrf\(trustedOrigins\)/);
+        });
+
+        it('generates a per-request CSP nonce and wires it into the policy', () => {
+            expect(source).toMatch(/randomBytes\(\d+\)/);
+            expect(source).toMatch(/withNonce\(policy,\s*nonce\)/);
+            expect(source).toMatch(/Content-Security-Policy/);
+        });
+    });
 });
