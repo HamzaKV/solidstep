@@ -329,6 +329,17 @@ and sends a generic message plus that id to the client, so you can correlate a
 user report to a server log without exposing internal details (SQL text, file
 paths, secrets). In development the full message is sent through for debugging.
 
+> **Server actions are different: their thrown message always reaches the
+> client, in every environment.** This is intentional, not a gap — `error()`
+> from [`useActionState`](./server-actions-and-forms.md#form-validation-with-useactionstate)
+> is meant to be rendered directly (`{error()!.message}`), the same way a
+> `ValidationError`'s message is. Since you write the `throw` yourself inside
+> `'use server'` code, you're always the one deciding what's user-facing —
+> throw a message meant for the end user (`throw new Error('Email already
+> taken')`), not a raw internal one (a DB driver's error, a stack trace). If
+> an action can fail for reasons you don't want surfaced, catch it yourself
+> and throw a sanitized message instead.
+
 ## Server-Only Code
 
 Ensure code only runs on the server and throws an error if accessed on the client:
