@@ -38,5 +38,6 @@ This is the documentation index. Pages are grouped into **Guides**, **Reference*
 
 ## Links
 
+- [llms.txt](./llms.txt) — machine-readable docs index for AI agents.
 - [GitHub](https://github.com/HamzaKV/solidstep)
 - [SolidJS Documentation](https://www.solidjs.com/)

@@ -35,6 +35,7 @@ describe('create-solidstep scaffold', () => {
             'tsconfig.json',
             '.gitignore',
             '.env.example',
+            'AGENTS.md',
             'app/page.tsx',
             'app/layout.tsx',
             'app/middleware.ts',

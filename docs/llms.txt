@@ -1,0 +1,37 @@
+# SolidStep
+
+> Full-stack SSR framework for SolidJS built on Vinxi/Nitro: file-based routing under `app/`, server loaders, type-safe server actions and forms, static/ISR/PPR rendering, streaming, and built-in security middleware.
+
+Published on npm as `solidstep`; scaffold a new app with `npm create @varlabs/solidstep@latest my-app`. The documentation is the set of markdown files in this folder; start with [Getting Started](./getting-started.md) and the [API Reference](./api-reference.md).
+
+## Guides
+
+- [Getting Started](./getting-started.md): create a project, special files (page/layout/loading/error/route/actions), configuration, project structure.
+- [Routing](./routing.md): pages, layouts, group routes `(group)`, dynamic routes `[slug]`, catch-alls, parallel routes `@slot`.
+- [Data Loading](./data-loading.md): `defineLoader`, typed loader data, request context and `locals`, deferred/streaming loaders, timeouts.
+- [Data Validation](./data-validation.md): validating params and form data with Standard Schema (Zod/Valibot/ArkType) via `parseActionInput`.
+- [Rendering Strategies](./rendering.md): dynamic/static/ISR/PPR via the `render` option, `generateStaticParams`.
+- [Server Actions & Forms](./server-actions-and-forms.md): `'use server'` functions, `<Form>`, `useActionState`, `useFormStatus`, progressive enhancement.
+- [Metadata](./metadata.md): SEO/head metadata with `generateMeta` and the `meta()` wrapper.
+- [Metadata Files](./metadata-files.md): dynamic `robots.txt`, `sitemap.xml`, web manifest, and `llms.txt` routes.
+- [Middleware](./middleware.md): request/response interceptors with `defineMiddleware`.
+- [Instrumentation](./instrumentation.md): observability hooks and OpenTelemetry integration.
+- [Caching](./caching.md): loader and page caching, `invalidateCache`/`invalidateTag`/`revalidatePath`, pluggable cache stores.
+- [API Routes](./api-routes.md): REST endpoints with `route.ts`, SSE and streaming responses, server assets.
+- [Database & ORM](./database.md): Drizzle/Prisma patterns and connection lifecycle.
+- [Performance](./performance.md): choosing a rendering strategy, caching, streaming, metrics, bundle analysis.
+- [Security](./security.md): cookies, CORS, CSP, CSRF, rate limiting, safe redirects, error handling, server-only code.
+- [Utilities](./utilities.md): logging, fetch wrappers, preloading and prefetching strategies.
+- [Assets & Environment](./assets-and-env.md): fonts, images, environment variables.
+
+## Reference
+
+- [Architecture](./architecture.md): request lifecycle, route manifest, render strategies, streaming/deferred/PPR, soft navigation, hydration, server-action serialization.
+- [API Reference](./api-reference.md): every public `solidstep/...` import mapped to a description and docs page.
+- [Testing](./testing.md): unit testing loaders/actions/components with Vitest, end-to-end testing with Playwright.
+- [Troubleshooting](./troubleshooting.md): common issues and fixes.
+
+## Operations
+
+- [Deployment](./deployment.md): building, Nitro presets, environment variables, Docker, Node requirements.
+- [Roadmap](./roadmap.md): planned features and direction.
