@@ -398,6 +398,14 @@ export const navigate = async (
     saveScroll();
     setPending(true);
     try {
+        // The route match is derivable synchronously from the URL, so start
+        // warming its component modules in parallel with the envelope fetch
+        // instead of waiting for the fetch to land first. `preloadHandler`
+        // never rejects (it swallows failures internally), so leaving this
+        // dangling on the redirect/route/not-found paths below is safe.
+        const match = matchClientRoute(url.pathname);
+        const preload = match ? preloadHandler(match.handler) : undefined;
+
         const envelope = await takeEnvelope(target);
         switch (envelope.type) {
             case 'redirect':
@@ -412,9 +420,11 @@ export const navigate = async (
                 break;
         }
 
-        if (envelope.type === 'page' || envelope.type === 'error') {
-            const match = matchClientRoute(url.pathname);
-            if (match) await preloadHandler(match.handler);
+        if (
+            (envelope.type === 'page' || envelope.type === 'error') &&
+            preload
+        ) {
+            await preload;
         }
 
         // Record the view-transition preference on this entry's own history
@@ -457,6 +467,11 @@ const onPopState = async () => {
     const target = url.pathname + url.search;
     setPending(true);
     try {
+        // Same rationale as `navigate()`: warm modules in parallel with the
+        // envelope fetch instead of after it.
+        const match = matchClientRoute(url.pathname);
+        const preload = match ? preloadHandler(match.handler) : undefined;
+
         const envelope = await fetchEnvelope(target);
         if (envelope.type === 'redirect') {
             location.assign(envelope.location);
@@ -470,8 +485,7 @@ const onPopState = async () => {
             history.state as { viewTransition?: boolean } | null
         )?.viewTransition;
         if (envelope.type === 'page' || envelope.type === 'error') {
-            const match = matchClientRoute(url.pathname);
-            if (match) await preloadHandler(match.handler);
+            if (preload) await preload;
             const meta = 'meta' in envelope ? envelope.meta : undefined;
             withViewTransition(viewTransition, () => {
                 commit(stateFromEnvelope(envelope, url));

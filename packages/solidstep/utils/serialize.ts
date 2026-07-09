@@ -36,6 +36,11 @@ export const SEROVAL_PLUGINS: Plugin<any, any>[] = [
     URLPlugin,
 ];
 
+// Shared across all chunks/frames on both the server and client transports —
+// TextEncoder/TextDecoder are stateless and safe to reuse.
+const textEncoder = new TextEncoder();
+const textDecoder = new TextDecoder();
+
 /**
  * Frames a serialized string into a length-prefixed binary chunk.
  *
@@ -43,11 +48,11 @@ export const SEROVAL_PLUGINS: Plugin<any, any>[] = [
  * encoded payload. {@link SerovalChunkReader} reads this framing back.
  */
 export function createChunk(data: string) {
-    const encodeData = new TextEncoder().encode(data);
+    const encodeData = textEncoder.encode(data);
     const bytes = encodeData.length;
     const baseHex = bytes.toString(16);
     const totalHex = '00000000'.substring(0, 8 - baseHex.length) + baseHex; // 32-bit
-    const head = new TextEncoder().encode(`;0x${totalHex};`);
+    const head = textEncoder.encode(`;0x${totalHex};`);
 
     const chunk = new Uint8Array(12 + bytes);
     chunk.set(head);
@@ -158,7 +163,7 @@ export class SerovalChunkReader {
         // The byte header tells us how big the expected data is
         // so we know how much data we should wait before we
         // deserialize the data
-        const head = new TextDecoder().decode(this.buffer.subarray(1, 11));
+        const head = textDecoder.decode(this.buffer.subarray(1, 11));
         const bytes = Number.parseInt(head, 16); // ;0x00000000;
         if (Number.isNaN(bytes)) {
             throw new Error(`Malformed server function stream header: ${head}`);
@@ -175,7 +180,7 @@ export class SerovalChunkReader {
             await this.readChunk();
         }
         // Extract the exact chunk as defined by the byte header
-        const partial = new TextDecoder().decode(
+        const partial = textDecoder.decode(
             this.buffer.subarray(12, 12 + bytes),
         );
         // The rest goes to the buffer

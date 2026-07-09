@@ -149,6 +149,7 @@ const handleApiRoute = async (
     matched: ApiRouteHandler,
     params: Record<string, string | string[]>,
     searchParams: SearchParams,
+    pathname: string,
 ) => {
     const inst = getInstrumentation();
     const reqCtx = createRequestContext(req, {
@@ -156,6 +157,7 @@ const handleApiRoute = async (
         routeType: 'api',
         params,
         searchParams,
+        pathname,
     });
     await safeExecuteHook('onRequest', inst?.onRequest, req, reqCtx);
 
@@ -177,22 +179,24 @@ const handleApiRoute = async (
                         searchParams: searchParams,
                     },
                 );
-                const respCtx = createResponseContext(
-                    reqCtx,
-                    getResponseStatus(event) || 200,
-                );
-                await safeExecuteHook(
-                    'onResponseStart',
-                    inst?.onResponseStart,
-                    req,
-                    respCtx,
-                );
-                await safeExecuteHook(
-                    'onResponseEnd',
-                    inst?.onResponseEnd,
-                    req,
-                    respCtx,
-                );
+                if (inst?.onResponseStart || inst?.onResponseEnd) {
+                    const respCtx = createResponseContext(
+                        reqCtx,
+                        getResponseStatus(event) || 200,
+                    );
+                    await safeExecuteHook(
+                        'onResponseStart',
+                        inst?.onResponseStart,
+                        req,
+                        respCtx,
+                    );
+                    await safeExecuteHook(
+                        'onResponseEnd',
+                        inst?.onResponseEnd,
+                        req,
+                        respCtx,
+                    );
+                }
                 return result;
             }
 
@@ -218,6 +222,10 @@ const handler = eventHandler(async (event) => {
     if (instrumentationReady) await instrumentationReady;
 
     const req = toWebRequest(event);
+    // Parsed once and threaded through the rest of the dispatcher instead of
+    // re-parsing `req.url` at every branch below.
+    const urlObj = new URL(req.url);
+    const pathnamePart = urlObj.pathname;
 
     try {
         if (
@@ -229,10 +237,9 @@ const handler = eventHandler(async (event) => {
             return;
         }
 
-        const serverFnPathname = new URL(req.url).pathname;
         if (
-            serverFnPathname === SERVER_FN_BASE ||
-            serverFnPathname.startsWith(`${SERVER_FN_BASE}/`)
+            pathnamePart === SERVER_FN_BASE ||
+            pathnamePart.startsWith(`${SERVER_FN_BASE}/`)
         ) {
             return await handleServerFunction(event);
         }
@@ -242,7 +249,7 @@ const handler = eventHandler(async (event) => {
         // is never reachable in a normal production server.
         if (
             process.env.SOLIDSTEP_PRERENDER === '1' &&
-            new URL(req.url).pathname === PRERENDER_ENDPOINT
+            pathnamePart === PRERENDER_ENDPOINT
         ) {
             setHeader('Content-Type', 'application/json');
             return JSON.stringify(await collectPrerenderTargets());
@@ -253,7 +260,7 @@ const handler = eventHandler(async (event) => {
         // 404), matching PRERENDER_ENDPOINT's convention above.
         if (
             process.env.SOLIDSTEP_REVALIDATE_TOKEN &&
-            new URL(req.url).pathname === REVALIDATE_ENDPOINT
+            pathnamePart === REVALIDATE_ENDPOINT
         ) {
             const { status, body } = await handleRevalidate(req);
             setResponseStatus(status);
@@ -279,7 +286,7 @@ const handler = eventHandler(async (event) => {
 
         // PPR hole data: the client fetches a deferred loader's data here to fill
         // a partially-prerendered page's dynamic holes.
-        if (new URL(req.url).pathname === LOADER_ENDPOINT) {
+        if (pathnamePart === LOADER_ENDPOINT) {
             const body = await serveHoleData(req, locals);
             if (body === null) {
                 setResponseStatus(400);
@@ -293,7 +300,7 @@ const handler = eventHandler(async (event) => {
 
         // Soft-navigation route data: the client router fetches a route's full
         // loader data + metadata here as a seroval-serialized envelope.
-        if (new URL(req.url).pathname === ROUTE_ENDPOINT) {
+        if (pathnamePart === ROUTE_ENDPOINT) {
             const body = await serveRouteData(req, cspNonce, locals);
             if (body === null) {
                 setResponseStatus(400);
@@ -304,8 +311,6 @@ const handler = eventHandler(async (event) => {
             return body;
         }
 
-        const urlObj = new URL(req.url);
-        const pathnamePart = urlObj.pathname;
         const searchParams = parseSearchParams(urlObj.searchParams);
         const isrBypass = req.headers.get(ISR_BYPASS_HEADER) === '1';
 
@@ -339,6 +344,7 @@ const handler = eventHandler(async (event) => {
                 matched,
                 params,
                 searchParams,
+                pathnamePart,
             );
         }
 

@@ -15,6 +15,7 @@ const matchRoute = vi.fn();
 const getCachedModule = vi.fn();
 const registerShutdownHandler = vi.hoisted(() => vi.fn());
 const safeExecuteHook = vi.hoisted(() => vi.fn(async () => undefined));
+const getInstrumentation = vi.hoisted(() => vi.fn(() => null as any));
 const serveHoleData = vi.hoisted(() => vi.fn(async () => null as unknown));
 const serveRouteData = vi.hoisted(() => vi.fn(async () => null as unknown));
 const getMetadataManifest = vi.hoisted(() => vi.fn(() => undefined as any));
@@ -54,7 +55,7 @@ vi.mock('../utils/path-router', () => ({
 }));
 vi.mock('../utils/instrumentation', () => ({
     loadInstrumentation: async () => null,
-    getInstrumentation: () => null,
+    getInstrumentation: (...a: unknown[]) => getInstrumentation(...a),
     safeExecuteHook: (...a: unknown[]) => safeExecuteHook(...a),
     createRequestContext: () => ({}),
     createResponseContext: () => ({}),
@@ -97,6 +98,15 @@ beforeEach(() => {
     matchRoute.mockReset();
     getCachedModule.mockReset();
     safeExecuteHook.mockClear();
+    // Populated by default so onResponseStart/onResponseEnd gating in
+    // handleApiRoute still gets exercised; individual tests override to
+    // `null` to check the gated-skip path.
+    getInstrumentation.mockReturnValue({
+        onRequest: vi.fn(),
+        onResponseStart: vi.fn(),
+        onResponseEnd: vi.fn(),
+        onRequestError: vi.fn(),
+    });
     serveHoleData.mockReset().mockResolvedValue(null);
     serveRouteData.mockReset().mockResolvedValue(null);
     getMetadataManifest.mockReset().mockReturnValue(undefined);
@@ -157,6 +167,18 @@ describe('server request handler', () => {
         getCachedModule.mockResolvedValue({ GET: async () => 'ok' });
         await handler(makeEvent('https://example.com/api/thing'));
         expect(hookNames()).toContain('onResponseStart');
+    });
+
+    it('skips building the response context for an API route when no instrumentation is registered', async () => {
+        getInstrumentation.mockReturnValue(null);
+        matchRoute.mockReturnValue({
+            handler: { type: 'route', handler: {}, routePath: '/api/thing' },
+            params: {},
+        });
+        getCachedModule.mockResolvedValue({ GET: async () => 'ok' });
+        await handler(makeEvent('https://example.com/api/thing'));
+        expect(hookNames()).not.toContain('onResponseStart');
+        expect(hookNames()).not.toContain('onResponseEnd');
     });
 
     it('maps a rejected API route handler to the 500 response', async () => {

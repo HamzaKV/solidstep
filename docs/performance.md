@@ -96,6 +96,24 @@ layouts (they end up in every chunk).
 hover/focus so navigation feels instant; use `prefetch="viewport"` for links that
 scroll into view. See [Routing](./routing.md).
 
+## Benchmarking the framework
+
+`scripts/bench.mjs` at the repo root is a zero-dependency load generator for
+before/after comparisons on one machine (not absolute-ceiling numbers):
+
+```bash
+pnpm --filter solidstep build
+pnpm --filter kitchen-sink build
+node examples/kitchen-sink/.output/server/index.mjs &
+pnpm bench
+```
+
+It hits a fixed set of kitchen-sink routes (`/`, `/about`, `/slow`, `/deferred`,
+`/isr`, `/ppr`, `/__solidstep_route`) with a warmup phase, then reports RPS and
+p50/p95/p99 latency + TTFB per route. Override `BASE_URL`, `DURATION_MS`,
+`CONCURRENCY`, or `WARMUP` via env vars. Run it 2-3 times and compare medians —
+a single run is noisy.
+
 ## Related
 
 - [Rendering](./rendering.md) — SSG / ISR / PPR / dynamic.

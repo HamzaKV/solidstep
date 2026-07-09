@@ -192,6 +192,28 @@ describe('getCachedLoaderData', () => {
         expect(ctx.locals).toEqual({ user: 'u1' });
     });
 
+    it('skips cloning the request when there is nothing to change (no signal)', async () => {
+        const loader = vi.fn(async () => ({ data: { ok: true } }));
+        const loaderFn = { loader, options: {} };
+        const original = req();
+        await getCachedLoaderData(loaderFn, '/p', original, {
+            locals: { user: 'u1' },
+        });
+        const [passedReq] = loader.mock.calls[0] as [Request];
+        expect(passedReq).toBe(original);
+    });
+
+    it('skips cloning the request when the invocation signal is already req.signal', async () => {
+        const loader = vi.fn(async () => ({ data: { ok: true } }));
+        const loaderFn = { loader, options: {} };
+        const original = req();
+        await getCachedLoaderData(loaderFn, '/p', original, {
+            signal: original.signal,
+        });
+        const [passedReq] = loader.mock.calls[0] as [Request];
+        expect(passedReq).toBe(original);
+    });
+
     describe('load: many interleaved preview/non-preview paths at once', () => {
         it('every one of many concurrent (path, previewState) combinations resolves its own correct value, with no cross-contamination', async () => {
             // `isPreviewActive()` is read synchronously at the very top of

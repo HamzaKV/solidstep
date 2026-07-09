@@ -14,6 +14,7 @@ import fileRoutes from 'vinxi/routes';
 import {
     createRouteManifest,
     getCachedModule,
+    getCachedAssets,
     ensureRouteManifest,
     ensureClientManifest,
     collectPrerenderTargets,
@@ -220,6 +221,21 @@ describe('getCachedModule', () => {
         } as any);
 
         expect(result).toBe(mod);
+    });
+});
+
+describe('getCachedAssets', () => {
+    it('resolves the manifest input src and returns its assets', async () => {
+        const assetList = [{ tag: 'link', attrs: { href: '/a.css' } }];
+        const manifest = {
+            inputs: {
+                'mod.tsx&pick=$css': { assets: async () => assetList },
+            },
+        } as any;
+
+        const result = await getCachedAssets(manifest, 'mod.tsx&pick=$css');
+
+        expect(result).toBe(assetList);
     });
 });
 

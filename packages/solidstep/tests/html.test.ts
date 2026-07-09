@@ -110,6 +110,29 @@ describe('renderAssetsToHtml', () => {
         const out = renderAssetsToHtml([dup, dup]);
         expect(out.split('/loading.js').length - 1).toBe(1);
     });
+
+    it('keeps two link assets with the same href but different rel', () => {
+        const out = renderAssetsToHtml([
+            { tag: 'link', attrs: { rel: 'modulepreload', href: '/x.js' } },
+            { tag: 'link', attrs: { rel: 'preload', href: '/x.js' } },
+        ]);
+        expect(out.split('<link').length - 1).toBe(2);
+    });
+
+    it('keeps two style assets with identical attrs but different children', () => {
+        const out = renderAssetsToHtml([
+            { tag: 'style', attrs: { id: 's' }, children: 'a{color:red}' },
+            { tag: 'style', attrs: { id: 's' }, children: 'b{color:blue}' },
+        ]);
+        expect(out).toContain('a{color:red}');
+        expect(out).toContain('b{color:blue}');
+    });
+
+    it('dedupes script assets by tag+src, ignoring nonce differences at render time', () => {
+        const dup = { tag: 'script', attrs: { src: '/main.js' } };
+        const out = renderAssetsToHtml([dup, dup], 'NONCE');
+        expect(out.split('/main.js').length - 1).toBe(1);
+    });
 });
 
 describe('serializeForScript', () => {

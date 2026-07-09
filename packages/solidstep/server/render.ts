@@ -14,7 +14,7 @@ import type {
     SearchParams,
 } from '../utils/path-router.js';
 import type { Options } from '../utils/options.js';
-import { getCachedModule } from './route-manifest.js';
+import { getCachedModule, getCachedAssets } from './route-manifest.js';
 import type {
     ComponentFn,
     LoaderModule,
@@ -56,6 +56,9 @@ type RenderArgs = {
     cspNonce?: string;
     locals?: Record<string, unknown>;
     error?: Error;
+    /** Pre-parsed request URL, so callers that already built one (the
+     * dispatcher) don't force a second `new URL()` per request. */
+    url?: URL;
 };
 
 export const template = `
@@ -83,8 +86,9 @@ export async function render(args: RenderArgs): Promise<RenderResult> {
         cspNonce,
         locals,
         error,
+        url: preParsedUrl,
     } = args;
-    const url = new URL(req.url);
+    const url = preParsedUrl ?? new URL(req.url);
     // Request-scoped context threaded into every loader on this render: the
     // middleware-populated `locals` (with the CSP nonce folded in for parity with
     // the component props) and the request's abort signal for cancellation.
@@ -100,18 +104,27 @@ export async function render(args: RenderArgs): Promise<RenderResult> {
     const shouldCache = shouldCachePage(pageOptions);
     // Preview mode reads and writes an entirely separate cache namespace, so
     // a preview render can never see (or pollute) what a non-preview visitor
-    // gets served — see the matching comment in `utils/loader-cache.ts`.
-    const cacheKey = isPreviewActive()
-        ? `preview:${pageCacheKey(url)}`
-        : pageCacheKey(url);
-    const cachedEntry = shouldCache
-        ? await getCache<{
-              rendered: string;
-              documentMeta: Meta;
-              documentAssets: RenderAsset[];
-              loaderData: Record<string, unknown>;
-          }>(cacheKey)
-        : null;
+    // gets served — see the matching comment in `utils/loader-cache.ts`. Only
+    // computed when the page actually caches — skip the preview check and key
+    // construction for the common (uncached, dynamic) page.
+    let cacheKey = '';
+    let cachedEntry: {
+        rendered: string;
+        documentMeta: Meta;
+        documentAssets: RenderAsset[];
+        loaderData: Record<string, unknown>;
+    } | null = null;
+    if (shouldCache) {
+        cacheKey = isPreviewActive()
+            ? `preview:${pageCacheKey(url)}`
+            : pageCacheKey(url);
+        cachedEntry = await getCache<{
+            rendered: string;
+            documentMeta: Meta;
+            documentAssets: RenderAsset[];
+            loaderData: Record<string, unknown>;
+        }>(cacheKey);
+    }
 
     if (cachedEntry && toRender === 'main') {
         return {
@@ -224,15 +237,21 @@ export async function render(args: RenderArgs): Promise<RenderResult> {
     const compose = entry.layouts.reduceRight(
         (children, layout, index) => async () => {
             const moduleSrc = `${layout.layout.src}&pick=$css`;
-            const moduleAssets =
-                await clientManifest.inputs[moduleSrc].assets();
-            assets.push(...moduleAssets);
-            const { default: layoutModule } = await getCachedModule<PageModule>(
-                layout.layout,
-            );
-            const { generateMeta: generateMetaPage } = layout.generateMeta
-                ? await getCachedModule<MetaModule>(layout.generateMeta)
-                : { generateMeta: null };
+            // Independent lookups for this node — fetched concurrently. Order
+            // of *execution* relative to sibling/parent nodes is unchanged
+            // (still top-down via reduceRight); only the awaits within this
+            // one node now overlap instead of chaining.
+            const [moduleAssets, layoutModuleResult, metaModuleResult] =
+                await Promise.all([
+                    getCachedAssets(clientManifest, moduleSrc),
+                    getCachedModule<PageModule>(layout.layout),
+                    layout.generateMeta
+                        ? getCachedModule<MetaModule>(layout.generateMeta)
+                        : Promise.resolve({ generateMeta: null }),
+                ]);
+            assets.push(...(moduleAssets as RenderAsset[]));
+            const { default: layoutModule } = layoutModuleResult;
+            const { generateMeta: generateMetaPage } = metaModuleResult;
             let data: unknown = {};
             if (generateMetaPage) {
                 const metaData = await generateMetaPage({
@@ -260,16 +279,19 @@ export async function render(args: RenderArgs): Promise<RenderResult> {
                         (async () => {
                             const slotName = groupName.replace('@', '');
                             const moduleSrc = `${group.page.src}&pick=$css`;
-                            const moduleAssets =
-                                await clientManifest.inputs[moduleSrc].assets();
-                            assets.push(...moduleAssets);
-                            const { default: groupPage } =
-                                await getCachedModule<PageModule>(group.page);
-                            const { loader: groupLoader } = group.loader
-                                ? await getCachedModule<LoaderModule>(
-                                      group.loader,
-                                  )
-                                : { loader: null };
+                            const [moduleAssets, pageResult, loaderResult] =
+                                await Promise.all([
+                                    getCachedAssets(clientManifest, moduleSrc),
+                                    getCachedModule<PageModule>(group.page),
+                                    group.loader
+                                        ? getCachedModule<LoaderModule>(
+                                              group.loader,
+                                          )
+                                        : Promise.resolve({ loader: null }),
+                                ]);
+                            assets.push(...(moduleAssets as RenderAsset[]));
+                            const { default: groupPage } = pageResult;
+                            const { loader: groupLoader } = loaderResult;
 
                             const groupDeferred =
                                 groupLoader?.options?.type === 'defer';
@@ -309,31 +331,47 @@ export async function render(args: RenderArgs): Promise<RenderResult> {
                             hasStreamingGroup = true;
                             let GroupLoading: ComponentFn | null = null;
                             let GroupError: ComponentFn | null = null;
-                            if (group.loadingPage) {
-                                const src = `${group.loadingPage.src}&pick=$css`;
+                            // Loading/error boundary fetches are independent
+                            // of each other — run concurrently, but still
+                            // pushed to `assets` in the same (loading, then
+                            // error) order as before.
+                            const [loadingFetch, errorFetch] =
+                                await Promise.all([
+                                    group.loadingPage
+                                        ? Promise.all([
+                                              getCachedAssets(
+                                                  clientManifest,
+                                                  `${group.loadingPage.src}&pick=$css`,
+                                              ),
+                                              getCachedModule<PageModule>(
+                                                  group.loadingPage,
+                                              ),
+                                          ])
+                                        : Promise.resolve(null),
+                                    group.errorPage
+                                        ? Promise.all([
+                                              getCachedAssets(
+                                                  clientManifest,
+                                                  `${group.errorPage.src}&pick=$css`,
+                                              ),
+                                              getCachedModule<PageModule>(
+                                                  group.errorPage,
+                                              ),
+                                          ])
+                                        : Promise.resolve(null),
+                                ]);
+                            if (loadingFetch) {
+                                const [loadingAssets, loadingModule] =
+                                    loadingFetch;
                                 assets.push(
-                                    ...(await clientManifest.inputs[
-                                        src
-                                    ].assets()),
+                                    ...(loadingAssets as RenderAsset[]),
                                 );
-                                GroupLoading = (
-                                    await getCachedModule<PageModule>(
-                                        group.loadingPage,
-                                    )
-                                ).default;
+                                GroupLoading = loadingModule.default;
                             }
-                            if (group.errorPage) {
-                                const src = `${group.errorPage.src}&pick=$css`;
-                                assets.push(
-                                    ...(await clientManifest.inputs[
-                                        src
-                                    ].assets()),
-                                );
-                                GroupError = (
-                                    await getCachedModule<PageModule>(
-                                        group.errorPage,
-                                    )
-                                ).default;
+                            if (errorFetch) {
+                                const [errorAssets, errorModule] = errorFetch;
+                                assets.push(...(errorAssets as RenderAsset[]));
+                                GroupError = errorModule.default;
                             }
                             // A boundary group with a loader streams its data in
                             // as a resource (so loader errors reach the
@@ -414,26 +452,40 @@ export async function render(args: RenderArgs): Promise<RenderResult> {
             );
             if (deferredLayoutPromise) {
                 let LoadingFallback: ComponentFn | null = null;
-                if (entry.loadingPage) {
-                    const loadingSrc = `${entry.loadingPage.page.src}&pick=$css`;
-                    const loadingAssets =
-                        await clientManifest.inputs[loadingSrc].assets();
-                    assets.push(...loadingAssets);
-                    const { default: lf } = await getCachedModule<PageModule>(
-                        entry.loadingPage.page,
-                    );
-                    LoadingFallback = lf;
-                }
                 let LayoutError: ComponentFn | null = null;
-                if (entry.errorPage) {
-                    const errorSrc = `${entry.errorPage.page.src}&pick=$css`;
-                    const errorAssets =
-                        await clientManifest.inputs[errorSrc].assets();
-                    assets.push(...errorAssets);
-                    const { default: ef } = await getCachedModule<PageModule>(
-                        entry.errorPage.page,
-                    );
-                    LayoutError = ef;
+                // Independent of each other — run concurrently, still pushed
+                // to `assets` in the same (loading, then error) order.
+                const [loadingFetch, errorFetch] = await Promise.all([
+                    entry.loadingPage
+                        ? Promise.all([
+                              getCachedAssets(
+                                  clientManifest,
+                                  `${entry.loadingPage.page.src}&pick=$css`,
+                              ),
+                              getCachedModule<PageModule>(
+                                  entry.loadingPage.page,
+                              ),
+                          ])
+                        : Promise.resolve(null),
+                    entry.errorPage
+                        ? Promise.all([
+                              getCachedAssets(
+                                  clientManifest,
+                                  `${entry.errorPage.page.src}&pick=$css`,
+                              ),
+                              getCachedModule<PageModule>(entry.errorPage.page),
+                          ])
+                        : Promise.resolve(null),
+                ]);
+                if (loadingFetch) {
+                    const [loadingAssets, loadingModule] = loadingFetch;
+                    assets.push(...(loadingAssets as RenderAsset[]));
+                    LoadingFallback = loadingModule.default;
+                }
+                if (errorFetch) {
+                    const [errorAssets, errorModule] = errorFetch;
+                    assets.push(...(errorAssets as RenderAsset[]));
+                    LayoutError = errorModule.default;
                 }
                 return () => {
                     const resource = createDeferredResource(
@@ -489,15 +541,17 @@ export async function render(args: RenderArgs): Promise<RenderResult> {
             // non-null assertions below are compile-time only (no runtime change).
             const node = pageToRender!;
             const moduleSrc = `${node.page.src}&pick=$css`;
-            const moduleAssets =
-                await clientManifest.inputs[moduleSrc].assets();
-            assets.push(...moduleAssets);
-            const { default: page } = await getCachedModule<PageModule>(
-                node.page,
-            );
-            const { generateMeta } = node.generateMeta
-                ? await getCachedModule<MetaModule>(node.generateMeta)
-                : { generateMeta: null };
+            const [moduleAssets, pageResult, metaModuleResult] =
+                await Promise.all([
+                    getCachedAssets(clientManifest, moduleSrc),
+                    getCachedModule<PageModule>(node.page),
+                    node.generateMeta
+                        ? getCachedModule<MetaModule>(node.generateMeta)
+                        : Promise.resolve({ generateMeta: null }),
+                ]);
+            assets.push(...(moduleAssets as RenderAsset[]));
+            const { default: page } = pageResult;
+            const { generateMeta } = metaModuleResult;
 
             let data: unknown = {};
             if (resolvedLoaderData.has(node.manifestPath)) {
@@ -531,26 +585,40 @@ export async function render(args: RenderArgs): Promise<RenderResult> {
             const deferredPromise = deferredLoaderData.get(node.manifestPath);
             if (deferredPromise) {
                 let LoadingFallback: ComponentFn | null = null;
-                if (entry.loadingPage) {
-                    const loadingSrc = `${entry.loadingPage.page.src}&pick=$css`;
-                    const loadingAssets =
-                        await clientManifest.inputs[loadingSrc].assets();
-                    assets.push(...loadingAssets);
-                    const { default: lf } = await getCachedModule<PageModule>(
-                        entry.loadingPage.page,
-                    );
-                    LoadingFallback = lf;
-                }
                 let PageError: ComponentFn | null = null;
-                if (entry.errorPage) {
-                    const errorSrc = `${entry.errorPage.page.src}&pick=$css`;
-                    const errorAssets =
-                        await clientManifest.inputs[errorSrc].assets();
-                    assets.push(...errorAssets);
-                    const { default: ef } = await getCachedModule<PageModule>(
-                        entry.errorPage.page,
-                    );
-                    PageError = ef;
+                // Independent of each other — run concurrently, still pushed
+                // to `assets` in the same (loading, then error) order.
+                const [loadingFetch, errorFetch] = await Promise.all([
+                    entry.loadingPage
+                        ? Promise.all([
+                              getCachedAssets(
+                                  clientManifest,
+                                  `${entry.loadingPage.page.src}&pick=$css`,
+                              ),
+                              getCachedModule<PageModule>(
+                                  entry.loadingPage.page,
+                              ),
+                          ])
+                        : Promise.resolve(null),
+                    entry.errorPage
+                        ? Promise.all([
+                              getCachedAssets(
+                                  clientManifest,
+                                  `${entry.errorPage.page.src}&pick=$css`,
+                              ),
+                              getCachedModule<PageModule>(entry.errorPage.page),
+                          ])
+                        : Promise.resolve(null),
+                ]);
+                if (loadingFetch) {
+                    const [loadingAssets, loadingModule] = loadingFetch;
+                    assets.push(...(loadingAssets as RenderAsset[]));
+                    LoadingFallback = loadingModule.default;
+                }
+                if (errorFetch) {
+                    const [errorAssets, errorModule] = errorFetch;
+                    assets.push(...(errorAssets as RenderAsset[]));
+                    PageError = errorModule.default;
                 }
                 return () => {
                     const resource = createDeferredResource(deferredPromise);
@@ -651,7 +719,7 @@ export async function render(args: RenderArgs): Promise<RenderResult> {
 // page or a layout loader is deferred, or any parallel-route group has a
 // loading/error boundary or a deferred loader. Loader modules are cached, so
 // imports are cheap.
-export const routeNeedsStreaming = async (
+const computeNeedsStreaming = async (
     entry: RoutePageHandler,
 ): Promise<boolean> => {
     const pageLoader = entry.mainPage.loader;
@@ -677,4 +745,26 @@ export const routeNeedsStreaming = async (
         }
     }
     return false;
+};
+
+// A route's defer-ness is fixed once its loaders are authored — cache the
+// answer per route-handler identity so a request never re-walks and
+// re-imports every loader module just to re-derive a static fact (skipped in
+// dev, matching `getCachedModule`'s HMR discipline; a WeakMap also means a
+// route manifest rebuilt in dev never needs explicit invalidation).
+const streamingCache = new WeakMap<RoutePageHandler, boolean>();
+
+export const routeNeedsStreaming = async (
+    entry: RoutePageHandler,
+): Promise<boolean> => {
+    /* v8 ignore next 3 -- prod-only cache hit path; covered by the
+       kitchen-sink e2e suite's deferred/group-boundary specs. */
+    if (!import.meta.env.DEV && streamingCache.has(entry)) {
+        return streamingCache.get(entry)!;
+    }
+    const result = await computeNeedsStreaming(entry);
+    if (!import.meta.env.DEV) {
+        streamingCache.set(entry, result);
+    }
+    return result;
 };

@@ -250,18 +250,26 @@ export function createRequestContext(
     request: Request,
     overrides: Partial<RequestContext> = {},
 ): RequestContext {
-    const url = new URL(request.url);
+    // Callers on the hot path (server.ts, render-page.ts) already have a
+    // parsed URL by this point — skip re-parsing `request.url` when both
+    // values are supplied.
+    let { pathname, searchParams } = overrides;
+    if (pathname === undefined || searchParams === undefined) {
+        const url = new URL(request.url);
+        pathname ??= url.pathname;
+        searchParams ??= parseSearchParams(url.searchParams);
+    }
 
     return {
         routePath: 'unknown',
-        pathname: url.pathname,
         routeType: 'unknown',
         params: {},
-        searchParams: parseSearchParams(url.searchParams),
         startTime: performance.now(),
         metadata: {},
         startTimeEpoch: Date.now(),
         ...overrides,
+        pathname,
+        searchParams,
     };
 }
 

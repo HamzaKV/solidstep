@@ -37,6 +37,34 @@ export type LinkProps = Omit<
     viewTransition?: boolean;
 };
 
+// A single shared IntersectionObserver for every `prefetch="viewport"` Link,
+// instead of one per link — a long list of viewport-prefetch links would
+// otherwise instantiate one observer each for no added benefit.
+let sharedViewportObserver: IntersectionObserver | null = null;
+const viewportCallbacks = new WeakMap<Element, () => void>();
+
+const unobserveViewport = (el: Element) => {
+    viewportCallbacks.delete(el);
+    sharedViewportObserver?.unobserve(el);
+};
+
+const observeViewport = (el: Element, callback: () => void) => {
+    if (!sharedViewportObserver) {
+        sharedViewportObserver = new IntersectionObserver((entries) => {
+            for (const entry of entries) {
+                if (!entry.isIntersecting) continue;
+                const cb = viewportCallbacks.get(entry.target);
+                if (cb) {
+                    unobserveViewport(entry.target);
+                    cb();
+                }
+            }
+        });
+    }
+    viewportCallbacks.set(el, callback);
+    sharedViewportObserver.observe(el);
+};
+
 /** Whether a click should be handled by the router rather than the browser. */
 const shouldIntercept = (
     e: MouseEvent,
@@ -129,17 +157,8 @@ export const Link = (props: LinkProps): JSX.Element => {
             anchor &&
             'IntersectionObserver' in window
         ) {
-            const io = new IntersectionObserver((entries) => {
-                for (const entry of entries) {
-                    if (entry.isIntersecting) {
-                        doPrefetch();
-                        io.disconnect();
-                        break;
-                    }
-                }
-            });
-            io.observe(anchor);
-            onCleanup(() => io.disconnect());
+            observeViewport(anchor, doPrefetch);
+            onCleanup(() => anchor && unobserveViewport(anchor));
         }
     });
 

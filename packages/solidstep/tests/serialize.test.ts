@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect } from 'vitest';
+import { serialize, deserialize } from 'seroval';
 import {
     SEROVAL_PLUGINS,
     SerovalChunkReader,
@@ -75,6 +76,13 @@ describe('createChunk', () => {
         const header = new TextDecoder().decode(chunk.subarray(0, 12));
         expect(header).toBe(';0x00000003;');
     });
+
+    it('produces independent buffers across calls (shared encoder is stateless)', () => {
+        const a = createChunk('first');
+        const b = createChunk('second');
+        expect(new TextDecoder().decode(a.subarray(12))).toBe('first');
+        expect(new TextDecoder().decode(b.subarray(12))).toBe('second');
+    });
 });
 
 describe('serializeToStream <-> SerovalChunkReader round-trip', () => {
@@ -116,6 +124,43 @@ describe('serializeToStream <-> SerovalChunkReader round-trip', () => {
         const first = await reader.next();
         await reader.drain();
         await expect(first.value.p).resolves.toBe(42);
+    });
+});
+
+describe('envelope serialize/deserialize plugin asymmetry (server/data-endpoints.ts <-> client router-context.ts)', () => {
+    // The server serializes route envelopes with `serialize(value, { plugins:
+    // SEROVAL_PLUGINS })` (server/data-endpoints.ts), but the client
+    // deserializes the response with plain `deserialize(text)` — no plugins
+    // (utils/router-context.ts's fetchEnvelope, client.ts's fetchHole). This
+    // is NOT a bug: in seroval's string-mode output, each plugin's
+    // `serialize()` emits a self-contained JS expression (e.g. `new
+    // URL("...")`, `new Headers({...})`) that needs no plugin registry to
+    // evaluate back. Plugins are only required on the decode side for the
+    // separate `fromJSON`/`toJSONAsync` node-tree codec, which envelopes
+    // don't use. This test locks that asymmetry so it isn't "fixed" later
+    // under the mistaken belief the client is missing something.
+    it('round-trips URL/Headers/URLSearchParams/Date/Map through a plugin-less deserialize', () => {
+        const value = {
+            url: new URL('https://example.com/p?q=1'),
+            headers: new Headers({ 'x-test': 'value' }),
+            search: new URLSearchParams('a=1&b=2'),
+            when: new Date('2026-01-01T00:00:00.000Z'),
+            tags: new Map([['k', 'v']]),
+        };
+
+        const text = serialize(value, { plugins: SEROVAL_PLUGINS });
+        const result = deserialize(text) as typeof value;
+
+        expect(result.url).toBeInstanceOf(URL);
+        expect(result.url.href).toBe(value.url.href);
+        expect(result.headers).toBeInstanceOf(Headers);
+        expect(result.headers.get('x-test')).toBe('value');
+        expect(result.search).toBeInstanceOf(URLSearchParams);
+        expect(result.search.get('a')).toBe('1');
+        expect(result.when).toBeInstanceOf(Date);
+        expect(result.when.getTime()).toBe(value.when.getTime());
+        expect(result.tags).toBeInstanceOf(Map);
+        expect(result.tags.get('k')).toBe('v');
     });
 });
 

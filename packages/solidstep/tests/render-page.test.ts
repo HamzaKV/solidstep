@@ -96,6 +96,8 @@ vi.mock('../utils/instrumentation', () => ({
 }));
 vi.mock('../server/route-manifest', () => ({
     getCachedModule: (...a: unknown[]) => getCachedModule(...a),
+    getCachedAssets: (manifest: any, src: string) =>
+        manifest.inputs[src].assets(),
 }));
 vi.mock('../server/isr', () => ({
     serveIsr: async () => ({ html: '', cacheStatus: 'hit' }),
@@ -134,7 +136,16 @@ beforeEach(() => {
     logger.warn.mockClear();
     logger.error.mockClear();
     safeExecuteHook.mockClear();
-    getInstrumentation.mockReturnValue(null);
+    // A populated instrumentation module by default so the existing
+    // assertions on safeExecuteHook calls/context still exercise the
+    // (now-gated) onResponseStart/onResponseEnd construction; the dedicated
+    // "skips response-context construction" test below sets this to null.
+    getInstrumentation.mockReturnValue({
+        onRequest: vi.fn(),
+        onResponseStart: vi.fn(),
+        onResponseEnd: vi.fn(),
+        onRequestError: vi.fn(),
+    });
     mockResponseStatus.current = 200;
     getCachedModule.mockReset().mockResolvedValue({ options: {} });
     buildHydrationScript.mockClear();
@@ -184,6 +195,28 @@ const baseCtx = () => ({
     routeManifest: {} as any,
 });
 
+describe('renderPage manifest script', () => {
+    it('embeds the escaped client-manifest JSON with the per-request nonce', async () => {
+        render.mockResolvedValue({
+            rendered: '<p>hi</p>',
+            documentMeta: {},
+            documentAssets: [],
+            loaderData: {},
+            cacheStatus: undefined,
+        });
+        const ctx = baseCtx();
+        ctx.cspNonce = 'NONCE1' as any;
+        ctx.clientManifest.json = async () => ({ chunk: 'value' });
+
+        const stream = await renderPage(ctx);
+        const { text, error } = await readStream(stream as ReadableStream);
+
+        expect(error).toBeNull();
+        expect(text).toContain('nonce="NONCE1"');
+        expect(text).toContain('window.manifest={"chunk":"value"}');
+    });
+});
+
 describe('renderPage onResponseStart', () => {
     it('fires once with the final status before the body streams (main render)', async () => {
         render.mockResolvedValue({
@@ -203,6 +236,27 @@ describe('renderPage onResponseStart', () => {
         expect(onResponseStartCalls()[0][3]).toMatchObject({
             statusCode: 200,
         });
+    });
+
+    it('skips building the response context entirely when no instrumentation is registered', async () => {
+        getInstrumentation.mockReturnValue(null);
+        render.mockResolvedValue({
+            rendered: '<p>hi</p>',
+            documentMeta: {},
+            documentAssets: [],
+            loaderData: {},
+            cacheStatus: undefined,
+        });
+
+        const stream = await renderPage(baseCtx());
+        const { text, error } = await readStream(stream as ReadableStream);
+
+        expect(error).toBeNull();
+        expect(text).toContain('<p>hi</p>');
+        expect(onResponseStartCalls()).toHaveLength(0);
+        expect(
+            safeExecuteHook.mock.calls.filter((c) => c[0] === 'onResponseEnd'),
+        ).toHaveLength(0);
     });
 
     it('fires before the body on the hardcoded 404 fallback (no not-found module)', async () => {

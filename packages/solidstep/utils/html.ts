@@ -63,6 +63,22 @@ export const generateHtmlHead = (meta: Meta): string =>
  * more than one deferred boundary would otherwise emit the same
  * `<link>`/`<script>` tag once per boundary.
  */
+const dedupeKey = (asset: {
+    tag: string;
+    attrs: Record<string, unknown>;
+    children?: string;
+}): string => {
+    // script/link assets are uniquely identified by tag + rel + src/href, which
+    // covers the vast majority of assets and avoids a full JSON.stringify per
+    // asset per render. Anything else (inline <style>, or a script/link with
+    // neither src nor href) falls back to the exact-match comparison.
+    const ref = asset.attrs.src ?? asset.attrs.href;
+    if (asset.children === undefined && typeof ref === 'string') {
+        return `${asset.tag}|${asset.attrs.rel ?? ''}|${ref}`;
+    }
+    return JSON.stringify(asset);
+};
+
 const dedupeAssets = <
     T extends {
         tag: string;
@@ -74,7 +90,7 @@ const dedupeAssets = <
 ): T[] => {
     const seen = new Set<string>();
     return assets.filter((asset) => {
-        const key = JSON.stringify(asset);
+        const key = dedupeKey(asset);
         if (seen.has(key)) return false;
         seen.add(key);
         return true;

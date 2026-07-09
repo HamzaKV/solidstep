@@ -34,6 +34,7 @@ pnpm --filter kitchen-sink dev     # run the example app
 | `pnpm test` | Run the framework unit tests (Vitest) |
 | `pnpm test:e2e` | Build the framework + example app, then run Playwright e2e |
 | `pnpm build` | Build all publishable packages |
+| `pnpm bench` | Load-test a running production server (see [Performance](docs/performance.md#benchmarking-the-framework)) |
 
 ## Code style
 

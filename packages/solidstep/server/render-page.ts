@@ -35,12 +35,34 @@ import {
     createRequestContext,
     createResponseContext,
 } from '../utils/instrumentation.js';
-import { getCachedModule } from './route-manifest.js';
+import { getCachedModule, getCachedAssets } from './route-manifest.js';
 import { serveIsr } from './isr.js';
 import { isPreviewActive } from '../utils/preview.js';
 import { render, routeNeedsStreaming, template } from './render.js';
 import { isDeferredResult, isPprResult } from './types.js';
-import type { OptionsModule } from './types.js';
+import type { OptionsModule, RenderAsset } from './types.js';
+
+// The escaped client-manifest JSON payload embedded in every document is
+// static once the app is built — cache it in prod (skipped in dev so a
+// changed manifest under HMR is reflected immediately, same discipline as
+// `getCachedModule` in `./route-manifest.js`). Only the JSON blob is cached;
+// the surrounding `<script>` tag (which carries the per-request CSP nonce)
+// is still built fresh every time.
+let manifestJsonCache: string | null = null;
+const getManifestJson = async (
+    clientManifest: PageRenderContext['clientManifest'],
+): Promise<string> => {
+    /* v8 ignore next 3 -- prod-only cache hit path; covered by the
+       kitchen-sink e2e suite's production build (CSP/manifest specs). */
+    if (!import.meta.env.DEV && manifestJsonCache !== null) {
+        return manifestJsonCache;
+    }
+    const json = escapeScript(JSON.stringify(await clientManifest.json()));
+    if (!import.meta.env.DEV) {
+        manifestJsonCache = json;
+    }
+    return json;
+};
 
 /**
  * Everything the page-render pipeline needs from the request handler. The
@@ -97,6 +119,7 @@ export const renderPage = async (ctx: PageRenderContext) => {
         routeType: matched ? 'page' : 'not-found',
         params,
         searchParams,
+        pathname: pathnamePart,
     });
     await safeExecuteHook('onRequest', inst?.onRequest, req, reqCtx);
 
@@ -134,19 +157,21 @@ export const renderPage = async (ctx: PageRenderContext) => {
                 `public, max-age=0, s-maxage=${revalidate}, stale-while-revalidate`,
             );
             setResponseStatus(200);
-            const respCtx = createResponseContext(reqCtx, 200);
-            await safeExecuteHook(
-                'onResponseStart',
-                inst?.onResponseStart,
-                req,
-                respCtx,
-            );
-            await safeExecuteHook(
-                'onResponseEnd',
-                inst?.onResponseEnd,
-                req,
-                respCtx,
-            );
+            if (inst?.onResponseStart || inst?.onResponseEnd) {
+                const respCtx = createResponseContext(reqCtx, 200);
+                await safeExecuteHook(
+                    'onResponseStart',
+                    inst?.onResponseStart,
+                    req,
+                    respCtx,
+                );
+                await safeExecuteHook(
+                    'onResponseEnd',
+                    inst?.onResponseEnd,
+                    req,
+                    respCtx,
+                );
+            }
             return isr.html;
         }
     }
@@ -155,13 +180,15 @@ export const renderPage = async (ctx: PageRenderContext) => {
     let html: string | undefined;
     let hydrationDisabled = false;
     let meta: Meta = createBaseMeta();
-    const assets =
-        await clientManifest!.inputs[clientManifest!.handler].assets();
+    const assets = (await getCachedAssets(
+        clientManifest!,
+        clientManifest!.handler,
+    )) as RenderAsset[];
     const entryPath =
         clientManifest!.inputs[clientManifest!.handler].output.path;
     // The dev-only suffix injects the client error-overlay runtime into
     // every page (tree-shaken from prod, where `import.meta.env.DEV` is false).
-    const manifestHtml = `<script ${cspNonce ? `nonce="${cspNonce}"` : ''}>window.manifest=${escapeScript(JSON.stringify(await clientManifest!.json()))}</script>${import.meta.env.DEV ? devOverlayClientScript(cspNonce) : ''}`;
+    const manifestHtml = `<script ${cspNonce ? `nonce="${cspNonce}"` : ''}>window.manifest=${await getManifestJson(clientManifest!)}</script>${import.meta.env.DEV ? devOverlayClientScript(cspNonce) : ''}`;
 
     let clientHydrationScript: string | undefined;
 
@@ -178,16 +205,18 @@ export const renderPage = async (ctx: PageRenderContext) => {
             // but before the first body byte — across whichever of the
             // branches below (ISR, PPR, deferred, loading-swap, main, error,
             // 404, dev-overlay) ends up producing the response.
-            const fireResponseStart = () =>
-                safeExecuteHook(
+            const fireResponseStart = () => {
+                if (!inst?.onResponseStart) return undefined;
+                return safeExecuteHook(
                     'onResponseStart',
-                    inst?.onResponseStart,
+                    inst.onResponseStart,
                     req,
                     createResponseContext(
                         reqCtx,
                         getResponseStatus(event) || 200,
                     ),
                 );
+            };
 
             try {
                 try {
@@ -216,6 +245,7 @@ export const renderPage = async (ctx: PageRenderContext) => {
                                 pageOptions: {},
                                 cspNonce,
                                 locals,
+                                url: urlObj,
                             });
                             assets.push(...documentAssets);
                             clientHydrationScript = buildHydrationScript({
@@ -295,6 +325,7 @@ export const renderPage = async (ctx: PageRenderContext) => {
                                 pageOptions: options,
                                 cspNonce,
                                 locals,
+                                url: urlObj,
                             });
                             if (!isPprResult(result)) {
                                 throw new Error('Expected a PPR render result');
@@ -348,6 +379,7 @@ export const renderPage = async (ctx: PageRenderContext) => {
                                 pageOptions: options,
                                 cspNonce,
                                 locals,
+                                url: urlObj,
                             });
                             if (!isDeferredResult(result)) {
                                 throw new Error(
@@ -424,6 +456,7 @@ export const renderPage = async (ctx: PageRenderContext) => {
                                     pageOptions: options,
                                     cspNonce,
                                     locals,
+                                    url: urlObj,
                                 });
                             const assetsHtml = renderAssetsToHtml(
                                 assets.concat(documentAssets),
@@ -476,6 +509,7 @@ export const renderPage = async (ctx: PageRenderContext) => {
                             pageOptions: options,
                             cspNonce,
                             locals,
+                            url: urlObj,
                         });
                         if (
                             isDeferredResult(mainResult) ||
@@ -563,6 +597,7 @@ export const renderPage = async (ctx: PageRenderContext) => {
                             cspNonce,
                             locals,
                             error: e1,
+                            url: urlObj,
                         });
                         assets.push(...documentAssets);
                         clientHydrationScript = buildHydrationScript({
@@ -648,14 +683,16 @@ export const renderPage = async (ctx: PageRenderContext) => {
                 streamError = streamError ?? error;
                 throw error;
             } finally {
-                const statusCode = getResponseStatus(event) || 200;
-                const respCtx = createResponseContext(reqCtx, statusCode);
-                await safeExecuteHook(
-                    'onResponseEnd',
-                    inst?.onResponseEnd,
-                    req,
-                    respCtx,
-                );
+                if (inst?.onResponseEnd) {
+                    const statusCode = getResponseStatus(event) || 200;
+                    const respCtx = createResponseContext(reqCtx, statusCode);
+                    await safeExecuteHook(
+                        'onResponseEnd',
+                        inst.onResponseEnd,
+                        req,
+                        respCtx,
+                    );
+                }
                 if (streamError) {
                     await safeExecuteHook(
                         'onRequestError',

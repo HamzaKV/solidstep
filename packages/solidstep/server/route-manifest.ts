@@ -30,6 +30,33 @@ export const getCachedModule = async <T>(importFn: Import): Promise<T> => {
     return module;
 };
 
+// A given module's client asset list (script/link/style tags from the Vite
+// manifest) is fixed once the app is built — cache it per src (skipped in dev,
+// same discipline as `getCachedModule` above). Caches the *promise* so
+// concurrent first requests for the same module coalesce onto one manifest
+// lookup instead of each re-resolving it. Callers only ever spread these
+// arrays into a larger list, never mutate them, so sharing one array/promise
+// across requests is safe.
+const assetsCache = new Map<
+    string,
+    ReturnType<Manifest['inputs'][string]['assets']>
+>();
+
+export const getCachedAssets = (
+    manifest: Pick<Manifest, 'inputs'>,
+    src: string,
+): ReturnType<Manifest['inputs'][string]['assets']> => {
+    if (import.meta.env.DEV) {
+        return manifest.inputs[src].assets();
+    }
+    let cached = assetsCache.get(src);
+    if (!cached) {
+        cached = manifest.inputs[src].assets();
+        assetsCache.set(src, cached);
+    }
+    return cached;
+};
+
 export type FileRoute = RouteModule & {
     type:
         | 'route'

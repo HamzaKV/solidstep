@@ -11,11 +11,22 @@ const getCache = vi.fn(async () => null as unknown);
 const setCacheWithOptions = vi.fn(async () => undefined);
 const shouldCachePage = vi.fn(() => false);
 const isPreviewActive = vi.fn(() => false);
+const pageCacheKey = vi.fn((_url: URL) => 'page:key');
 
+// Overridable per-src asset lookup — defaults to empty (matching the prior
+// behavior for every existing test); the asset-ordering test below swaps in
+// a per-src tag so it can assert push order across nodes.
+const clientManifestAssets = vi.fn((_src: string): unknown[] => []);
 vi.mock('vinxi/manifest', () => ({
-    // Any input src resolves to a node whose assets() is empty.
     getManifest: () => ({
-        inputs: new Proxy({}, { get: () => ({ assets: async () => [] }) }),
+        inputs: new Proxy(
+            {},
+            {
+                get: (_t, src: string) => ({
+                    assets: async () => clientManifestAssets(src),
+                }),
+            },
+        ),
     }),
 }));
 vi.mock('solid-js/web', () => ({
@@ -38,7 +49,7 @@ vi.mock('../utils/cache', () => ({
 }));
 vi.mock('../utils/page-cache', () => ({
     shouldCachePage: () => shouldCachePage(),
-    pageCacheKey: () => 'page:key',
+    pageCacheKey: (url: URL) => pageCacheKey(url),
 }));
 vi.mock('../utils/preview', () => ({
     isPreviewActive: () => isPreviewActive(),
@@ -46,6 +57,8 @@ vi.mock('../utils/preview', () => ({
 // getCachedModule resolves an Import by calling its `import()`.
 vi.mock('../server/route-manifest', () => ({
     getCachedModule: (imp: { import: () => unknown }) => imp.import(),
+    getCachedAssets: (manifest: any, src: string) =>
+        manifest.inputs[src].assets(),
 }));
 
 import { render, routeNeedsStreaming } from '../server/render';
@@ -79,6 +92,8 @@ beforeEach(() => {
     setCacheWithOptions.mockClear();
     shouldCachePage.mockReset().mockReturnValue(false);
     isPreviewActive.mockReset().mockReturnValue(false);
+    pageCacheKey.mockClear();
+    clientManifestAssets.mockReset().mockReturnValue([]);
 });
 
 describe('render', () => {
@@ -166,6 +181,37 @@ describe('render', () => {
         );
     });
 
+    it('skips preview/cache-key/cache-read work entirely for a non-cached page', async () => {
+        shouldCachePage.mockReturnValue(false);
+        await render({
+            toRender: 'main',
+            entry: baseEntry(),
+            routeParams: {},
+            searchParams: {},
+            req: req(),
+        });
+        expect(isPreviewActive).not.toHaveBeenCalled();
+        expect(pageCacheKey).not.toHaveBeenCalled();
+        expect(getCache).not.toHaveBeenCalled();
+    });
+
+    it('threads a pre-parsed url through to the cache-key computation instead of re-parsing req.url', async () => {
+        shouldCachePage.mockReturnValue(true);
+        getCache.mockResolvedValue(null);
+        const threadedUrl = new URL('https://example.com/page?threaded=1');
+        await render({
+            toRender: 'main',
+            entry: baseEntry(),
+            routeParams: {},
+            searchParams: {},
+            req: req(), // a different URL than `threadedUrl`
+            pageOptions: { cache: { ttl: 1000 } },
+            url: threadedUrl,
+        });
+        expect(pageCacheKey).toHaveBeenCalledWith(threadedUrl);
+        expect(getCache).toHaveBeenCalledWith('page:key');
+    });
+
     it('selects the not-found variant', async () => {
         const result = await render({
             toRender: 'not-found',
@@ -217,6 +263,29 @@ describe('render', () => {
             title: 'page',
             base: 'layout',
         });
+    });
+
+    it('pushes assets in root-layout-before-page order, even though per-node fetches now run concurrently', async () => {
+        clientManifestAssets.mockImplementation((src: string) => [
+            { tag: 'link', attrs: { href: src } },
+        ]);
+        const entry = baseEntry();
+        const layoutSrc = `${entry.layouts[0].layout.src}&pick=$css`;
+        const pageSrc = `${entry.mainPage.page.src}&pick=$css`;
+
+        const result = await render({
+            toRender: 'main',
+            entry,
+            routeParams: {},
+            searchParams: {},
+            req: req(),
+        });
+        const hrefs = result.documentAssets.map(
+            (a) => (a as any).attrs.href as string,
+        );
+        // Layout's own CSS asset is pushed before the page's, mirroring the
+        // reduceRight tree order (outer layout resolves and pushes first).
+        expect(hrefs).toEqual([layoutSrc, pageSrc]);
     });
 
     it('returns a deferred result when a layout loader defers', async () => {

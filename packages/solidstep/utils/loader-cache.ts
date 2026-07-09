@@ -42,7 +42,13 @@ const invokeLoader = (
     const timeoutMs = resolveLoaderTimeout(loaderFn.options?.timeout);
     return runWithLoaderTimeout(
         (signal) => {
-            const request = signal ? new Request(req, { signal }) : req;
+            // Skip the clone when there's nothing to change: no signal, or a
+            // signal that's already `req.signal` (the common no-timeout path
+            // where `invocation.signal` is just the request's own signal).
+            const request =
+                signal && signal !== req.signal
+                    ? new Request(req, { signal })
+                    : req;
             const context: LoaderContext = {
                 locals: (invocation?.locals ?? {}) as LoaderContext['locals'],
                 signal,

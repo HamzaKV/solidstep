@@ -39,7 +39,7 @@ At server startup, SolidStep builds an in-memory route manifest from Vinxi's fil
 
 For each page route it precomputes the chain of nested layouts (root → leaf), the matching `loading` and `error` pages, the root `not-found` page, and any parallel-route groups attached to that path. API routes (`route.ts`) are inserted as `route`-type nodes carrying their handler import.
 
-The manifest is built once and reused. In production, dynamically imported route modules are additionally memoized in a module cache; in dev the cache is skipped so HMR invalidations are respected.
+The manifest is built once and reused. In production, dynamically imported route modules are additionally memoized in a module cache; a route's per-module client asset list, its escaped client-manifest JSON payload, and whether it needs the streaming (`renderToStream`) path are memoized the same way. In dev all of these caches are skipped so HMR invalidations are respected.
 
 ## 2. Matching
 

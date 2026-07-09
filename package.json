@@ -13,6 +13,7 @@
     "test:coverage": "pnpm --filter solidstep test:coverage",
     "test:e2e": "pnpm --filter kitchen-sink test:e2e",
     "build": "pnpm --filter \"./packages/*\" build",
+    "bench": "node scripts/bench.mjs",
     "changeset": "changeset",
     "version-packages": "changeset version",
     "release": "bash scripts/release.sh",
