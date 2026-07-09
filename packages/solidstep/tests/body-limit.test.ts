@@ -4,6 +4,7 @@ import {
     isOverBodyLimit,
     bodyLimit,
 } from '../utils/body-limit';
+import { fuzz, fuzzString } from './fuzz-helpers';
 
 describe('parseContentLength', () => {
     it('returns null for missing/empty values', () => {
@@ -83,5 +84,37 @@ describe('bodyLimit middleware', () => {
         );
         expect(res).toBeInstanceOf(Response);
         expect((res as Response).status).toBe(413);
+    });
+
+    describe('fuzzing', () => {
+        it('parseContentLength never throws and always returns null, NaN, or a non-negative finite number', () => {
+            fuzz(1, 3000, fuzzString, (header) => {
+                const result = parseContentLength(header);
+                if (result === null || Number.isNaN(result)) return;
+                expect(Number.isFinite(result)).toBe(true);
+                expect(result).toBeGreaterThanOrEqual(0);
+            });
+        });
+
+        it('isOverBodyLimit fails closed: a present-but-malformed length is never silently allowed through', () => {
+            fuzz(2, 3000, fuzzString, (header) => {
+                if (!header) return; // falsy -> parses to null ("absent"), allowed by design
+                const len = parseContentLength(header);
+                const over = isOverBodyLimit(len, 100);
+                if (len === null) return;
+                if (Number.isNaN(len)) {
+                    expect(over).toBe(true);
+                } else {
+                    expect(over).toBe(len > 100);
+                }
+            });
+        });
+
+        it('bodyLimit middleware never throws for any Content-Length header value', () => {
+            const mw = bodyLimit({ maxBytes: 100 });
+            fuzz(3, 500, fuzzString, (header) => {
+                mw.onRequest?.(event(header));
+            });
+        });
     });
 });

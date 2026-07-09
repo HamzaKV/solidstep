@@ -6,6 +6,17 @@ import {
     ValidationError,
     isValidationError,
 } from '../utils/action-schema';
+import { fuzzKey, makeRng } from './fuzz-helpers';
+
+/** Echoes the coerced input straight back, unvalidated -- lets fuzz tests
+ * inspect exactly what `formDataToObject` produced. */
+const echoSchema: StandardSchemaV1<Record<string, unknown>, unknown> = {
+    '~standard': {
+        version: 1,
+        vendor: 'test',
+        validate: (value) => ({ value }),
+    },
+};
 
 /** A minimal Standard Schema V1 whose `validate` returns a Promise, unlike
  * zod's (which resolves synchronously for these simple schemas) -- exercises
@@ -206,5 +217,64 @@ describe('isValidationError', () => {
         expect(isValidationError(new Error('boom'))).toBe(false);
         expect(isValidationError('not an error')).toBe(false);
         expect(isValidationError(undefined)).toBe(false);
+    });
+});
+
+describe('formDataToObject: fuzzing (via parseActionInput + echoSchema)', () => {
+    // parseActionInput is async, so this drives its own loop rather than
+    // using the sync `fuzz()` helper.
+    it('the coerced object never has a tampered prototype, for any field name including dangerous ones', async () => {
+        const rng = makeRng(1);
+        for (let i = 0; i < 1000; i++) {
+            const formData = new FormData();
+            const fieldCount = rng.int(1, 4);
+            for (let f = 0; f < fieldCount; f++) {
+                const key = fuzzKey(rng);
+                if (rng.bool()) {
+                    formData.append(key, `value-${f}`);
+                } else {
+                    formData.append(
+                        key,
+                        new File(['x'], `file-${f}.txt`, {
+                            type: 'text/plain',
+                        }),
+                    );
+                }
+            }
+            let result: unknown;
+            try {
+                result = await parseActionInput(echoSchema, formData);
+            } catch (err) {
+                throw new Error(
+                    `iteration ${i} threw unexpectedly: ${err instanceof Error ? err.message : String(err)}`,
+                );
+            }
+            expect(
+                Object.getPrototypeOf(result),
+                `iteration ${i}: prototype was tampered`,
+            ).toBeNull();
+        }
+    });
+
+    it('a field never leaks its value onto an unrelated field name', async () => {
+        const rng = makeRng(2);
+        for (let i = 0; i < 500; i++) {
+            const key = fuzzKey(rng);
+            const formData = new FormData();
+            formData.set(key, 'the-canary-value');
+            formData.set('unrelated_field', 'original');
+
+            const result = (await parseActionInput(
+                echoSchema,
+                formData,
+            )) as Record<string, unknown>;
+
+            if (key !== 'unrelated_field') {
+                expect(
+                    result.unrelated_field,
+                    `iteration ${i}: key=${JSON.stringify(key)} leaked into unrelated_field`,
+                ).toBe('original');
+            }
+        }
     });
 });

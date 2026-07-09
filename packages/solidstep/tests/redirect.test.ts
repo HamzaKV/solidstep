@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { isSafeRedirectTarget } from '../utils/redirect';
+import { fuzz, fuzzString } from './fuzz-helpers';
 
 // `redirect`/`safeRedirect` branch on `isServer` from 'solid-js/web'; each block
 // remocks it and re-imports so both the server (throw) and client (navigate)
@@ -112,5 +113,40 @@ describe('isSafeRedirectTarget', () => {
     it('rejects empty / malformed input', () => {
         expect(isSafeRedirectTarget('')).toBe(false);
         expect(isSafeRedirectTarget('not a url')).toBe(false);
+    });
+
+    describe('fuzzing', () => {
+        const BASE = 'https://good.example.com';
+
+        it('never throws, for any input', () => {
+            fuzz(1, 3000, fuzzString, (input) => {
+                expect(() => isSafeRedirectTarget(input)).not.toThrow();
+                expect(() =>
+                    isSafeRedirectTarget(input, ['auth.example.com']),
+                ).not.toThrow();
+            });
+        });
+
+        it('never approves (no allowedHosts) a target that a real WHATWG URL resolution would send off-origin', () => {
+            fuzz(2, 3000, fuzzString, (input) => {
+                if (!isSafeRedirectTarget(input)) return;
+                // isSafeRedirectTarget approved it -- the browser's own
+                // resolution of the same string against a fixed origin must
+                // stay on that origin, or this is an open-redirect bypass.
+                const resolved = new URL(input, BASE);
+                expect(resolved.origin).toBe(BASE);
+            });
+        });
+
+        it('with allowedHosts, an approved absolute target always resolves to an allowed host', () => {
+            const allowed = ['auth.example.com', 'sso.example.com'];
+            fuzz(3, 3000, fuzzString, (input) => {
+                if (!isSafeRedirectTarget(input, allowed)) return;
+                if (input.startsWith('/')) return; // relative path, already covered above
+                const resolved = new URL(input);
+                expect(allowed).toContain(resolved.host);
+                expect(['http:', 'https:']).toContain(resolved.protocol);
+            });
+        });
     });
 });

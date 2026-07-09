@@ -24,6 +24,7 @@ import {
     setSources,
     addSource,
 } from '../utils/csp';
+import { fuzz, fuzzString } from './fuzz-helpers';
 
 describe('createBasePolicy', () => {
     it('includes default-src self', () => {
@@ -201,6 +202,54 @@ describe('source injection guards', () => {
                 'https://cdn.example.com',
             ]),
         ).not.toThrow();
+    });
+
+    describe('fuzzing', () => {
+        it('any source that is accepted never lets serializePolicy emit a second directive or a raw newline', () => {
+            fuzz(1, 3000, fuzzString, (source) => {
+                let directive: ReturnType<typeof createDirective> | null = null;
+                try {
+                    directive = createDirective('script-src', [
+                        "'self'",
+                        source,
+                    ]);
+                } catch {
+                    return; // rejected outright -- nothing further to check
+                }
+                const serialized = serializePolicy([directive]);
+                // Exactly one directive: no ';'-smuggled second directive.
+                expect(
+                    serialized.split(';').filter((s) => s.trim().length > 0),
+                ).toHaveLength(1);
+                // No raw newline ever reaches the header value.
+                expect(serialized).not.toMatch(/[\r\n]/);
+            });
+        });
+
+        it('addSource/setSources uphold the same invariant as createDirective', () => {
+            fuzz(2, 3000, fuzzString, (source) => {
+                const base = createDirective('style-src', ["'self'"]);
+                for (const build of [
+                    () => addSource(base, source),
+                    () => setSources(base, [source]),
+                ]) {
+                    let directive: ReturnType<typeof createDirective> | null =
+                        null;
+                    try {
+                        directive = build();
+                    } catch {
+                        continue;
+                    }
+                    const serialized = serializePolicy([directive]);
+                    expect(
+                        serialized
+                            .split(';')
+                            .filter((s) => s.trim().length > 0),
+                    ).toHaveLength(1);
+                    expect(serialized).not.toMatch(/[\r\n]/);
+                }
+            });
+        });
     });
 });
 

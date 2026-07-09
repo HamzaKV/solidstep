@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { cors } from '../utils/cors';
+import { fuzz, fuzzString } from './fuzz-helpers';
 
 const trustedOrigins = ['https://example.com', 'https://app.example.com'];
 const check = cors(trustedOrigins);
@@ -103,6 +104,38 @@ describe('trustedOrigins case normalization', () => {
         expect(headers['Access-Control-Allow-Origin']).toBe(
             'https://example.com',
         );
+    });
+});
+
+describe('fuzzing', () => {
+    it('never throws, and never approves an origin not in trustedOrigins (case-insensitively)', () => {
+        fuzz(1, 3000, fuzzString, (origin) => {
+            const headers = check(origin, false) as Record<string, string>;
+            const allowOrigin = headers['Access-Control-Allow-Origin'];
+            if (allowOrigin === undefined) return; // untrusted, correctly empty
+            expect(
+                trustedOrigins.some(
+                    (t) => t.toLowerCase() === origin.toLowerCase(),
+                ),
+            ).toBe(true);
+            // The echoed value is always the verbatim input, never rewritten
+            // to something else (which could itself be an injection vector).
+            expect(allowOrigin).toBe(origin);
+        });
+    });
+
+    it('never emits credential headers for an untrusted origin, for any input', () => {
+        const credCheck = cors(trustedOrigins, undefined, undefined, {
+            allowCredentials: true,
+        });
+        fuzz(2, 2000, fuzzString, (origin) => {
+            const headers = credCheck(origin, false) as Record<string, string>;
+            if (headers['Access-Control-Allow-Origin'] === undefined) {
+                expect(
+                    headers['Access-Control-Allow-Credentials'],
+                ).toBeUndefined();
+            }
+        });
     });
 });
 

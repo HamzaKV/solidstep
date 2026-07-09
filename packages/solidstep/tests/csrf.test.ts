@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { csrf } from '../utils/csrf';
+import { fuzz, fuzzString } from './fuzz-helpers';
 
 const trustedOrigins = ['trusted.example.com'];
 const check = csrf(trustedOrigins);
@@ -136,6 +137,44 @@ describe('trustedOrigins case normalization', () => {
             'https://trusted.example.com/form',
         );
         expect(result.success).toBe(true);
+    });
+});
+
+describe('fuzzing', () => {
+    it('never throws for any Origin or Referer header value', () => {
+        fuzz(1, 2000, fuzzString, (value) => {
+            expect(() => check('POST', httpsUrl, value)).not.toThrow();
+            expect(() =>
+                check('POST', httpsUrl, undefined, value),
+            ).not.toThrow();
+        });
+    });
+
+    it('never approves an Origin that is neither same-origin nor in trustedOrigins', () => {
+        fuzz(2, 2000, fuzzString, (origin) => {
+            const result = check('POST', httpsUrl, origin);
+            if (!result.success) return;
+            const parsedOrigin = new URL(origin); // must parse -- it was approved
+            const sameOrigin = parsedOrigin.origin === httpsUrl.origin;
+            const isTrusted = trustedOrigins.some(
+                (t) => t.toLowerCase() === parsedOrigin.host,
+            );
+            expect(sameOrigin || isTrusted).toBe(true);
+        });
+    });
+
+    it('never approves an HTTPS Referer that is neither same-host nor in trustedOrigins', () => {
+        fuzz(3, 2000, fuzzString, (referer) => {
+            const result = check('POST', httpsUrl, undefined, referer);
+            if (!result.success) return;
+            const parsedReferer = new URL(referer); // must parse -- it was approved
+            expect(parsedReferer.protocol).toBe('https:');
+            const sameHost = parsedReferer.host === httpsUrl.host;
+            const isTrusted = trustedOrigins.some(
+                (t) => t.toLowerCase() === parsedReferer.host,
+            );
+            expect(sameHost || isTrusted).toBe(true);
+        });
     });
 });
 

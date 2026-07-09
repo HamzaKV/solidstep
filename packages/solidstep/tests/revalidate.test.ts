@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { fuzzString, makeRng } from './fuzz-helpers';
 
 vi.mock('../utils/cache.js', () => ({
     invalidateCache: vi.fn(async () => undefined),
@@ -188,5 +189,79 @@ describe('handleRevalidate', () => {
         });
         const res = await handleRevalidate(req);
         expect(res.status).toBe(400);
+    });
+
+    describe('fuzzing', () => {
+        it('never throws and never returns 200 without the exact correct token, for any Authorization header value', async () => {
+            const { handleRevalidate } = await import('../server/revalidate');
+            const rng = makeRng(1);
+            const VALID_STATUSES = [200, 400, 401, 405, 413];
+            for (let i = 0; i < 1500; i++) {
+                const authHeader = fuzzString(rng);
+                let req: Request;
+                try {
+                    // A header value containing control chars (e.g. a
+                    // newline) is rejected by the Headers API itself -- such
+                    // a request could never arrive at our handler in the
+                    // first place (the HTTP layer rejects it first), so
+                    // that's not a finding about handleRevalidate.
+                    req = new Request(
+                        'http://localhost/__solidstep_revalidate',
+                        {
+                            method: 'POST',
+                            headers: { authorization: authHeader },
+                            body: JSON.stringify({ path: '/x' }),
+                        },
+                    );
+                } catch {
+                    continue;
+                }
+                let res: { status: number; body: string };
+                try {
+                    res = await handleRevalidate(req);
+                } catch (err) {
+                    throw new Error(
+                        `iteration ${i} (auth=${JSON.stringify(authHeader)}) threw: ${err instanceof Error ? err.message : String(err)}`,
+                    );
+                }
+                expect(VALID_STATUSES, `iteration ${i}`).toContain(res.status);
+                if (res.status === 200) {
+                    expect(
+                        authHeader.toLowerCase(),
+                        `iteration ${i}: got 200 with a wrong-looking token`,
+                    ).toBe('bearer the-real-token');
+                }
+            }
+        });
+
+        it('never throws for any raw request body, regardless of Content-Length or JSON validity', async () => {
+            const { handleRevalidate } = await import('../server/revalidate');
+            const rng = makeRng(2);
+            for (let i = 0; i < 1000; i++) {
+                const rawBody = fuzzString(rng);
+                const req = new Request(
+                    'http://localhost/__solidstep_revalidate',
+                    {
+                        method: 'POST',
+                        headers: {
+                            authorization: 'Bearer the-real-token',
+                            'content-length': String(
+                                rng.bool()
+                                    ? rawBody.length
+                                    : rng.int(0, 50_000), // sometimes lie
+                            ),
+                        },
+                        body: rawBody,
+                    },
+                );
+                try {
+                    await handleRevalidate(req);
+                } catch (err) {
+                    throw new Error(
+                        `iteration ${i} (body=${JSON.stringify(rawBody.slice(0, 50))}) threw: ${err instanceof Error ? err.message : String(err)}`,
+                    );
+                }
+            }
+        });
     });
 });
