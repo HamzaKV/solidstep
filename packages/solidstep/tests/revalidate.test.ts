@@ -264,4 +264,44 @@ describe('handleRevalidate', () => {
             }
         });
     });
+
+    describe('load: high-concurrency invalidation calls', () => {
+        it('a large burst of concurrent path/tag invalidations all succeed with no crash or dropped call', async () => {
+            const { handleRevalidate } = await import('../server/revalidate');
+            const { invalidateCache, invalidateTag } = await import(
+                '../utils/cache.js'
+            );
+            // Other tests in this file share these module-level mocks and
+            // don't reset them (they only assert toHaveBeenCalledWith, not
+            // counts) -- clear here since this test counts exact calls.
+            vi.mocked(invalidateCache).mockClear();
+            vi.mocked(invalidateTag).mockClear();
+            const N = 200;
+            const requests = Array.from({ length: N }, (_, i) =>
+                i % 2 === 0
+                    ? new Request('http://localhost/__solidstep_revalidate', {
+                          method: 'POST',
+                          headers: { authorization: 'Bearer the-real-token' },
+                          body: JSON.stringify({ path: `/item-${i}` }),
+                      })
+                    : new Request('http://localhost/__solidstep_revalidate', {
+                          method: 'POST',
+                          headers: { authorization: 'Bearer the-real-token' },
+                          body: JSON.stringify({ tag: `tag-${i}` }),
+                      }),
+            );
+
+            const results = await Promise.all(
+                requests.map((req) => handleRevalidate(req)),
+            );
+
+            for (let i = 0; i < N; i++) {
+                expect(results[i].status, `request ${i}`).toBe(200);
+            }
+            expect(invalidateCache).toHaveBeenCalledTimes(
+                (N / 2) * 3, // path + preview:path + isr:path, per path call
+            );
+            expect(invalidateTag).toHaveBeenCalledTimes(N / 2);
+        });
+    });
 });

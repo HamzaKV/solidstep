@@ -88,6 +88,44 @@ describe('checkRateLimit', () => {
             vi.useRealTimers();
         }
     });
+
+    describe('load: high concurrency across many interleaved keys', () => {
+        it('gives every key exactly `max` allowed hits under a large true-concurrent burst, no lost or double-counted increments', async () => {
+            const opts = { windowMs: 5000, max: 10 };
+            const KEY_COUNT = 15;
+            const CALLS_PER_KEY = 30;
+            const keys = Array.from(
+                { length: KEY_COUNT },
+                (_, i) => `load-key-${i}`,
+            );
+
+            // Interleave calls across all keys (not grouped per key) so the
+            // per-key lock in checkRateLimit is genuinely exercised against
+            // concurrent traffic for OTHER keys too, not just its own.
+            const calls: Promise<{ limited: boolean }>[] = [];
+            for (let round = 0; round < CALLS_PER_KEY; round++) {
+                for (const key of keys) {
+                    calls.push(checkRateLimit(key, opts));
+                }
+            }
+            const results = await Promise.all(calls);
+
+            // Group results back by key (calls were pushed in round-major,
+            // key-minor order) to check each key's own allowed count.
+            for (let k = 0; k < KEY_COUNT; k++) {
+                const forKey = results.filter((_, i) => i % KEY_COUNT === k);
+                const allowed = forKey.filter((r) => !r.limited).length;
+                expect(allowed, `key ${keys[k]}`).toBe(opts.max);
+            }
+
+            // Sequential follow-up per key proves no increment was lost:
+            // every key should already be well past its limit.
+            for (const key of keys) {
+                const final = await checkRateLimit(key, opts);
+                expect(final.limited, key).toBe(true);
+            }
+        });
+    });
 });
 
 describe('rateLimit middleware', () => {

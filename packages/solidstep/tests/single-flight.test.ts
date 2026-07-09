@@ -114,4 +114,44 @@ describe('singleFlight', () => {
             }
         });
     });
+
+    describe('load: high concurrency across many interleaved keys', () => {
+        it('runs each of many keys exactly once despite a large truly-concurrent burst of callers per key', async () => {
+            const KEY_COUNT = 100;
+            const CALLERS_PER_KEY = 20;
+            const execCounts = new Map<string, number>();
+            const keys = Array.from(
+                { length: KEY_COUNT },
+                (_, i) => `flight-${i}`,
+            );
+
+            const fnFor = (key: string) => async () => {
+                execCounts.set(key, (execCounts.get(key) ?? 0) + 1);
+                // A real async delay (macrotask, not just a microtask) so
+                // callers genuinely interleave across keys while each
+                // flight is in progress, not just resolve synchronously.
+                await new Promise((r) => setTimeout(r, 1));
+                return `result-${key}`;
+            };
+
+            // Interleaved (round-major) so it's not just N sequential
+            // bursts per key -- every key has an in-flight call while
+            // every OTHER key also does.
+            const calls: Promise<string>[] = [];
+            for (let round = 0; round < CALLERS_PER_KEY; round++) {
+                for (const key of keys) {
+                    calls.push(singleFlight(key, fnFor(key)));
+                }
+            }
+            const results = await Promise.all(calls);
+
+            for (const key of keys) {
+                expect(execCounts.get(key), key).toBe(1);
+            }
+            for (let i = 0; i < results.length; i++) {
+                const key = keys[i % KEY_COUNT];
+                expect(results[i], `call ${i}`).toBe(`result-${key}`);
+            }
+        });
+    });
 });

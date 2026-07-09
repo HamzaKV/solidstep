@@ -191,4 +191,60 @@ describe('getCachedLoaderData', () => {
         expect(ctx.signal).toBe(controller.signal);
         expect(ctx.locals).toEqual({ user: 'u1' });
     });
+
+    describe('load: many interleaved preview/non-preview paths at once', () => {
+        it('every one of many concurrent (path, previewState) combinations resolves its own correct value, with no cross-contamination', async () => {
+            // `isPreviewActive()` is read synchronously at the very top of
+            // getCachedLoaderData, before its first await -- so toggling the
+            // mock immediately before each call (in the same synchronous
+            // turn, no await in between) reliably "stamps" that call's
+            // preview state, even though none of the calls are awaited
+            // individually until the end.
+            const PATH_COUNT = 25;
+            const loaders = Array.from({ length: PATH_COUNT }, (_, i) => ({
+                loader: vi.fn(async () => {
+                    await new Promise((r) => setTimeout(r, 1));
+                    return { data: { path: i, at: Date.now() } };
+                }),
+                options: { cache: {} },
+            }));
+
+            const calls: Promise<unknown>[] = [];
+            const expectedPreview: boolean[] = [];
+            for (let round = 0; round < 3; round++) {
+                for (let i = 0; i < PATH_COUNT; i++) {
+                    const preview = (i + round) % 2 === 0;
+                    isPreviewActive.mockReturnValue(preview);
+                    expectedPreview.push(preview);
+                    calls.push(
+                        getCachedLoaderData(
+                            loaders[i],
+                            '/p',
+                            req(`https://example.com/load-${i}`),
+                        ),
+                    );
+                }
+            }
+            const results = (await Promise.all(calls)) as {
+                path: number;
+            }[];
+
+            for (let j = 0; j < results.length; j++) {
+                const expectedPath = j % PATH_COUNT;
+                expect(results[j].path, `call ${j}`).toBe(expectedPath);
+            }
+
+            // Each path's loader ran at most twice (once for preview, once
+            // for published) despite 3 rounds -- the 2nd/3rd round for a
+            // given (path, previewState) pair coalesces onto the cached
+            // value from round 1, never re-running or leaking into the
+            // other namespace.
+            for (let i = 0; i < PATH_COUNT; i++) {
+                expect(
+                    loaders[i].loader.mock.calls.length,
+                    `path ${i}`,
+                ).toBeLessThanOrEqual(2);
+            }
+        });
+    });
 });

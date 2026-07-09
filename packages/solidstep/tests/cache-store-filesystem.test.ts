@@ -169,4 +169,72 @@ describe('FilesystemCacheStore', () => {
         await store.set('b', 2); // ensureDir recreates the directory
         expect((await store.get<number>('b'))?.value).toBe(2);
     });
+
+    describe('load: high-concurrency tag-index writes', () => {
+        it('every key survives a large concurrent set() burst across overlapping tags, tag index stays fully consistent', async () => {
+            const KEY_COUNT = 80;
+            const TAGS = ['t0', 't1', 't2', 't3', 't4'];
+            const tagFor = (i: number) => TAGS[i % TAGS.length];
+
+            // All 80 writes fire truly concurrently (no await between them),
+            // each touching the shared tags file via withTagsLock -- this is
+            // the real stress case the lock exists for, at far higher
+            // concurrency than the earlier 2-writer test.
+            await Promise.all(
+                Array.from({ length: KEY_COUNT }, (_, i) =>
+                    store.set(`k${i}`, i, { tags: [tagFor(i)] }),
+                ),
+            );
+
+            // Every key readable with its own value intact.
+            for (let i = 0; i < KEY_COUNT; i++) {
+                expect((await store.get<number>(`k${i}`))?.value).toBe(i);
+            }
+
+            // Every tag's index entry lists exactly the keys tagged with it
+            // -- no lost entries, no cross-tag contamination.
+            const index = JSON.parse(
+                readFileSync(join(dir, '__tags.json'), 'utf-8'),
+            ) as Record<string, string[]>;
+            for (const tag of TAGS) {
+                const expectedKeys = Array.from(
+                    { length: KEY_COUNT },
+                    (_, i) => i,
+                )
+                    .filter((i) => tagFor(i) === tag)
+                    .map((i) => `k${i}`)
+                    .sort();
+                expect(index[tag]?.slice().sort(), tag).toEqual(expectedKeys);
+            }
+
+            // Invalidating all tags concurrently must remove every key with
+            // no crash and no leftover entries.
+            await Promise.all(TAGS.map((tag) => store.invalidateTag(tag)));
+            for (let i = 0; i < KEY_COUNT; i++) {
+                expect(await store.get(`k${i}`)).toBeNull();
+            }
+        });
+
+        it('concurrent set/delete/invalidateTag on overlapping tags never corrupts the tags file (always valid JSON)', async () => {
+            const OPS = 100;
+            const ops: Promise<void>[] = [];
+            for (let i = 0; i < OPS; i++) {
+                const key = `key-${i % 20}`; // heavy key reuse -> real races
+                const tag = `tag-${i % 4}`;
+                if (i % 3 === 0) {
+                    ops.push(store.set(key, i, { tags: [tag] }));
+                } else if (i % 3 === 1) {
+                    ops.push(store.delete(key));
+                } else {
+                    ops.push(store.invalidateTag(tag));
+                }
+            }
+            await expect(Promise.all(ops)).resolves.toBeDefined();
+
+            // The tags file must always be valid, parseable JSON afterward
+            // -- no torn/partial write ever observably escaped the lock.
+            const raw = readFileSync(join(dir, '__tags.json'), 'utf-8');
+            expect(() => JSON.parse(raw)).not.toThrow();
+        });
+    });
 });
