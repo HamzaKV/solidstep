@@ -1,5 +1,11 @@
 # solidstep
 
+## 0.9.1
+
+### Patch Changes
+
+- 370e641: Add `docs/llms.txt` — an llms.txt-standard machine-readable index of the documentation for AI agents — and link it from the docs index.
+
 ## 0.9.0
 
 ### Minor Changes
