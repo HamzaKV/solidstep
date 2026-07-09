@@ -1,5 +1,11 @@
 # @varlabs/create-solidstep
 
+## 0.3.3
+
+### Patch Changes
+
+- 370e641: Scaffolded apps now include an `AGENTS.md` that teaches AI coding agents SolidStep's conventions: routing and special files, loaders, server actions and forms, rendering/caching options, security middleware, an import cheat sheet, and common SolidJS pitfalls.
+
 ## 0.3.2
 
 ### Patch Changes
