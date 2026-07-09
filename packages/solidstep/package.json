@@ -1,6 +1,6 @@
 {
     "name": "solidstep",
-    "version": "0.8.1",
+    "version": "0.9.0",
     "description": "Next Step SolidJS Framework for building web applications.",
     "type": "module",
     "author": "HamzaKV <hamzakv333@gmail.com>",
