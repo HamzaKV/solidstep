@@ -60,4 +60,33 @@ test.describe('deferred layout loaders', () => {
             'layout error: deferred-layout-failed',
         );
     });
+
+    // Two deferred layouts stacked in the SAME chain (not just one deferred
+    // layout + one deferred page, which `deferred-combo.spec.ts` already
+    // covers) -- each burns its own createUniqueId() for its own
+    // ErrorBoundary. Only the INNER layout fails here: if the OUTER also
+    // failed, its ErrorBoundary would correctly catch it and unmount the
+    // inner layout's subtree entirely before it ever mounts (normal
+    // ErrorBoundary nesting semantics, not something to test around) --
+    // this asymmetric case is what actually isolates whether the inner
+    // layout's own hydration id got shifted/collided by the outer one.
+    test('the outer layout succeeds while the inner (stacked) layout fails -- the inner error surfaces correctly, not garbled by an id collision', async ({
+        page,
+    }) => {
+        const consoleErrors: string[] = [];
+        page.on('console', (msg) => {
+            if (msg.type() === 'error') consoleErrors.push(msg.text());
+        });
+
+        await page.goto('/deferred-layout-stack/nested');
+
+        await expect(
+            page.getByTestId('deferred-layout-stack-greeting'),
+        ).toHaveText('hello-from-outer-stacked-layout');
+        await expect(
+            page.getByTestId('deferred-layout-stack-error'),
+        ).toHaveText('stack error: nested-stacked-layout-failed');
+
+        expect(consoleErrors.filter((t) => /hydrat/i.test(t))).toEqual([]);
+    });
 });
