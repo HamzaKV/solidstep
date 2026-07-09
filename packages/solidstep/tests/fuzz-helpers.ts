@@ -79,6 +79,7 @@ const INJECTION_FRAGMENTS = [
     '\r\n',
     '<script>',
     "'; DROP TABLE users; --",
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: deliberately a literal SSTI-probe string, not a real template literal
     '${7*7}',
     '{{7*7}}',
     'javascript:alert(1)',
