@@ -240,18 +240,34 @@ export async function render(args: RenderArgs): Promise<RenderResult> {
             // Independent lookups for this node — fetched concurrently. Order
             // of *execution* relative to sibling/parent nodes is unchanged
             // (still top-down via reduceRight); only the awaits within this
-            // one node now overlap instead of chaining.
-            const [moduleAssets, layoutModuleResult, metaModuleResult] =
-                await Promise.all([
+            // one node now overlap instead of chaining. Only Promise.all the
+            // generateMeta fetch in when it actually exists — a filler
+            // `Promise.resolve(...)` for the common no-generateMeta layout
+            // would just add allocation/microtask overhead to the trivial
+            // case for no benefit (nothing to overlap it with).
+            let moduleAssets: unknown[];
+            let layoutModule: PageModule['default'];
+            let generateMetaPage: MetaModule['generateMeta'] | null;
+            if (layout.generateMeta) {
+                const [assetsResult, layoutModuleResult, metaModuleResult] =
+                    await Promise.all([
+                        getCachedAssets(clientManifest, moduleSrc),
+                        getCachedModule<PageModule>(layout.layout),
+                        getCachedModule<MetaModule>(layout.generateMeta),
+                    ]);
+                moduleAssets = assetsResult;
+                layoutModule = layoutModuleResult.default;
+                generateMetaPage = metaModuleResult.generateMeta;
+            } else {
+                const [assetsResult, layoutModuleResult] = await Promise.all([
                     getCachedAssets(clientManifest, moduleSrc),
                     getCachedModule<PageModule>(layout.layout),
-                    layout.generateMeta
-                        ? getCachedModule<MetaModule>(layout.generateMeta)
-                        : Promise.resolve({ generateMeta: null }),
                 ]);
+                moduleAssets = assetsResult;
+                layoutModule = layoutModuleResult.default;
+                generateMetaPage = null;
+            }
             assets.push(...(moduleAssets as RenderAsset[]));
-            const { default: layoutModule } = layoutModuleResult;
-            const { generateMeta: generateMetaPage } = metaModuleResult;
             let data: unknown = {};
             if (generateMetaPage) {
                 const metaData = await generateMetaPage({
@@ -279,19 +295,41 @@ export async function render(args: RenderArgs): Promise<RenderResult> {
                         (async () => {
                             const slotName = groupName.replace('@', '');
                             const moduleSrc = `${group.page.src}&pick=$css`;
-                            const [moduleAssets, pageResult, loaderResult] =
-                                await Promise.all([
-                                    getCachedAssets(clientManifest, moduleSrc),
-                                    getCachedModule<PageModule>(group.page),
-                                    group.loader
-                                        ? getCachedModule<LoaderModule>(
-                                              group.loader,
-                                          )
-                                        : Promise.resolve({ loader: null }),
-                                ]);
+                            // Only Promise.all the loader fetch in when the
+                            // group actually has one — see the matching
+                            // comment on the layout closure above.
+                            let moduleAssets: unknown[];
+                            let groupPage: ComponentFn;
+                            let groupLoader: LoaderModule['loader'] | null;
+                            if (group.loader) {
+                                const [assetsResult, pageResult, loaderResult] =
+                                    await Promise.all([
+                                        getCachedAssets(
+                                            clientManifest,
+                                            moduleSrc,
+                                        ),
+                                        getCachedModule<PageModule>(group.page),
+                                        getCachedModule<LoaderModule>(
+                                            group.loader,
+                                        ),
+                                    ]);
+                                moduleAssets = assetsResult;
+                                groupPage = pageResult.default;
+                                groupLoader = loaderResult.loader;
+                            } else {
+                                const [assetsResult, pageResult] =
+                                    await Promise.all([
+                                        getCachedAssets(
+                                            clientManifest,
+                                            moduleSrc,
+                                        ),
+                                        getCachedModule<PageModule>(group.page),
+                                    ]);
+                                moduleAssets = assetsResult;
+                                groupPage = pageResult.default;
+                                groupLoader = null;
+                            }
                             assets.push(...(moduleAssets as RenderAsset[]));
-                            const { default: groupPage } = pageResult;
-                            const { loader: groupLoader } = loaderResult;
 
                             const groupDeferred =
                                 groupLoader?.options?.type === 'defer';
@@ -541,17 +579,31 @@ export async function render(args: RenderArgs): Promise<RenderResult> {
             // non-null assertions below are compile-time only (no runtime change).
             const node = pageToRender!;
             const moduleSrc = `${node.page.src}&pick=$css`;
-            const [moduleAssets, pageResult, metaModuleResult] =
-                await Promise.all([
+            // Only Promise.all the generateMeta fetch in when it actually
+            // exists — see the matching comment on the layout closure above.
+            let moduleAssets: unknown[];
+            let page: ComponentFn;
+            let generateMeta: MetaModule['generateMeta'] | null;
+            if (node.generateMeta) {
+                const [assetsResult, pageResult, metaModuleResult] =
+                    await Promise.all([
+                        getCachedAssets(clientManifest, moduleSrc),
+                        getCachedModule<PageModule>(node.page),
+                        getCachedModule<MetaModule>(node.generateMeta),
+                    ]);
+                moduleAssets = assetsResult;
+                page = pageResult.default;
+                generateMeta = metaModuleResult.generateMeta;
+            } else {
+                const [assetsResult, pageResult] = await Promise.all([
                     getCachedAssets(clientManifest, moduleSrc),
                     getCachedModule<PageModule>(node.page),
-                    node.generateMeta
-                        ? getCachedModule<MetaModule>(node.generateMeta)
-                        : Promise.resolve({ generateMeta: null }),
                 ]);
+                moduleAssets = assetsResult;
+                page = pageResult.default;
+                generateMeta = null;
+            }
             assets.push(...(moduleAssets as RenderAsset[]));
-            const { default: page } = pageResult;
-            const { generateMeta } = metaModuleResult;
 
             let data: unknown = {};
             if (resolvedLoaderData.has(node.manifestPath)) {

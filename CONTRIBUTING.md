@@ -13,7 +13,7 @@ project scaffolder, and an example app used for integration testing.
 
 ## Prerequisites
 
-- **Node.js** `>=20` (CI tests on 20 and 22)
+- **Node.js** `>=22.19.0`
 - **pnpm** `10.19.0` (pinned via the `packageManager` field — run `corepack enable` to match it)
 
 ## Getting started

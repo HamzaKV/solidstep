@@ -69,7 +69,7 @@ In production, provide environment variables through your host/runtime as usual;
 
 ## Node Version
 
-SolidStep requires **Node >= 20**.
+SolidStep requires **Node >= 22.19.0**.
 
 > **Node 20/21 and `node:sqlite`:** Nitro's default Node database connector bundles an (unused) `import 'node:sqlite'`, a builtin that only exists in Node 22.5+. On Node 20/21 the server can crash at startup even when no database is used. The `create-solidstep` template ships a `sqlite-stub.mjs` and aliases the builtin to it in `app.config.ts`, keeping the production server runnable on Node 20/21:
 >
@@ -117,8 +117,6 @@ EXPOSE 3000
 
 CMD ["node", ".output/server/index.mjs"]
 ```
-
-> If you deploy on `node:20`/`node:21` images, keep the `node:sqlite` stub described above.
 
 ## Hardening for production
 

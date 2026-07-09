@@ -8,7 +8,15 @@ export default defineConfig({
     fullyParallel: true,
     forbidOnly: !!process.env.CI,
     retries: process.env.CI ? 2 : 0,
-    workers: process.env.CI ? 1 : undefined,
+    // Playwright defaults local `workers` to the machine's CPU count, sending
+    // that many concurrent browser sessions at the single-threaded `webServer`
+    // instance below. On a high-core-count machine (e.g. 32 cores) that's
+    // dozens of simultaneous requests against one Node process, which starves
+    // the event loop and produces spurious timeouts on server-action/form
+    // tests unrelated to any actual bug (verified: identical suite is 100%
+    // stable at `--workers=1`, matching CI). Cap it instead of leaving it
+    // unbounded, while still running faster than fully serial locally.
+    workers: process.env.CI ? 1 : 4,
     reporter: process.env.CI ? 'github' : 'list',
     use: {
         baseURL: BASE_URL,
