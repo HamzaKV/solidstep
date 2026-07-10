@@ -76,6 +76,23 @@ describe('robots', () => {
         );
     });
 
+    it('strips newlines from field values so they cannot inject directives', () => {
+        const txt = robots({
+            rules: {
+                userAgent: 'Good\nbot',
+                allow: '/ok\r\nDisallow: /',
+            },
+            host: 'example.com\nSitemap: https://evil.test/x.xml',
+        });
+        // No LINE may start with an injected directive — the newline payloads
+        // must be flattened into their host line, not become new lines.
+        const lines = txt.split('\n');
+        expect(lines.some((l) => l.startsWith('Disallow:'))).toBe(false);
+        expect(lines.some((l) => l.startsWith('Sitemap:'))).toBe(false);
+        expect(txt).toContain('User-agent: Goodbot');
+        expect(txt).toContain('Allow: /okDisallow: /');
+    });
+
     it('supports an array of rule groups', () => {
         const txt = robots({
             rules: [

@@ -60,9 +60,11 @@ describe('generateHtmlHead', () => {
         expect(html).toContain(
             '<meta name="description" content="hi &quot;x&quot;" data-ss-meta>',
         );
-        expect(html).toContain('<link rel="stylesheet" href="/a"></link>');
-        expect(html).toContain('<style id="s"></style>');
-        expect(html).toContain('<script src="/a.js"></script>');
+        expect(html).toContain(
+            '<link rel="stylesheet" href="/a" data-ss-meta></link>',
+        );
+        expect(html).toContain('<style id="s" data-ss-meta></style>');
+        expect(html).toContain('<script src="/a.js" data-ss-meta></script>');
     });
 
     it('stamps route meta tags with data-ss-meta but never the preserved base tags', () => {
@@ -93,6 +95,26 @@ describe('generateHtmlHead', () => {
             '<meta name="viewport" content="width=device-width">',
         );
         expect(html).toContain('<meta name="x-build-time" content="1">');
+    });
+
+    it('stamps link/script/style meta tags with data-ss-meta so soft-nav can diff them', () => {
+        const meta: Meta = {
+            canonical: {
+                type: 'link',
+                attributes: { rel: 'canonical', href: 'https://x.test/a' },
+            },
+            jsonld: {
+                type: 'script',
+                attributes: { type: 'application/ld+json' },
+            },
+        };
+        const html = generateHtmlHead(meta);
+        expect(html).toContain(
+            '<link rel="canonical" href="https://x.test/a" data-ss-meta></link>',
+        );
+        expect(html).toContain(
+            '<script type="application/ld+json" data-ss-meta></script>',
+        );
     });
 
     it('handles a title with no content and an unknown tag type', () => {

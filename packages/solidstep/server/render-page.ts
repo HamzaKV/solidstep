@@ -202,11 +202,22 @@ export const renderPage = async (ctx: PageRenderContext) => {
     setHeader('Content-Type', 'text/html');
     setHeader('Cache-Control', 'no-cache');
 
+    // Client-disconnect handling: `cancel()` flips the flag (turning every
+    // later `push`/`close` into a no-op) and unblocks the deferred branch's
+    // pipe-completion promise so `start` can finish and the `finally`
+    // (onResponseEnd/onRequestError) still runs instead of hanging forever.
+    let streamCancelled = false;
+    let unblockOnCancel: (() => void) | null = null;
     const stream = new ReadableStream({
         async start(controller) {
             const encoder = new TextEncoder();
-            const push = (text: string) =>
+            const push = (text: string) => {
+                if (streamCancelled) return;
                 controller.enqueue(encoder.encode(text));
+            };
+            const close = () => {
+                if (!streamCancelled) controller.close();
+            };
             let streamError: unknown = null;
             // Fired once per response, right after status/headers are final
             // but before the first body byte — across whichever of the
@@ -274,7 +285,7 @@ export const renderPage = async (ctx: PageRenderContext) => {
                             setResponseStatus(404);
                             await fireResponseStart();
                             push('Not Found');
-                            controller.close();
+                            close();
                             return;
                         }
                     } else {
@@ -368,7 +379,7 @@ export const renderPage = async (ctx: PageRenderContext) => {
                             push(
                                 `<!doctype html><html lang="en"><head>${headHtml}</head>${result.rendered}${manifestHtml}${mainScript}</html>`,
                             );
-                            controller.close();
+                            close();
                             return;
                         }
 
@@ -419,6 +430,11 @@ export const renderPage = async (ctx: PageRenderContext) => {
                                 `<!doctype html><html lang="en"><head>${headHtml}</head>`,
                             );
                             await new Promise<void>((resolve) => {
+                                // A client disconnect must also settle this
+                                // promise (via `cancel()` below), or the
+                                // request would hang until `end` — which for
+                                // never-settling deferred data is never.
+                                unblockOnCancel = resolve;
                                 // The runtime `pipe(writable)` calls
                                 // `writable.write()` for chunks and
                                 // `writable.end()` on completion, and the
@@ -446,7 +462,8 @@ export const renderPage = async (ctx: PageRenderContext) => {
                                     },
                                 } as any);
                             });
-                            controller.close();
+                            unblockOnCancel = null;
+                            close();
                             return;
                         }
                         // Only pages with a loading.tsx get the transient
@@ -567,8 +584,8 @@ export const renderPage = async (ctx: PageRenderContext) => {
                         e1.name === 'RedirectError'
                     ) {
                         setHeader('Location', e1.message);
-                        setResponseStatus(302);
-                        controller.close();
+                        setResponseStatus((e1 as RedirectError).status ?? 302);
+                        close();
                         return;
                     }
                     if (import.meta.env.DEV) {
@@ -589,7 +606,7 @@ export const renderPage = async (ctx: PageRenderContext) => {
                                         url: req.url,
                                     }),
                                 );
-                                controller.close();
+                                close();
                                 return;
                             }
                             throw e1;
@@ -655,7 +672,7 @@ export const renderPage = async (ctx: PageRenderContext) => {
                     push(buildLoadingSwapScript(meta, assetsHtml, cspNonce));
                     push(manifestHtml);
                     push(clientHydrationScript ?? '');
-                    controller.close();
+                    close();
                     return;
                 }
                 // hydration.disable: ship no client-manifest script, no
@@ -689,7 +706,7 @@ export const renderPage = async (ctx: PageRenderContext) => {
                                 : manifestHtml + (clientHydrationScript ?? '')),
                     );
                 push(transformHtml);
-                controller.close();
+                close();
                 return;
             } catch (error) {
                 streamError = streamError ?? error;
@@ -717,6 +734,10 @@ export const renderPage = async (ctx: PageRenderContext) => {
                     );
                 }
             }
+        },
+        cancel() {
+            streamCancelled = true;
+            unblockOnCancel?.();
         },
     });
     return stream;

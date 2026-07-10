@@ -1,13 +1,19 @@
 import { isServer } from 'solid-js/web';
 
+/** HTTP status codes a redirect may carry. */
+export type RedirectStatus = 301 | 302 | 303 | 307 | 308;
+
 /**
  * Error thrown on the server to signal a redirect. The `message` carries the
- * target URL; the framework catches it and issues the redirect response.
+ * target URL and `status` the HTTP status; the framework catches it and
+ * issues the redirect response.
  */
 export class RedirectError extends Error {
-    constructor(message: string) {
+    readonly status: RedirectStatus;
+    constructor(message: string, status: RedirectStatus = 302) {
         super(message);
         this.name = 'RedirectError';
+        this.status = status;
     }
 }
 
@@ -19,11 +25,14 @@ export class RedirectError extends Error {
  * `window.location.href`.
  *
  * @param url - The destination URL.
+ * @param status - HTTP redirect status. Defaults to 302; use 307/308 to
+ *   preserve the request method, 301/308 for permanent moves. Ignored on the
+ *   client (a client-side redirect is just a navigation).
  * @throws {RedirectError} On the server, to trigger the redirect.
  */
-export const redirect = (url: string) => {
+export const redirect = (url: string, status: RedirectStatus = 302) => {
     if (isServer) {
-        throw new RedirectError(url);
+        throw new RedirectError(url, status);
     }
     window.location.href = url;
     return;

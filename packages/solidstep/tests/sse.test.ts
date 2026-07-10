@@ -62,3 +62,51 @@ describe('streamResponse', () => {
         expect(await res.text()).toBe('hi');
     });
 });
+
+describe('client-disconnect teardown', () => {
+    it('sseResponse stops the generator when the stream is cancelled', async () => {
+        let finallyRan = false;
+        let resolveTick: () => void;
+        const res = sseResponse(async function* () {
+            try {
+                yield 'first';
+                // Park like a real heartbeat generator would.
+                await new Promise<void>((r) => {
+                    resolveTick = r;
+                });
+                yield 'never-delivered';
+            } finally {
+                finallyRan = true;
+            }
+        });
+        const reader = res.body!.getReader();
+        await reader.read(); // consume 'first'
+        await reader.cancel(); // client disconnects
+        resolveTick!(); // the parked await resumes...
+        await new Promise((r) => setTimeout(r, 0));
+        // ...and the generator must be told to stop (finally runs), not loop on.
+        expect(finallyRan).toBe(true);
+    });
+
+    it('streamResponse stops the generator when the stream is cancelled', async () => {
+        let finallyRan = false;
+        let resolveTick: () => void;
+        const res = streamResponse(async function* () {
+            try {
+                yield 'first';
+                await new Promise<void>((r) => {
+                    resolveTick = r;
+                });
+                yield 'never-delivered';
+            } finally {
+                finallyRan = true;
+            }
+        });
+        const reader = res.body!.getReader();
+        await reader.read();
+        await reader.cancel();
+        resolveTick!();
+        await new Promise((r) => setTimeout(r, 0));
+        expect(finallyRan).toBe(true);
+    });
+});

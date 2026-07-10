@@ -280,6 +280,19 @@ describe('withDevelopmentSources / withProductionSources', () => {
         const dev = withDevelopmentSources(policy);
         expect(hasSource(dev, 'script-src', "'unsafe-eval'")).toBe(true);
     });
+
+    it('withProductionSources also strips unsafe-inline from style-src/style-src-elem', () => {
+        // The base-policy docs promise this helper "strips the unsafe
+        // sources" — leaving 'unsafe-inline' on the style directives would
+        // keep a CSS-injection surface the caller believes is closed.
+        const prod = withProductionSources(createBasePolicy());
+        expect(hasSource(prod, 'style-src', "'unsafe-inline'")).toBe(false);
+        expect(hasSource(prod, 'style-src-elem', "'unsafe-inline'")).toBe(
+            false,
+        );
+        // Legitimate style sources survive.
+        expect(hasSource(prod, 'style-src', "'self'")).toBe(true);
+    });
 });
 
 describe('mergePolicies', () => {

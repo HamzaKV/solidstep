@@ -416,9 +416,14 @@ export async function render(args: RenderArgs): Promise<RenderResult> {
                             // ErrorBoundary and hydrate consistently).
                             let pending: Promise<unknown> | null = null;
                             if (groupLoader) {
-                                if (isPPR && groupDeferred) {
+                                if (isPPR) {
                                     // PPR hole: leave pending so the shell shows
-                                    // the fallback; the client fetches it.
+                                    // the fallback; the client fetches it. This
+                                    // applies to non-defer group loaders too —
+                                    // renderToString is synchronous, so running
+                                    // the loader here would only block the shell
+                                    // and discard the result while the client
+                                    // re-fetches it as a hole anyway.
                                     pending = new Promise<unknown>(
                                         () => undefined,
                                     );

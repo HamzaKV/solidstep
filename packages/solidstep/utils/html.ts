@@ -51,7 +51,10 @@ export const generateHtmlHead = (meta: Meta): string =>
                 value.type === 'style' ||
                 value.type === 'script'
             ) {
-                return `<${value.type} ${serializeAttributes(value.attributes)}></${value.type}>`;
+                // Stamped like route <meta> tags so the client's soft-nav meta
+                // diff can remove/replace them when a new route's meta no
+                // longer declares them (canonical links, JSON-LD, etc.).
+                return `<${value.type} ${serializeAttributes(value.attributes)} data-ss-meta></${value.type}>`;
             }
             return '';
         })

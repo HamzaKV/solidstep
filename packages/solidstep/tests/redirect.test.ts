@@ -24,6 +24,28 @@ describe('redirect (server)', () => {
         const { redirect } = await import('../utils/redirect');
         expectRedirectTo(() => redirect('/login'), '/login');
     });
+
+    it('defaults the redirect status to 302', async () => {
+        vi.doMock('solid-js/web', () => ({ isServer: true }));
+        const { redirect, RedirectError } = await import('../utils/redirect');
+        try {
+            redirect('/login');
+            expect.unreachable();
+        } catch (e) {
+            expect((e as InstanceType<typeof RedirectError>).status).toBe(302);
+        }
+    });
+
+    it('carries an explicit status (e.g. 307 to preserve the request method)', async () => {
+        vi.doMock('solid-js/web', () => ({ isServer: true }));
+        const { redirect, RedirectError } = await import('../utils/redirect');
+        try {
+            redirect('/next', 307);
+            expect.unreachable();
+        } catch (e) {
+            expect((e as InstanceType<typeof RedirectError>).status).toBe(307);
+        }
+    });
 });
 
 describe('redirect (client)', () => {
@@ -32,12 +54,9 @@ describe('redirect (client)', () => {
     it('navigates via window.location on the client', async () => {
         vi.doMock('solid-js/web', () => ({ isServer: false }));
         const { redirect } = await import('../utils/redirect');
-        // biome-ignore lint/suspicious/noExplicitAny: minimal window stub.
         (globalThis as any).window = { location: { href: '' } };
         redirect('/dashboard');
-        // biome-ignore lint/suspicious/noExplicitAny: minimal window stub.
         expect((globalThis as any).window.location.href).toBe('/dashboard');
-        // biome-ignore lint/suspicious/noExplicitAny: cleanup.
         (globalThis as any).window = undefined;
     });
 });

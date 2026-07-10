@@ -1,16 +1,12 @@
 import { getCachedLoaderData } from './loader-cache.js';
 import { logger } from './logger.js';
 import { RedirectError } from './redirect.js';
+import {
+    LOADER_ERROR_KEY,
+    type LoaderErrorSentinel,
+} from './loader-error-sentinel.js';
 
-/**
- * Property key of the JSON-serializable sentinel placed in a node's
- * `loaderData` when its loader fails in isolation. A plain string message (not
- * an `Error` instance) so it survives the hydration `JSON.stringify`.
- */
-export const LOADER_ERROR_KEY = '__loaderError';
-
-/** The serializable shape written into `loaderData` for an isolated failure. */
-export type LoaderErrorSentinel = { [LOADER_ERROR_KEY]: string };
+export { LOADER_ERROR_KEY, type LoaderErrorSentinel };
 
 /**
  * Run a single sequential loader with per-node error isolation.

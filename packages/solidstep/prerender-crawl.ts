@@ -29,6 +29,65 @@ type Target = {
 const [serverDir, publicDir] = process.argv.slice(2);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** One ISR seed entry for `prerender-manifest.json`. */
+export type IsrSeed = {
+    pathname: string;
+    revalidate: number;
+    tags?: string[];
+    file: string;
+};
+
+/**
+ * Persist one crawled route's artifact: `static`/`ppr` as a public `.html`,
+ * `isr` as a server-dir seed + manifest entry. Returns whether anything was
+ * written. Exported for unit tests; the crawl loop below drives it.
+ */
+export const handleCrawledTarget = (
+    t: Pick<Target, 'pathname' | 'render' | 'revalidate' | 'tags'>,
+    res: { ok: boolean; status: number; html: string },
+    dirs: { serverDir: string; publicDir: string },
+    isr: IsrSeed[],
+): boolean => {
+    // Never bake an error response into an artifact: a transient 500 during
+    // the crawl would otherwise be served as the page indefinitely. Skipping
+    // keeps the crawl non-fatal (per this script's contract) — the route just
+    // renders dynamically at runtime until the next build/revalidation.
+    if (!res.ok) {
+        console.warn(
+            `ℹ Prerender skipped ${t.pathname}: server responded ${res.status}.`,
+        );
+        return false;
+    }
+    // `static` and `ppr` are both served as .html artifacts from the
+    // public dir (a `ppr` artifact is the static shell; its holes are
+    // filled on the client).
+    if (t.render === 'static' || t.render === 'ppr') {
+        const outFile =
+            t.pathname === '/'
+                ? join(dirs.publicDir, 'index.html')
+                : join(dirs.publicDir, t.pathname, 'index.html');
+        mkdirSync(dirname(outFile), { recursive: true });
+        writeFileSync(outFile, res.html, 'utf-8');
+        return true;
+    }
+    const hash = createHash('sha256').update(t.pathname).digest('hex');
+    // Forward-slash relative path so the manifest is portable.
+    const file = `prerender/${hash}.html`;
+    mkdirSync(join(dirs.serverDir, 'prerender'), { recursive: true });
+    writeFileSync(
+        join(dirs.serverDir, 'prerender', `${hash}.html`),
+        res.html,
+        'utf-8',
+    );
+    isr.push({
+        pathname: t.pathname,
+        revalidate: t.revalidate ?? 60,
+        tags: t.tags,
+        file,
+    });
+    return true;
+};
+
 const main = async () => {
     if (!serverDir || !publicDir) return;
     const serverEntry = join(serverDir, 'index.mjs');
@@ -77,12 +136,7 @@ const main = async () => {
             return;
         }
 
-        const isr: {
-            pathname: string;
-            revalidate: number;
-            tags?: string[];
-            file: string;
-        }[] = [];
+        const isr: IsrSeed[] = [];
         let staticCount = 0;
 
         for (const t of targets) {
@@ -90,36 +144,14 @@ const main = async () => {
                 headers: { [ISR_BYPASS_HEADER]: '1' },
             });
             const html = await res.text();
-
-            // `static` and `ppr` are both served as .html artifacts from the
-            // public dir (a `ppr` artifact is the static shell; its holes are
-            // filled on the client).
-            if (t.render === 'static' || t.render === 'ppr') {
-                const outFile =
-                    t.pathname === '/'
-                        ? join(publicDir, 'index.html')
-                        : join(publicDir, t.pathname, 'index.html');
-                mkdirSync(dirname(outFile), { recursive: true });
-                writeFileSync(outFile, html, 'utf-8');
+            const written = handleCrawledTarget(
+                t,
+                { ok: res.ok, status: res.status, html },
+                { serverDir, publicDir },
+                isr,
+            );
+            if (written && (t.render === 'static' || t.render === 'ppr')) {
                 staticCount += 1;
-            } else {
-                const hash = createHash('sha256')
-                    .update(t.pathname)
-                    .digest('hex');
-                // Forward-slash relative path so the manifest is portable.
-                const file = `prerender/${hash}.html`;
-                mkdirSync(join(serverDir, 'prerender'), { recursive: true });
-                writeFileSync(
-                    join(serverDir, 'prerender', `${hash}.html`),
-                    html,
-                    'utf-8',
-                );
-                isr.push({
-                    pathname: t.pathname,
-                    revalidate: t.revalidate ?? 60,
-                    tags: t.tags,
-                    file,
-                });
             }
         }
 
@@ -138,4 +170,8 @@ const main = async () => {
     }
 };
 
-await main();
+// Only run when invoked as a script (`node prerender-crawl.js <dirs>`), not
+// when imported (tests import handleCrawledTarget).
+if (serverDir && publicDir && existsSync(join(serverDir, 'index.mjs'))) {
+    await main();
+}

@@ -56,6 +56,18 @@ test.describe('PPR (render: ppr)', () => {
         expect(second).not.toBe(first);
     });
 
+    test('a boundary group with a NON-defer loader is still filled as a hole', async ({
+        page,
+    }) => {
+        // Regression pin: the hole endpoint must serve boundary-group loaders
+        // even when they are not `type: 'defer'` — under PPR the shell can't
+        // resolve group resources, so they are always client-filled holes.
+        await page.goto('/ppr');
+        await expect(page.getByTestId('fresh-value')).toHaveText(
+            'fresh-group-data',
+        );
+    });
+
     test('the loader endpoint returns the hole data as a seroval envelope', async ({
         request,
     }) => {

@@ -49,12 +49,15 @@ vi.mock('vinxi/http', () => ({
     },
 }));
 const renderToStreamError = vi.hoisted(() => ({ value: null as unknown }));
+const renderToStreamHang = vi.hoisted(() => ({ value: false }));
 vi.mock('solid-js/web', () => ({
     // The real API streams chunks then calls `end()`; this stub writes one
     // shell chunk and ends immediately so the deferred branch's
     // `await new Promise(...)` around `pipe(...)` resolves. If a test sets
     // renderToStreamError, its onError callback fires first (matching a
-    // real mid-stream render failure) before the shell still completes.
+    // real mid-stream render failure) before the shell still completes. If a
+    // test sets renderToStreamHang, `end()` is never called — simulating a
+    // render whose deferred data never settles.
     renderToStream: (
         fn: () => unknown,
         opts: { onError?: (e: unknown) => void },
@@ -65,7 +68,7 @@ vi.mock('solid-js/web', () => ({
                 opts.onError?.(renderToStreamError.value);
             }
             writable.write('<div>deferred-shell</div>');
-            writable.end();
+            if (!renderToStreamHang.value) writable.end();
         },
     }),
 }));
@@ -157,6 +160,7 @@ beforeEach(() => {
     buildLoadingSwapScript.mockClear();
     setHeader.mockClear();
     renderToStreamError.value = null;
+    renderToStreamHang.value = false;
 });
 
 const onResponseStartCalls = () =>
@@ -572,6 +576,37 @@ describe('renderPage deferred streaming', () => {
         );
         // disable was ignored -> normal hydration script still present
         expect(text).toContain('HYDRATE[');
+    });
+
+    it('cancelling a hung deferred stream (client disconnect) still fires onResponseEnd', async () => {
+        routeNeedsStreaming.mockResolvedValue(true);
+        isDeferredResult.mockReturnValue(true);
+        renderToStreamHang.value = true; // deferred data never settles
+        render.mockResolvedValue({
+            documentMeta: {},
+            documentAssets: [],
+            loaderData: {},
+            deferredKeys: ['/p'],
+            composed: () => 'tree',
+        });
+
+        const stream = (await renderPage(baseCtx())) as ReadableStream;
+        const reader = stream.getReader();
+        await reader.read(); // shell head reaches the client...
+        await reader.cancel(); // ...then the client disconnects
+
+        // The request must not hang forever: the response lifecycle completes
+        // and the onResponseEnd hook fires.
+        await vi.waitFor(
+            () => {
+                expect(
+                    safeExecuteHook.mock.calls.filter(
+                        (c) => c[0] === 'onResponseEnd',
+                    ),
+                ).toHaveLength(1);
+            },
+            { timeout: 1000 },
+        );
     });
 
     it('recovers via error.tsx when render() returns a non-deferred shape for a streaming route (internal consistency guard)', async () => {

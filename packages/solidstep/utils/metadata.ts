@@ -93,6 +93,11 @@ export type RobotsConfig = {
 const asArray = <T>(value: T | T[] | undefined): T[] =>
     value === undefined ? [] : Array.isArray(value) ? value : [value];
 
+// robots.txt is a line-oriented format: a newline inside a field value would
+// inject arbitrary directives. Values are developer-supplied, but sanitizing
+// here keeps a value that was ever derived from user input from becoming one.
+const stripNewlines = (value: string): string => value.replace(/[\r\n]+/g, '');
+
 /**
  * Build a `robots.txt` document.
  *
@@ -113,13 +118,13 @@ export const robots = (config: RobotsConfig): string => {
         const lines: string[] = [];
         const agents = asArray(rule.userAgent);
         for (const agent of agents.length ? agents : ['*']) {
-            lines.push(`User-agent: ${agent}`);
+            lines.push(`User-agent: ${stripNewlines(agent)}`);
         }
         for (const allow of asArray(rule.allow)) {
-            lines.push(`Allow: ${allow}`);
+            lines.push(`Allow: ${stripNewlines(allow)}`);
         }
         for (const disallow of asArray(rule.disallow)) {
-            lines.push(`Disallow: ${disallow}`);
+            lines.push(`Disallow: ${stripNewlines(disallow)}`);
         }
         if (rule.crawlDelay !== undefined) {
             lines.push(`Crawl-delay: ${rule.crawlDelay}`);
@@ -128,10 +133,10 @@ export const robots = (config: RobotsConfig): string => {
     });
 
     for (const url of asArray(config.sitemap)) {
-        blocks.push(`Sitemap: ${url}`);
+        blocks.push(`Sitemap: ${stripNewlines(url)}`);
     }
     if (config.host !== undefined) {
-        blocks.push(`Host: ${config.host}`);
+        blocks.push(`Host: ${stripNewlines(config.host)}`);
     }
 
     return blocks.join('\n\n');

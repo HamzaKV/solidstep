@@ -30,6 +30,7 @@ import {
     safeExecuteHook,
 } from '../utils/instrumentation.js';
 import { isTrustedServerActionOrigin } from './server-action-origin.js';
+import { parseSearchParams } from './path-router.js';
 
 // Dispatch-level failures (unresolvable function, malformed wire payload) are
 // distinct from the target action itself throwing: they must map to a plain
@@ -64,6 +65,8 @@ class HeaderProxy {
     }
     getSetCookie() {
         const cookies = getResponseHeader(this.event, 'Set-Cookie');
+        // Headers.getSetCookie() contract: string[] with no holes.
+        if (cookies === undefined || cookies === null) return [];
         return Array.isArray(cookies) ? cookies : [cookies as string];
     }
     forEach(fn: (value: string, key: string, object: Headers) => void) {
@@ -126,9 +129,15 @@ export async function handleServerFunction(event: HTTPEvent) {
     const request = toWebRequest(event);
     const url = new URL(request.url);
     const inst = getInstrumentation();
+    // Pass the already-parsed pathname/searchParams so createRequestContext
+    // doesn't re-parse the URL and re-run parseSearchParams for every
+    // server-action request (matching server.ts/render-page.ts, which thread
+    // these through for the same reason).
     const reqCtx = createRequestContext(request, {
         routePath: url.pathname,
         routeType: 'server-action',
+        pathname: url.pathname,
+        searchParams: parseSearchParams(url.searchParams),
     });
     await safeExecuteHook('onRequest', inst?.onRequest, request, reqCtx);
     // Fired once per response, right before its body is returned/streamed —
@@ -327,6 +336,13 @@ export async function handleServerFunction(event: HTTPEvent) {
         // When there's no X-Server-Instance header, this is a plain form POST.
         // Execute the action and redirect back to the referring page.
         if (!instance) {
+            // An action that returns a Response (file download, custom
+            // redirect) gets it served as-is — discarding it behind the
+            // generic 303 would silently break those actions for no-JS users.
+            if (result instanceof Response) {
+                await fireResponseStart(result.status);
+                return result;
+            }
             // The Referer is always an absolute URL (unlike `?next=`-style
             // user-supplied redirect targets, which are usually relative) --
             // validate it's same-origin as this request rather than reusing
@@ -387,11 +403,19 @@ export async function handleServerFunction(event: HTTPEvent) {
         // The `X-Revalidate` header remains on the response; the client router
         // re-fetches the route's loader data and re-renders reactively (no DOM
         // diffing) — see `refreshRoute` in `utils/router-context`.
-        const revalidatePath = getResponseHeader(event, 'X-Revalidate') as
+        // Appended headers read back as an array (or a comma-joined string,
+        // depending on the runtime) — normalize and invalidate every path.
+        const revalidateHeader = getResponseHeader(event, 'X-Revalidate') as
             | string
+            | string[]
             | undefined;
-        if (revalidatePath) {
-            await invalidateCache(revalidatePath);
+        const revalidatePaths = Array.isArray(revalidateHeader)
+            ? revalidateHeader
+            : typeof revalidateHeader === 'string' && revalidateHeader
+              ? revalidateHeader.split(',').map((p) => p.trim())
+              : [];
+        for (const path of revalidatePaths) {
+            if (path) await invalidateCache(path);
         }
 
         setHeader(event, 'content-type', 'text/javascript');
@@ -420,6 +444,34 @@ export async function handleServerFunction(event: HTTPEvent) {
             return process.env.NODE_ENV === 'development'
                 ? new Response(x.message, { status: 400 })
                 : new Response(null, { status: 400 });
+        }
+
+        // No-JS form post: the outcome must be a real HTTP response — the
+        // serialized-error wire format below only means something to the JS
+        // client.
+        if (!instance) {
+            if (
+                x instanceof RedirectError ||
+                (x as Error)?.name === 'RedirectError'
+            ) {
+                // redirect() thrown by the action: 303 to its target (the URL
+                // was already validated by redirect() at construction).
+                setResponseStatus(event, 303);
+                setHeader(event, 'Location', (x as Error).message);
+                await fireResponseStart(303);
+                return '';
+            }
+            if (!(x instanceof Response)) {
+                // Anything else is a server failure: a plain 500, with the
+                // message only in development (mirroring the 404/400 paths).
+                await fireResponseStart(500);
+                return process.env.NODE_ENV === 'development'
+                    ? new Response(x instanceof Error ? x.message : String(x), {
+                          status: 500,
+                      })
+                    : new Response(null, { status: 500 });
+            }
+            // A thrown Response falls through to the shared forwarding below.
         }
 
         if (x instanceof Response) {

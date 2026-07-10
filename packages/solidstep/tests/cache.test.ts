@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 vi.mock('vinxi/http', () => ({
     getEvent: vi.fn(),
     setResponseHeader: vi.fn(),
+    appendResponseHeader: vi.fn(),
 }));
 
 import {
@@ -248,6 +249,27 @@ describe('revalidatePath', () => {
     beforeEach(() => {
         vi.mocked(vinxiHttp.getEvent).mockReset();
         vi.mocked(vinxiHttp.setResponseHeader).mockReset();
+        vi.mocked(vinxiHttp.appendResponseHeader).mockReset();
+    });
+
+    it('accumulates multiple calls instead of keeping only the last path', () => {
+        const fakeEvent = { path: '/_server?id=chunk&name=action' };
+        vi.mocked(vinxiHttp.getEvent).mockReturnValue(fakeEvent as any);
+
+        revalidatePath('/a');
+        revalidatePath('/b');
+
+        // Appended (not replaced): both paths must survive on the response.
+        expect(vinxiHttp.appendResponseHeader).toHaveBeenCalledWith(
+            fakeEvent,
+            'X-Revalidate',
+            '/a',
+        );
+        expect(vinxiHttp.appendResponseHeader).toHaveBeenCalledWith(
+            fakeEvent,
+            'X-Revalidate',
+            '/b',
+        );
     });
 
     it('sets X-Revalidate header when called from a server function', () => {
@@ -258,7 +280,7 @@ describe('revalidatePath', () => {
 
         revalidatePath('/dashboard');
 
-        expect(vinxiHttp.setResponseHeader).toHaveBeenCalledWith(
+        expect(vinxiHttp.appendResponseHeader).toHaveBeenCalledWith(
             fakeEvent,
             'X-Revalidate',
             '/dashboard',
@@ -271,7 +293,7 @@ describe('revalidatePath', () => {
 
         revalidatePath('/dashboard');
 
-        expect(vinxiHttp.setResponseHeader).toHaveBeenCalledWith(
+        expect(vinxiHttp.appendResponseHeader).toHaveBeenCalledWith(
             fakeEvent,
             'X-Revalidate',
             '/dashboard',

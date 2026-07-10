@@ -254,10 +254,20 @@ const withDevelopmentSources = (policy: CSPPolicy): CSPPolicy => {
     return mergePolicies(policy, devPolicy);
 };
 
-const withProductionSources = (policy: CSPPolicy): CSPPolicy =>
-    updateDirective(policy, 'script-src', (d) =>
+const withProductionSources = (policy: CSPPolicy): CSPPolicy => {
+    // Strip ALL the unsafe sources the permissive base policy adds — script
+    // AND style directives — matching what createBasePolicy's docs promise
+    // this helper does.
+    const scriptClean = updateDirective(policy, 'script-src', (d) =>
         removeSource(removeSource(d, "'unsafe-eval'"), "'unsafe-inline'"),
     );
+    const styleClean = updateDirective(scriptClean, 'style-src', (d) =>
+        removeSource(d, "'unsafe-inline'"),
+    );
+    return updateDirective(styleClean, 'style-src-elem', (d) =>
+        removeSource(d, "'unsafe-inline'"),
+    );
+};
 
 // Common Integrations
 const withCDN = (policy: CSPPolicy, cdnUrl: string): CSPPolicy => {

@@ -379,7 +379,9 @@ const handler = eventHandler(async (event) => {
     } catch (e: any) {
         if (e instanceof RedirectError || e.name === 'RedirectError') {
             return new Response('', {
-                status: 302,
+                // `?? 302` covers a duck-typed RedirectError (name match
+                // without the class) that carries no status.
+                status: (e as RedirectError).status ?? 302,
                 headers: { Location: e.message },
             });
         }

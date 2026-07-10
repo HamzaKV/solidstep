@@ -44,6 +44,7 @@ export const serveHoleData = async (
     // Find the loader import for `manifest`, but only among nodes that belong to
     // this matched route (page, its layouts, its groups).
     let loaderImport: Import | undefined;
+    let isGroup = false;
     if (page.mainPage.manifestPath === manifest) {
         loaderImport = page.mainPage.loader as Import | undefined;
     } else {
@@ -51,7 +52,10 @@ export const serveHoleData = async (
             if (l.manifestPath === manifest) loaderImport = l.loader as Import;
         }
         for (const g of Object.values(page.groups || {})) {
-            if (g.manifestPath === manifest) loaderImport = g.loader as Import;
+            if (g.manifestPath === manifest) {
+                loaderImport = g.loader as Import;
+                isGroup = true;
+            }
         }
     }
     if (!loaderImport) return null;
@@ -59,9 +63,11 @@ export const serveHoleData = async (
     const { loader: loaderFn } =
         await getCachedModule<LoaderModule>(loaderImport);
     if (!loaderFn) return null;
-    // Only deferred loaders are holes; refuse to run a regular loader that
-    // happens to be addressable by manifest path.
-    if (loaderFn.options?.type !== 'defer') return null;
+    // Holes are exactly what the render engine can emit as one: deferred
+    // page/layout loaders, and ANY boundary-group loader (under PPR the shell
+    // never resolves group resources, so even non-defer group loaders become
+    // client-filled holes — see server/render.ts). Refuse everything else.
+    if (!isGroup && loaderFn.options?.type !== 'defer') return null;
 
     // Run the loader against the original page URL so its params/search (and
     // loader cache key) are correct. The client-disconnect signal is forwarded

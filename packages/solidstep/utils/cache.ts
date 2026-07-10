@@ -1,4 +1,4 @@
-import { getEvent, setResponseHeader } from 'vinxi/http';
+import { getEvent, appendResponseHeader } from 'vinxi/http';
 import {
     MemoryCacheStore,
     type CacheEntry,
@@ -177,6 +177,7 @@ export const revalidatePath = (path: string) => {
         throw new Error('This function can only be used in server functions.');
     }
 
-    // add the revalidate header as a flag for the server action to do diffing
-    setResponseHeader(event, 'X-Revalidate', path);
+    // Append (not set): an action may revalidate several paths; replacing
+    // would keep only the last one. The handler invalidates each value.
+    appendResponseHeader(event, 'X-Revalidate', path);
 };

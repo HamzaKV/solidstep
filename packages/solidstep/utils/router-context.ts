@@ -321,9 +321,27 @@ const applyMeta = (meta: Record<string, any> | undefined) => {
             }
             el.setAttribute('data-ss-meta', '');
             touched.add(el);
+        } else if (
+            (value?.type === 'link' ||
+                value?.type === 'script' ||
+                value?.type === 'style') &&
+            value.attributes
+        ) {
+            // No stable identity to diff against (a route may declare several
+            // links/scripts) — create fresh each pass; the sweep below removes
+            // the previous route's stamped ones.
+            const el = document.createElement(value.type);
+            for (const [k, v] of Object.entries(value.attributes)) {
+                el.setAttribute(k, String(v));
+            }
+            el.setAttribute('data-ss-meta', '');
+            document.head.appendChild(el);
+            touched.add(el);
         }
     }
-    for (const el of document.head.querySelectorAll('meta[data-ss-meta]')) {
+    // Sweep every stamped head tag (meta/link/script/style) the new route's
+    // meta didn't touch, so nothing leaks across navigations.
+    for (const el of document.head.querySelectorAll('[data-ss-meta]')) {
         if (!touched.has(el)) el.remove();
     }
 };
@@ -598,9 +616,9 @@ export type NavigateFn = (to: Href, opts?: NavigateOptions) => Promise<void>;
 /** Returns the imperative `navigate(to, opts)` function. */
 export const useNavigate = (): NavigateFn => navigate;
 /** Reactive accessor for the current pathname. */
-export const usePathname = () => () => route().pathname;
+export const usePathname = () => () => structure().pathname;
 /** Reactive accessor for the current search params. */
-export const useSearchParams = () => () => route().searchParams;
+export const useSearchParams = () => () => structure().searchParams;
 /** The full router API: route accessor, navigate, refresh, and pending signal. */
 export const useRouter = () => ({
     route,

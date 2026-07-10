@@ -67,3 +67,47 @@ describe('createRequestContext', () => {
         expect(ctx.searchParams).toEqual({ y: '2' });
     });
 });
+
+describe('isMissingInstrumentationModule', () => {
+    it('treats a missing instrumentation module itself as "no instrumentation"', async () => {
+        const { isMissingInstrumentationModule } = await import(
+            '../utils/instrumentation'
+        );
+        const e = Object.assign(
+            new Error(
+                "Cannot find module '/app/instrumentation.ts' imported from /srv/server.mjs",
+            ),
+            { code: 'ERR_MODULE_NOT_FOUND' },
+        );
+        expect(isMissingInstrumentationModule(e)).toBe(true);
+        expect(
+            isMissingInstrumentationModule(
+                new Error("Cannot find module 'instrumentation'"),
+            ),
+        ).toBe(true);
+    });
+
+    it('does NOT swallow a missing dependency imported BY the user instrumentation file', async () => {
+        const { isMissingInstrumentationModule } = await import(
+            '../utils/instrumentation'
+        );
+        // The user HAS an instrumentation.ts; its own import of 'pino-pretty'
+        // is broken. Swallowing this silently disables telemetry.
+        const e = Object.assign(
+            new Error(
+                "Cannot find module 'pino-pretty' imported from /app/instrumentation.ts",
+            ),
+            { code: 'ERR_MODULE_NOT_FOUND' },
+        );
+        expect(isMissingInstrumentationModule(e)).toBe(false);
+    });
+
+    it('is false for unrelated errors', async () => {
+        const { isMissingInstrumentationModule } = await import(
+            '../utils/instrumentation'
+        );
+        expect(
+            isMissingInstrumentationModule(new SyntaxError('unexpected token')),
+        ).toBe(false);
+    });
+});

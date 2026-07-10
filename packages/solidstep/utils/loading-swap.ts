@@ -33,16 +33,17 @@ export const buildLoadingSwapScript = (
     const tpl = document.createElement('template');
     tpl.innerHTML = ${escapeScript(JSON.stringify(generateHtmlHead(meta) + assetsHtml))};
     const incoming = Array.from(tpl.content.childNodes);
-    const metaKey = (el) =>
-        el.getAttribute('charset') !== null
-            ? 'charset'
-            : el.getAttribute('name')
-              ? 'name=' + el.getAttribute('name')
-              : el.getAttribute('property')
-                ? 'property=' + el.getAttribute('property')
-                : el.getAttribute('http-equiv')
-                  ? 'http-equiv=' + el.getAttribute('http-equiv')
-                  : null;
+    // Selectors are built with CSS.escape so a quote/backslash/bracket in a
+    // meta name/property or link href can't produce a malformed selector
+    // (which would throw, abort the swap, and force the reload fallback).
+    const metaSelector = (el) => {
+        if (el.getAttribute('charset') !== null) return 'meta[charset]';
+        for (const attr of ['name', 'property', 'http-equiv']) {
+            const value = el.getAttribute(attr);
+            if (value) return 'meta[' + attr + '="' + CSS.escape(value) + '"]';
+        }
+        return null;
+    };
     for (const node of incoming) {
         if (node.nodeType !== 1) continue;
         const tag = node.tagName;
@@ -51,10 +52,8 @@ export const buildLoadingSwapScript = (
             continue;
         }
         if (tag === 'META') {
-            const key = metaKey(node);
-            const existing = key
-                ? head.querySelector('meta[' + (key === 'charset' ? 'charset' : key.replace('=', '="') + '"') + ']')
-                : null;
+            const selector = metaSelector(node);
+            const existing = selector ? head.querySelector(selector) : null;
             if (existing) {
                 existing.replaceWith(node);
             } else {
@@ -66,7 +65,7 @@ export const buildLoadingSwapScript = (
             const href = node.getAttribute('href');
             if (
                 href &&
-                head.querySelector('link[href="' + href.replace(/"/g, '\\\\"') + '"]')
+                head.querySelector('link[href="' + CSS.escape(href) + '"]')
             ) {
                 continue;
             }

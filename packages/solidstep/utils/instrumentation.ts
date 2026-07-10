@@ -134,6 +134,29 @@ let initError: Error | null = null;
  * Load the user's instrumentation module.
  * Called once during server startup.
  */
+/**
+ * Whether a `loadInstrumentation` import failure means "the app simply has no
+ * instrumentation file" (→ null) as opposed to a broken instrumentation file
+ * whose own imports failed (→ must surface). Distinguished by the missing
+ * specifier named in the error: only the instrumentation module itself counts.
+ */
+export function isMissingInstrumentationModule(e: unknown): boolean {
+    const err = e as { code?: string; message?: string } | null;
+    if (
+        err?.code !== 'ERR_MODULE_NOT_FOUND' &&
+        !err?.message?.includes('Cannot find module')
+    ) {
+        return false;
+    }
+    const specifier = /Cannot find module '([^']+)'/.exec(
+        err?.message ?? '',
+    )?.[1];
+    // Unparsable shape (bundler-specific message): keep the historical
+    // lenient behavior and treat it as an absent instrumentation file.
+    if (!specifier) return true;
+    return /(^|[\\/])instrumentation(\.[cm]?[jt]sx?)?$/.test(specifier);
+}
+
 export async function loadInstrumentation(): Promise<InstrumentationModule | null> {
     if (initPromise) {
         return initPromise;
@@ -162,14 +185,14 @@ export async function loadInstrumentation(): Promise<InstrumentationModule | nul
 
             return instrumentationModule;
         } catch (e: any) {
-            // Check if it's a "module not found" error (no instrumentation file)
-            if (
-                e.code === 'ERR_MODULE_NOT_FOUND' ||
-                e.message?.includes('Cannot find module')
-            ) {
+            // Only a missing instrumentation module ITSELF means "the app has
+            // no instrumentation file". A missing module imported BY the
+            // user's instrumentation.ts must surface, not silently disable
+            // telemetry.
+            if (isMissingInstrumentationModule(e)) {
                 return null;
             }
-            // Re-throw other errors (syntax errors, etc.)
+            // Re-throw other errors (syntax errors, broken imports, etc.)
             initError = e;
             throw e;
         }

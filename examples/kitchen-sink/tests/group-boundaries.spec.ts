@@ -50,6 +50,27 @@ test.describe('per-group loading & error boundaries', () => {
         expect(reloaded).toBe(false); // soft navigation, not a full reload
     });
 
+    test('soft-navigating to a page with a failing NON-deferred group loader still shows its error.tsx', async ({
+        page,
+    }) => {
+        // Regression pin: on first load, `@boom`'s failing loader reaches its
+        // error.tsx via a thrown resource. On soft navigation the loader runs
+        // eagerly (not deferred) and must still surface as the boundary's
+        // error, not render with the raw loader-error sentinel as data.
+        await page.goto('/');
+        let reloaded = false;
+        page.on('load', () => {
+            reloaded = true;
+        });
+
+        await page.getByRole('link', { name: 'Groups' }).click();
+
+        await expect(page.getByTestId('group-boom-error')).toContainText(
+            'boom-group-failed',
+        );
+        expect(reloaded).toBe(false); // soft navigation, not a full reload
+    });
+
     test('raw stream emits the group loading fallback before its content', async ({
         request,
     }) => {

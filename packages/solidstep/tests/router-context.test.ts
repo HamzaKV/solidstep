@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { createRoot, createEffect } from 'solid-js';
 
 // Client router runtime: navigation, races, prefetch cache, meta application.
 // The envelope transport is mocked (fetch + seroval->JSON) with manually
@@ -22,8 +23,10 @@ import {
     navigate,
     initRouter,
     prefetchRoute,
+    refreshRoute,
     routeStructure,
     navigationPending,
+    usePathname,
     __routerInternals,
     type RouteState,
 } from '../utils/router-context';
@@ -238,5 +241,61 @@ describe('meta application', () => {
         expect(document.head.querySelector('meta[name="description"]')).toBe(
             null,
         );
+    });
+
+    it('applies and removes link/script meta types across navigations (canonical/JSON-LD)', async () => {
+        const withLink = {
+            ...pageEnvelope('/a'),
+            meta: {
+                canonical: {
+                    type: 'link',
+                    attributes: { rel: 'canonical', href: 'https://x.test/a' },
+                },
+            },
+        };
+        const nav1 = navigate('/a');
+        await tick();
+        resolveFetch('/a', withLink);
+        await nav1;
+        expect(
+            document.head
+                .querySelector('link[rel="canonical"]')
+                ?.getAttribute('href'),
+        ).toBe('https://x.test/a');
+
+        // Route B declares no canonical: A's must not leak across.
+        const nav2 = navigate('/b');
+        await tick();
+        resolveFetch('/b', pageEnvelope('/b'));
+        await nav2;
+        expect(document.head.querySelector('link[rel="canonical"]')).toBe(null);
+    });
+});
+
+describe('usePathname over-subscription', () => {
+    it('does not re-run when only loaderData changes (a same-route revalidation)', async () => {
+        let runs = 0;
+        let dispose: () => void;
+        await new Promise<void>((resolve) => {
+            createRoot((d) => {
+                dispose = d;
+                createEffect(() => {
+                    usePathname()();
+                    runs += 1;
+                    if (runs === 1) resolve();
+                });
+            });
+        });
+        const before = runs;
+
+        const refresh = refreshRoute();
+        await tick();
+        resolveFetch('/', pageEnvelope('/'));
+        await refresh;
+
+        // A loaderData-only update must not re-trigger something that only
+        // reads the pathname.
+        expect(runs).toBe(before);
+        dispose!();
     });
 });

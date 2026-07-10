@@ -1,4 +1,5 @@
 import { BaseFileSystemRouter, cleanPath } from 'vinxi/fs-router';
+import { parseGroupPath } from './route-group.js';
 
 /**
  * Vinxi file-system router definitions that turn files under `app/` into route
@@ -93,18 +94,15 @@ export class ServerRouter extends BaseFileSystemRouter {
             };
         }
 
-        // biome-ignore lint/correctness/noEmptyCharacterClassInRegex: <explanation>
-        const scopedPackageMatch = path.match(/@[^]+/g);
+        const groupMatch = parseGroupPath(path);
         // A `@group` dir's `page` becomes a group route; its `loading`/`error`
         // fall through to the normal loading/error recognition below (they get
         // distinct paths and are reattached to the group in the manifest).
         if (
-            scopedPackageMatch &&
+            groupMatch &&
             !/\/(loading|error)\.(jsx|js|tsx|ts)$/.test(filePath)
         ) {
-            // Remove the scoped package part
-            const scopedPackage = scopedPackageMatch[0];
-            const parent = path.replace(`/${scopedPackage}`, '');
+            const parent = groupMatch.parent;
             return {
                 type: 'group',
                 parent: parent,
@@ -290,15 +288,12 @@ export class ClientRouter extends BaseFileSystemRouter {
         }
         const path = this.toPath(filePath);
 
-        // biome-ignore lint/correctness/noEmptyCharacterClassInRegex: <explanation>
-        const scopedPackageMatch = path.match(/@[^]+/g);
+        const groupMatch = parseGroupPath(path);
         if (
-            scopedPackageMatch &&
+            groupMatch &&
             !/\/(loading|error)\.(jsx|js|tsx|ts)$/.test(filePath)
         ) {
-            // Remove the scoped package part
-            const scopedPackage = scopedPackageMatch[0];
-            const parent = path.replace(`/${scopedPackage}`, '');
+            const parent = groupMatch.parent;
             return {
                 type: 'group',
                 parent: parent,

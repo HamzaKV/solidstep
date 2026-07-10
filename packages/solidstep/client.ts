@@ -12,6 +12,10 @@ import {
 import { getModule, preloadHandler } from './utils/client-modules.js';
 import type { SearchParams } from './utils/path-router.js';
 import {
+    isLoaderErrorSentinel,
+    LOADER_ERROR_KEY,
+} from './utils/loader-error-sentinel.js';
+import {
     routeStructure,
     routeLoaderData,
     initRouter,
@@ -95,9 +99,15 @@ const buildSlots = (handler: ClientPageHandler, st: RouteStructure) => {
         const GroupLoading = group.loadingPage ? comp(group.loadingPage) : null;
         const GroupError = group.errorPage ? comp(group.errorPage) : null;
         const isDeferred = st.deferredKeys.includes(group.manifestPath);
+        // Mirrors server/render.ts's `needsWrap`: ANY boundary (loading or
+        // error), not just a true `type: 'defer'` loader, gets the
+        // resource-style calling convention (`loaderData()` as a function) —
+        // components under a boundary are authored against that shape on
+        // first load regardless of whether their own loader is deferred.
+        const hasBoundary = isDeferred || !!GroupLoading || !!GroupError;
         slots[slotName] = () => {
             const inner = () => {
-                if (!isDeferred) {
+                if (!hasBoundary) {
                     return GroupComp({
                         routeParams: st.params,
                         searchParams: st.searchParams,
@@ -106,20 +116,43 @@ const buildSlots = (handler: ClientPageHandler, st: RouteStructure) => {
                         },
                     });
                 }
-                const resource = deferredResourceFor(group.manifestPath, st);
-                return createComponent(Suspense, {
-                    fallback: GroupLoading
-                        ? createComponent(GroupLoading, {
-                              routeParams: st.params,
-                              searchParams: st.searchParams,
-                          })
-                        : undefined,
-                    get children() {
-                        return GroupComp({
-                            routeParams: st.params,
-                            searchParams: st.searchParams,
-                            loaderData: resource,
-                        });
+                if (isDeferred) {
+                    const resource = deferredResourceFor(
+                        group.manifestPath,
+                        st,
+                    );
+                    return createComponent(Suspense, {
+                        fallback: GroupLoading
+                            ? createComponent(GroupLoading, {
+                                  routeParams: st.params,
+                                  searchParams: st.searchParams,
+                              })
+                            : undefined,
+                        get children() {
+                            return GroupComp({
+                                routeParams: st.params,
+                                searchParams: st.searchParams,
+                                loaderData: resource,
+                            });
+                        },
+                    });
+                }
+                // Has a boundary but isn't truly deferred: the data already
+                // arrived resolved in the envelope/hydration payload. Present
+                // it through the same callable-accessor contract a resource
+                // would (so the component code is identical either way), and
+                // throw an isolated-loader-failure sentinel so the
+                // ErrorBoundary below catches it — matching the throw-based
+                // contract `render.ts` gives this same group on first load.
+                return GroupComp({
+                    routeParams: st.params,
+                    searchParams: st.searchParams,
+                    loaderData: () => {
+                        const data = routeLoaderData()[group.manifestPath];
+                        if (isLoaderErrorSentinel(data)) {
+                            throw new Error(data[LOADER_ERROR_KEY]);
+                        }
+                        return data ?? {};
                     },
                 });
             };

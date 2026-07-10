@@ -147,6 +147,17 @@ describe('server request handler', () => {
         expect(res.headers.get('Location')).toBe('/login');
     });
 
+    it("honors a RedirectError's explicit status (e.g. 308)", async () => {
+        handleServerFunction.mockRejectedValue(
+            new RedirectError('/moved', 308),
+        );
+        const res = (await handler(
+            makeEvent('https://example.com/_server?id=x&name=y'),
+        )) as Response;
+        expect(res.status).toBe(308);
+        expect(res.headers.get('Location')).toBe('/moved');
+    });
+
     it('does not dispatch a page path that merely contains "_server" to the server-function handler', async () => {
         matchRoute.mockReturnValue(undefined);
         renderPage.mockResolvedValue(new Response('ok'));

@@ -189,6 +189,33 @@ describe('serveHoleData', () => {
         expect(body.data).toEqual({ n: 1 });
     });
 
+    it("resolves a boundary group's NON-deferred loader (PPR emits those as holes too)", async () => {
+        matchRoute.mockReturnValue({
+            handler: {
+                type: 'page',
+                mainPage: { manifestPath: '/p' },
+                layouts: [],
+                groups: {
+                    sidebar: {
+                        manifestPath: '/group/sidebar',
+                        loader: {
+                            src: 'l',
+                            // Regular (non-defer) loader: under PPR the render
+                            // engine still reports boundary groups as holes,
+                            // so the endpoint must serve them.
+                            import: async () => ({ loader: {} }),
+                        },
+                    },
+                },
+            },
+            params: {},
+        });
+        const body = (await serveHoleData(
+            holeReq('manifest=/group/sidebar&url=/p'),
+        )) as unknown as { data: unknown };
+        expect(body.data).toEqual({ n: 1 });
+    });
+
     it('encodes an error envelope (not a rejection) when the deferred loader throws', async () => {
         matchRoute.mockReturnValue({
             handler: {
