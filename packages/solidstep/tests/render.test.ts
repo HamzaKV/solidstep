@@ -39,6 +39,7 @@ vi.mock('solid-js/web', () => ({
 vi.mock('solid-js', () => ({
     Suspense: 'Suspense',
     ErrorBoundary: 'ErrorBoundary',
+    createUniqueId: () => 'id',
 }));
 vi.mock('../utils/deferred', () => ({
     createDeferredResource: (p: unknown) => p,
@@ -316,12 +317,13 @@ describe('render', () => {
             'deferredKeys' in result &&
                 (result.deferredKeys as string[]).includes('__root'),
         ).toBe(true);
-        // The deferred layout is wrapped in <Suspense> (mocked as the plain
-        // string 'Suspense' by createComponent's mock).
+        // The deferred layout is wrapped in <Suspense>, and — even with no
+        // error.tsx — in an <ErrorBoundary> too (defaultBoundaryFallback), so
+        // a rejection is contained instead of crashing hydration entirely.
         const composed = (
             result as unknown as { composed: () => { c: unknown } }
         ).composed;
-        expect(composed()).toMatchObject({ c: 'Suspense' });
+        expect(composed()).toMatchObject({ c: 'ErrorBoundary' });
     });
 
     it('wraps a deferred layout in <ErrorBoundary> when the route has an error.tsx', async () => {

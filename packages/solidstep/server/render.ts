@@ -8,6 +8,7 @@ import { getCachedLoaderData } from '../utils/loader-cache.js';
 import { runSequentialLoader } from '../utils/loader-error.js';
 import { shouldCachePage, pageCacheKey } from '../utils/page-cache.js';
 import { isPreviewActive } from '../utils/preview.js';
+import { logger } from '../utils/logger.js';
 import type {
     Import,
     RoutePageHandler,
@@ -44,6 +45,22 @@ const idSafeErrorBoundary = (fallback: (err: any) => any, inner: () => any) =>
             return inner();
         },
     });
+
+/**
+ * Fallback used to wrap a Suspense-ed node when its route has no `error.tsx`.
+ * Without SOME ErrorBoundary here, a rejected resource throws uncaught
+ * through `hydrate()` on the client (Solid has nothing local to catch it),
+ * aborting the ENTIRE page's hydration — not just this one slot. `client.ts`'s
+ * `defaultBoundaryFallback` mirrors this exactly (same wrap condition on both
+ * sides) so hydration ids still line up.
+ */
+const defaultBoundaryFallback = (err: unknown) => {
+    logger.warn(
+        { err: err instanceof Error ? err.message : String(err) },
+        'Suspense boundary failed with no error.tsx; rendering nothing for this slot',
+    );
+    return undefined;
+};
 
 /** Arguments for {@link render}. */
 type RenderArgs = {
@@ -468,18 +485,17 @@ export async function render(args: RenderArgs): Promise<RenderResult> {
                                         },
                                     });
                                 };
-                                if (GroupError) {
-                                    return idSafeErrorBoundary(
-                                        (err: unknown) =>
-                                            createComponent(GroupError, {
-                                                error: err,
-                                                routeParams,
-                                                searchParams,
-                                            }),
-                                        inner,
-                                    );
-                                }
-                                return inner();
+                                return idSafeErrorBoundary(
+                                    GroupError
+                                        ? (err: unknown) =>
+                                              createComponent(GroupError, {
+                                                  error: err,
+                                                  routeParams,
+                                                  searchParams,
+                                              })
+                                        : defaultBoundaryFallback,
+                                    inner,
+                                );
                             };
                         })(),
                     );
@@ -553,18 +569,17 @@ export async function render(args: RenderArgs): Promise<RenderResult> {
                                 });
                             },
                         });
-                    if (LayoutError) {
-                        return idSafeErrorBoundary(
-                            (err: unknown) =>
-                                createComponent(LayoutError, {
-                                    error: err,
-                                    routeParams,
-                                    searchParams,
-                                }),
-                            inner,
-                        );
-                    }
-                    return inner();
+                    return idSafeErrorBoundary(
+                        LayoutError
+                            ? (err: unknown) =>
+                                  createComponent(LayoutError, {
+                                      error: err,
+                                      routeParams,
+                                      searchParams,
+                                  })
+                            : defaultBoundaryFallback,
+                        inner,
+                    );
                 };
             }
 
@@ -694,18 +709,17 @@ export async function render(args: RenderArgs): Promise<RenderResult> {
                                 });
                             },
                         });
-                    if (PageError) {
-                        return idSafeErrorBoundary(
-                            (err: unknown) =>
-                                createComponent(PageError, {
-                                    error: err,
-                                    routeParams,
-                                    searchParams,
-                                }),
-                            inner,
-                        );
-                    }
-                    return inner();
+                    return idSafeErrorBoundary(
+                        PageError
+                            ? (err: unknown) =>
+                                  createComponent(PageError, {
+                                      error: err,
+                                      routeParams,
+                                      searchParams,
+                                  })
+                            : defaultBoundaryFallback,
+                        inner,
+                    );
                 };
             }
             return () => page(props);

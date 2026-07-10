@@ -74,6 +74,24 @@ const idSafeErrorBoundary = (fallback: (err: any) => any, inner: () => any) =>
     });
 
 /**
+ * Fallback used to wrap a Suspense-ed node when its route has no `error.tsx`.
+ * Without SOME ErrorBoundary here, a rejected resource (deferred loader
+ * failure, hole-fetch failure) throws uncaught through `hydrate()` — Solid
+ * has nothing local to catch it, the exception propagates to the very top of
+ * the tree, and the entire page's hydration aborts (observed: a blank
+ * `<body>`/`<main>`, not just the one failing slot). Containing it here keeps
+ * the failure local to its own boundary, matching what an author-provided
+ * `error.tsx` would do, just with no visible fallback UI.
+ */
+const defaultBoundaryFallback = (err: unknown) => {
+    console.error(
+        '[solidstep] boundary error (no error.tsx for this route/group):',
+        err,
+    );
+    return undefined;
+};
+
+/**
  * Resolve the loader-data accessor a deferred node should receive.
  * - first load, streamed (`!ppr`): `undefined` → the Solid resource reads the
  *   streamed value from `_$HY` at the matching tree position.
@@ -156,18 +174,22 @@ const buildSlots = (handler: ClientPageHandler, st: RouteStructure) => {
                     },
                 });
             };
-            if (GroupError) {
-                return idSafeErrorBoundary(
-                    (err: any) =>
-                        createComponent(GroupError, {
-                            error: err,
-                            routeParams: st.params,
-                            searchParams: st.searchParams,
-                        }),
-                    inner,
-                );
-            }
-            return inner();
+            // Only a boundary-wrapped (Suspense-ed) node can throw here — a
+            // plain group's data is already resolved, so wrapping it would
+            // burn an id the server never burns for that same node, breaking
+            // hydration parity.
+            if (!hasBoundary) return inner();
+            return idSafeErrorBoundary(
+                GroupError
+                    ? (err: any) =>
+                          createComponent(GroupError, {
+                              error: err,
+                              routeParams: st.params,
+                              searchParams: st.searchParams,
+                          })
+                    : defaultBoundaryFallback,
+                inner,
+            );
         };
     }
     return slots;
@@ -229,18 +251,19 @@ const renderLeaf = (handler: ClientPageHandler, st: RouteStructure) => {
                     });
                 },
             });
-        if (PageError) {
-            return idSafeErrorBoundary(
-                (err: any) =>
-                    createComponent(PageError, {
-                        error: err,
-                        routeParams: st.params,
-                        searchParams: st.searchParams,
-                    }),
-                inner,
-            );
-        }
-        return inner();
+        // Already inside the deferred (Suspense-wrapped) branch here, so
+        // always wrap — see defaultBoundaryFallback.
+        return idSafeErrorBoundary(
+            PageError
+                ? (err: any) =>
+                      createComponent(PageError, {
+                          error: err,
+                          routeParams: st.params,
+                          searchParams: st.searchParams,
+                      })
+                : defaultBoundaryFallback,
+            inner,
+        );
     }
     return Page({
         routeParams: st.params,
@@ -322,18 +345,20 @@ const renderLayoutNode = (
                 return LayoutComp(buildProps(resource));
             },
         });
-    if (LayoutError) {
-        return idSafeErrorBoundary(
-            (err: any) =>
-                createComponent(LayoutError, {
-                    error: err,
-                    routeParams: st.params,
-                    searchParams: st.searchParams,
-                }),
-            inner,
-        );
-    }
-    return inner();
+    // Already inside the deferred (Suspense-wrapped) branch here, so always
+    // wrap — an unwrapped Suspense would let a rejection throw uncaught
+    // through `hydrate()` and crash the whole tree (see defaultBoundaryFallback).
+    return idSafeErrorBoundary(
+        LayoutError
+            ? (err: any) =>
+                  createComponent(LayoutError, {
+                      error: err,
+                      routeParams: st.params,
+                      searchParams: st.searchParams,
+                  })
+            : defaultBoundaryFallback,
+        inner,
+    );
 };
 
 const composeFrom = (
