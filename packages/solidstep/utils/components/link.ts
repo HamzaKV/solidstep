@@ -3,7 +3,7 @@ import {
     createComponent,
     splitProps,
     mergeProps,
-    onMount,
+    createEffect,
     onCleanup,
 } from 'solid-js';
 import { Dynamic, isServer } from 'solid-js/web';
@@ -146,10 +146,17 @@ export const Link = (props: LinkProps): JSX.Element => {
         });
     };
 
-    const hoverPrefetch =
+    // A getter (not a plain value) so a reactive `prefetch` prop that changes
+    // after mount re-wires the hover/focus handlers, not just a stale
+    // snapshot taken at setup.
+    const hoverPrefetch = () =>
         local.prefetch === undefined || local.prefetch === 'hover';
 
-    onMount(() => {
+    // `createEffect`, not `onMount`: re-runs whenever `local.prefetch`
+    // changes, so switching to/away from `'viewport'` after mount actually
+    // (dis)connects the IntersectionObserver instead of only taking effect
+    // on the value present at the initial render.
+    createEffect(() => {
         if (isServer) return;
         if (local.prefetch === true) doPrefetch();
         if (
@@ -167,8 +174,12 @@ export const Link = (props: LinkProps): JSX.Element => {
             component: 'a',
             ref: setRef,
             onClick: handleClick,
-            onMouseEnter: hoverPrefetch ? doPrefetch : undefined,
-            onFocus: hoverPrefetch ? doPrefetch : undefined,
+            get onMouseEnter() {
+                return hoverPrefetch() ? doPrefetch : undefined;
+            },
+            get onFocus() {
+                return hoverPrefetch() ? doPrefetch : undefined;
+            },
             get href() {
                 return local.href;
             },

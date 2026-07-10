@@ -263,6 +263,44 @@ describe('robustness — collisions, depth, and group segments', () => {
     });
 });
 
+describe('insertRoute — segment after a catch-all', () => {
+    // A catch-all always consumes the rest of the path (see insertRoute's
+    // doc comment) -- a route nested under one, e.g.
+    // `app/shop/[[...slug]]/checkout/page.tsx`, would otherwise silently
+    // collide onto the same trie node as `app/shop/[[...slug]]/page.tsx`,
+    // with whichever route is inserted last winning and the other becoming
+    // permanently unreachable.
+    it('throws for a static segment nested after a required catch-all', () => {
+        expect(() =>
+            insertRoute(
+                root,
+                '/docs/[...path]/extra',
+                makePageHandler('/docs/[...path]/extra'),
+            ),
+        ).toThrow(/catch-all/i);
+    });
+
+    it('throws for a static segment nested after an optional catch-all', () => {
+        expect(() =>
+            insertRoute(
+                root,
+                '/shop/[[...slug]]/checkout',
+                makePageHandler('/shop/[[...slug]]/checkout'),
+            ),
+        ).toThrow(/catch-all/i);
+    });
+
+    it('does not throw when the catch-all is the last segment', () => {
+        expect(() =>
+            insertRoute(
+                root,
+                '/docs/[...path]',
+                makePageHandler('/docs/[...path]'),
+            ),
+        ).not.toThrow();
+    });
+});
+
 describe('param/catch-all decoding', () => {
     it('decodes a percent-encoded param value (e.g. a space)', () => {
         insertRoute(root, '/blog/[slug]', makePageHandler('/blog/[slug]'));

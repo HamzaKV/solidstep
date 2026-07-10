@@ -221,7 +221,8 @@ export const insertRoute = (
     const segments = path.split('/').filter(Boolean);
     let node = root;
 
-    for (const segment of segments) {
+    for (let i = 0; i < segments.length; i++) {
+        const segment = segments[i];
         const parsed = parseSegment(segment);
 
         if (parsed.type === 'static' && parsed.value) {
@@ -245,6 +246,12 @@ export const insertRoute = (
 
         // Only catchAll segments reach here — static and param both continue above
         const catchAll = parsed as Extract<ParseSegment, { type: 'catchAll' }>;
+        if (i !== segments.length - 1) {
+            throw new Error(
+                `Invalid route "${path}": a catch-all segment ("${segment}") must be the last segment. ` +
+                    `"${segments.slice(i + 1).join('/')}" would never be reachable -- move it out of the catch-all folder.`,
+            );
+        }
         if (!node.catchAllChild) {
             node.catchAllChild = {
                 name: catchAll.name,
