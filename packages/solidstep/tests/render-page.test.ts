@@ -217,6 +217,31 @@ describe('renderPage manifest script', () => {
     });
 });
 
+describe('renderPage loading boundary', () => {
+    it('does not warn or attempt a loading render when the page has no loading.tsx', async () => {
+        render.mockResolvedValue({
+            rendered: '<p>hi</p>',
+            documentMeta: {},
+            documentAssets: [],
+            loaderData: {},
+            cacheStatus: undefined,
+        });
+
+        const stream = await renderPage(baseCtx()); // loadingPage: undefined
+        const { text, error } = await readStream(stream as ReadableStream);
+
+        expect(error).toBeNull();
+        expect(text).toContain('<p>hi</p>');
+        // The normal "no loading.tsx" case is not a failure: no warn spam,
+        // no throwaway loading render attempt.
+        expect(logger.warn).not.toHaveBeenCalled();
+        const loadingRenders = render.mock.calls.filter(
+            (c) => (c[0] as { toRender?: string })?.toRender === 'loading',
+        );
+        expect(loadingRenders).toHaveLength(0);
+    });
+});
+
 describe('renderPage onResponseStart', () => {
     it('fires once with the final status before the body streams (main render)', async () => {
         render.mockResolvedValue({

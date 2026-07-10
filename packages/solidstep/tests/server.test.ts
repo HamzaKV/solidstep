@@ -58,7 +58,9 @@ vi.mock('../utils/instrumentation', () => ({
     getInstrumentation: (...a: unknown[]) => getInstrumentation(...a),
     safeExecuteHook: (...a: unknown[]) => safeExecuteHook(...a),
     createRequestContext: () => ({}),
-    createResponseContext: () => ({}),
+    createResponseContext: (_reqCtx: unknown, statusCode: number) => ({
+        statusCode,
+    }),
     registerShutdownHandler: (...a: unknown[]) => registerShutdownHandler(...a),
 }));
 vi.mock('../server/route-manifest', () => ({
@@ -210,6 +212,33 @@ describe('server request handler', () => {
         );
         expect(setResponseStatus).toHaveBeenCalledWith(204);
         expect(res).toBeUndefined();
+    });
+
+    it('does not 204 a page whose query string merely contains the devtools probe path', async () => {
+        matchRoute.mockReturnValue(undefined);
+        renderPage.mockResolvedValue(new Response('page'));
+        await handler(
+            makeEvent(
+                'https://example.com/foo?next=/.well-known/appspecific/com.chrome.devtools.json',
+            ),
+        );
+        expect(setResponseStatus).not.toHaveBeenCalledWith(204);
+        expect(renderPage).toHaveBeenCalled();
+    });
+
+    it("reports a returned Response's status to the instrumentation hooks", async () => {
+        matchRoute.mockReturnValue({
+            handler: { type: 'route', handler: {}, routePath: '/api/thing' },
+            params: {},
+        });
+        getCachedModule.mockResolvedValue({
+            GET: async () => new Response('nope', { status: 404 }),
+        });
+        await handler(makeEvent('https://example.com/api/thing'));
+        const start = safeExecuteHook.mock.calls.find(
+            (c) => c[0] === 'onResponseStart',
+        );
+        expect(start?.[3]).toMatchObject({ statusCode: 404 });
     });
 });
 

@@ -180,9 +180,14 @@ const handleApiRoute = async (
                     },
                 );
                 if (inst?.onResponseStart || inst?.onResponseEnd) {
+                    // A method handler usually *returns* a Response (with its
+                    // own status) rather than calling setResponseStatus, so
+                    // prefer the returned Response's status.
                     const respCtx = createResponseContext(
                         reqCtx,
-                        getResponseStatus(event) || 200,
+                        result instanceof Response
+                            ? result.status
+                            : getResponseStatus(event) || 200,
                     );
                     await safeExecuteHook(
                         'onResponseStart',
@@ -229,9 +234,7 @@ const handler = eventHandler(async (event) => {
 
     try {
         if (
-            req.url.includes(
-                '/.well-known/appspecific/com.chrome.devtools.json',
-            )
+            pathnamePart === '/.well-known/appspecific/com.chrome.devtools.json'
         ) {
             setResponseStatus(204);
             return;

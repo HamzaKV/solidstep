@@ -109,6 +109,25 @@ describe('useActionState', () => {
         });
     });
 
+    it('ignores a second concurrent call while the first is still pending', async () => {
+        await withRoot(async () => {
+            const action = vi.fn(async (prev: { n: number }) => ({
+                n: prev.n + 1,
+            }));
+            const [state, formAction, pending] = useActionState(action, {
+                n: 0,
+            });
+
+            const first = formAction(fd());
+            const second = formAction(fd());
+            await Promise.all([first, second]);
+
+            expect(action).toHaveBeenCalledTimes(1);
+            expect(state()).toEqual({ n: 1 });
+            expect(pending()).toBe(false);
+        });
+    });
+
     it('clears a previous error on the next submission', async () => {
         await withRoot(async () => {
             let shouldThrow = true;

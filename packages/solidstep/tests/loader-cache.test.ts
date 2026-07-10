@@ -45,6 +45,22 @@ describe('getCachedLoaderData', () => {
         expect(await getCachedLoaderData(loaderFn, '/p', req())).toEqual({});
     });
 
+    it('preserves legitimate falsy loader data (0, false, "") uncached', async () => {
+        expect(await getCachedLoaderData(makeLoader(0), '/p', req())).toBe(0);
+        expect(await getCachedLoaderData(makeLoader(false), '/p', req())).toBe(
+            false,
+        );
+        expect(await getCachedLoaderData(makeLoader(''), '/p', req())).toBe('');
+    });
+
+    it('preserves legitimate falsy loader data through the cache', async () => {
+        const loaderFn = makeLoader(0, {});
+        expect(await getCachedLoaderData(loaderFn, '/p', req())).toBe(0);
+        // Second call must serve the cached 0, not {} and not a re-run.
+        expect(await getCachedLoaderData(loaderFn, '/p', req())).toBe(0);
+        expect(loaderFn.loader).toHaveBeenCalledTimes(1);
+    });
+
     it('caches by pathname+search and does not re-run within the cache', async () => {
         const loaderFn = makeLoader({ n: 2 }, {});
         const first = await getCachedLoaderData(loaderFn, '/p', req());

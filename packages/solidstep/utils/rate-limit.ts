@@ -81,9 +81,16 @@ export const checkRateLimit = (
         };
     });
 
-/** Best-effort client IP from the H3 event, used as the default bucket key. */
+/**
+ * Best-effort client IP from the H3 event, used as the default bucket key.
+ *
+ * `X-Forwarded-For`'s first hop is attacker-controlled unless a trusted
+ * reverse proxy overwrites it before this process sees the request — behind
+ * anything else, a client can rotate it to evade its own bucket or spoof a
+ * victim's IP into one. Deploy behind a proxy that sets/overwrites this
+ * header, or pass a custom `keyFn` deriving the key from a source you trust.
+ */
 const clientIp = (event: H3Event): string => {
-    // biome-ignore lint/suspicious/noExplicitAny: H3Event's node shape is wider than its published type.
     const req = (event as any).node?.req;
     const xff = req?.headers?.['x-forwarded-for'];
     if (typeof xff === 'string' && xff.length > 0) {

@@ -154,7 +154,7 @@ export const renderPage = async (ctx: PageRenderContext) => {
             setHeader('Content-Type', 'text/html');
             setHeader(
                 'Cache-Control',
-                `public, max-age=0, s-maxage=${revalidate}, stale-while-revalidate`,
+                `public, max-age=0, s-maxage=${revalidate}, stale-while-revalidate=${revalidate}`,
             );
             setResponseStatus(200);
             if (inst?.onResponseStart || inst?.onResponseEnd) {
@@ -449,12 +449,16 @@ export const renderPage = async (ctx: PageRenderContext) => {
                             controller.close();
                             return;
                         }
-                        try {
-                            if (!pageEntry!.loadingPage) {
-                                throw new Error('No loading page');
-                            }
-                            const { rendered, documentMeta, documentAssets } =
-                                await render({
+                        // Only pages with a loading.tsx get the transient
+                        // loading boundary; the plain-page common case skips
+                        // this block entirely (no throwaway render, no warn).
+                        if (pageEntry!.loadingPage) {
+                            try {
+                                const {
+                                    rendered,
+                                    documentMeta,
+                                    documentAssets,
+                                } = await render({
                                     toRender: 'loading',
                                     entry: pageEntry!,
                                     routeParams: params,
@@ -465,11 +469,11 @@ export const renderPage = async (ctx: PageRenderContext) => {
                                     locals,
                                     url: urlObj,
                                 });
-                            const assetsHtml = renderAssetsToHtml(
-                                assets.concat(documentAssets),
-                                cspNonce,
-                            );
-                            const html = `
+                                const assetsHtml = renderAssetsToHtml(
+                                    assets.concat(documentAssets),
+                                    cspNonce,
+                                );
+                                const html = `
                         <!doctype html>
                         <html lang="en">
                             <head>
@@ -485,26 +489,27 @@ export const renderPage = async (ctx: PageRenderContext) => {
                             ${rendered}
                         </html>
                         `;
-                            push(html);
-                            // The loading boundary is a transient,
-                            // server-rendered placeholder shown until the
-                            // main content streams in and replaces it; it
-                            // is intentionally NOT hydrated. (Hydrating it
-                            // would render the real page with no loader
-                            // data and race the main hydration below.)
-                            loading = true;
-                        } catch (e) {
-                            // The loading boundary failed to render; we
-                            // still proceed to render the main page, but
-                            // surface this so authors notice a broken
-                            // loading.tsx.
-                            logger.warn(
-                                {
-                                    route: pathnamePart,
-                                    err: String(e),
-                                },
-                                'Failed to render loading boundary (loading.tsx)',
-                            );
+                                push(html);
+                                // The loading boundary is a transient,
+                                // server-rendered placeholder shown until the
+                                // main content streams in and replaces it; it
+                                // is intentionally NOT hydrated. (Hydrating it
+                                // would render the real page with no loader
+                                // data and race the main hydration below.)
+                                loading = true;
+                            } catch (e) {
+                                // The loading boundary failed to render; we
+                                // still proceed to render the main page, but
+                                // surface this so authors notice a broken
+                                // loading.tsx.
+                                logger.warn(
+                                    {
+                                        route: pathnamePart,
+                                        err: String(e),
+                                    },
+                                    'Failed to render loading boundary (loading.tsx)',
+                                );
+                            }
                         }
 
                         const mainResult = await render({

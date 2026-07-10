@@ -30,6 +30,14 @@ describe('serializeAttributes', () => {
             'name="desc" content="a&quot;b"',
         );
     });
+
+    it('escapes an attribute key too, not just its value', () => {
+        // A key containing a quote/space could otherwise break out of its own
+        // attribute and inject a new one (e.g. a key of `x" onclick="evil()`).
+        const out = serializeAttributes({ 'x" onclick="evil()': '1' });
+        expect(out).toBe('x&quot; onclick=&quot;evil()="1"');
+        expect(out).not.toContain('onclick="evil()"');
+    });
 });
 
 describe('generateHtmlHead', () => {
@@ -50,11 +58,41 @@ describe('generateHtmlHead', () => {
         const html = generateHtmlHead(meta);
         expect(html).toContain('<title>A &lt;b&gt;</title>');
         expect(html).toContain(
-            '<meta name="description" content="hi &quot;x&quot;">',
+            '<meta name="description" content="hi &quot;x&quot;" data-ss-meta>',
         );
         expect(html).toContain('<link rel="stylesheet" href="/a"></link>');
         expect(html).toContain('<style id="s"></style>');
         expect(html).toContain('<script src="/a.js"></script>');
+    });
+
+    it('stamps route meta tags with data-ss-meta but never the preserved base tags', () => {
+        const meta: Meta = {
+            charset: { type: 'meta', attributes: { charset: 'UTF-8' } },
+            viewport: {
+                type: 'meta',
+                attributes: { name: 'viewport', content: 'width=device-width' },
+            },
+            build_time: {
+                type: 'meta',
+                attributes: { name: 'x-build-time', content: '1' },
+            },
+            description: {
+                type: 'meta',
+                attributes: { name: 'description', content: 'hi' },
+            },
+        };
+        const html = generateHtmlHead(meta);
+        // Route-owned tags carry the stamp so the client router's meta diff
+        // can remove them when a navigation's meta no longer includes them.
+        expect(html).toContain(
+            '<meta name="description" content="hi" data-ss-meta>',
+        );
+        // Boot-time tags are never stamped (never removed by the diff).
+        expect(html).toContain('<meta charset="UTF-8">');
+        expect(html).toContain(
+            '<meta name="viewport" content="width=device-width">',
+        );
+        expect(html).toContain('<meta name="x-build-time" content="1">');
     });
 
     it('handles a title with no content and an unknown tag type', () => {
@@ -74,11 +112,11 @@ describe('renderAssetsToHtml', () => {
         { tag: 'meta', attrs: { name: 'ignored' } },
     ];
 
-    it('renders script/link/style and escapes style children; drops unknown tags', () => {
+    it('renders script/link/style (children passed through as raw CSS) and drops unknown tags', () => {
         const out = renderAssetsToHtml(assets, 'NONCE');
         expect(out).toContain('<script src="/x.js" nonce="NONCE"></script>');
         expect(out).toContain('<link rel="modulepreload" href="/y.js">');
-        expect(out).toContain('<style id="z">a&lt;b</style>');
+        expect(out).toContain('<style id="z">a<b</style>');
         // the meta asset (unknown tag) contributes an empty string
         expect(out).not.toContain('ignored');
     });
@@ -100,6 +138,23 @@ describe('renderAssetsToHtml', () => {
         expect(renderAssetsToHtml([{ tag: 'style', attrs: {} }])).toBe(
             '<style ></style>',
         );
+    });
+
+    it('does not corrupt valid CSS containing a child combinator or quoted content', () => {
+        const css = 'a > b { content: "x"; }';
+        const out = renderAssetsToHtml([
+            { tag: 'style', attrs: {}, children: css },
+        ]);
+        // HTML-entity-escaping `>`/`"` inside <style> is wrong: browsers don't
+        // decode entities there, so the rule would literally contain "&gt;".
+        expect(out).toBe(`<style >${css}</style>`);
+    });
+
+    it('still prevents a </style> breakout inside style children', () => {
+        const out = renderAssetsToHtml([
+            { tag: 'style', attrs: {}, children: 'a{}</style><script>evil()' },
+        ]);
+        expect(out).not.toContain('</style><script>');
     });
 
     it('dedupes identical assets (e.g. when a page and its layout are both deferred and both pull in the same loading.tsx/error.tsx bundle)', () => {

@@ -190,13 +190,18 @@ export class MemoryCacheStore implements CacheStore {
     }
 
     private removeTail() {
-        // Only called when a bound is exceeded, so tail and tail.prev are defined.
+        // Only called when a bound is exceeded, so tail is defined — but it
+        // may be the only node (e.g. maxEntries: 0), leaving no predecessor.
         const evicted = this.tail!;
         this.map.delete(evicted.key);
         this.untag(evicted.key, evicted.tags);
         this.totalBytes -= evicted.size;
-        this.tail = evicted.prev!;
-        this.tail.next = undefined;
+        this.tail = evicted.prev;
+        if (this.tail) {
+            this.tail.next = undefined;
+        } else {
+            this.head = undefined;
+        }
     }
 
     private untag(key: string, tags?: string[]) {

@@ -122,3 +122,35 @@ describe('create-solidstep scaffold', () => {
         });
     });
 });
+
+describe('shouldIncludeInScaffold', () => {
+    it('excludes node_modules and .git at the template root', async () => {
+        const { shouldIncludeInScaffold } = await import(
+            '../bin/scaffold-filter'
+        );
+        const templateDir = '/tpl';
+        expect(shouldIncludeInScaffold(templateDir, '/tpl/node_modules')).toBe(
+            false,
+        );
+        expect(
+            shouldIncludeInScaffold(templateDir, '/tpl/node_modules/x/y.js'),
+        ).toBe(false);
+        expect(shouldIncludeInScaffold(templateDir, '/tpl/.git')).toBe(false);
+        expect(shouldIncludeInScaffold(templateDir, '/tpl/.git/HEAD')).toBe(
+            false,
+        );
+    });
+
+    it('includes ordinary template files', async () => {
+        const { shouldIncludeInScaffold } = await import(
+            '../bin/scaffold-filter'
+        );
+        const templateDir = '/tpl';
+        expect(shouldIncludeInScaffold(templateDir, '/tpl/package.json')).toBe(
+            true,
+        );
+        expect(shouldIncludeInScaffold(templateDir, '/tpl/app/page.tsx')).toBe(
+            true,
+        );
+    });
+});

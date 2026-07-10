@@ -28,7 +28,13 @@ export const loadModule = async (imp: ClientImport): Promise<LoadedModule> => {
 export const getModule = (src: string): LoadedModule | undefined =>
     cache.get(src);
 
-/** Eagerly load every component module a route needs (page, layouts, groups, boundaries). */
+/**
+ * Eagerly load every component module a route needs (page, layouts, groups,
+ * boundaries). Rejects when any chunk fails to load — callers deciding to
+ * commit a route must let that rejection reach their hard-navigation fallback
+ * (committing anyway would render a blank tree from missing modules); purely
+ * speculative callers (prefetch) attach their own `.catch`.
+ */
 export const preloadHandler = async (
     handler: ClientPageHandler,
 ): Promise<void> => {
@@ -44,5 +50,5 @@ export const preloadHandler = async (
         if (g.loadingPage) imports.push(g.loadingPage);
         if (g.errorPage) imports.push(g.errorPage);
     }
-    await Promise.all(imports.map((i) => loadModule(i))).catch(() => undefined);
+    await Promise.all(imports.map((i) => loadModule(i)));
 };

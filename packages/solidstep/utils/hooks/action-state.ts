@@ -24,11 +24,15 @@ const useActionState = <T>(
     const [state, setState] = createSignal<T>(initialState);
     const [isPending, setIsPending] = createSignal(false);
     const [error, setError] = createSignal<Error | null>(null);
+    let inFlight: Promise<void> | null = null;
 
     const formAction = (formData: FormData): Promise<void> => {
+        // A fast double-submit must not re-invoke the action while the first
+        // call is still in flight; share its promise instead.
+        if (inFlight) return inFlight;
         setIsPending(true);
         setError(null);
-        return Promise.resolve(action(state(), formData))
+        const promise = Promise.resolve(action(state(), formData))
             .then((result) => {
                 setState(() => result);
             })
@@ -37,7 +41,10 @@ const useActionState = <T>(
             })
             .finally(() => {
                 setIsPending(false);
+                inFlight = null;
             });
+        inFlight = promise;
+        return promise;
     };
 
     return [state, formAction, isPending, error];

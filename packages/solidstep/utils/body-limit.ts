@@ -23,6 +23,10 @@ export const parseContentLength = (
     header: string | null | undefined,
 ): number | null => {
     if (!header) return null;
+    // RFC 9110 §8.6: Content-Length is 1*DIGIT — reject hex/scientific/signed
+    // forms Number() would accept ('0x10', '1e6', '+5'); lenient parsers on
+    // either side of a proxy are exactly what smuggling exploits.
+    if (!/^\d+$/.test(header)) return Number.NaN;
     const n = Number(header);
     return Number.isFinite(n) && n >= 0 ? n : Number.NaN;
 };
@@ -61,7 +65,6 @@ export const bodyLimit = (options: {
     const { maxBytes, message = 'Payload Too Large' } = options;
     return {
         onRequest: (event: H3Event) => {
-            // biome-ignore lint/suspicious/noExplicitAny: H3Event's node shape is wider than its published type.
             const header = (event as any).node?.req?.headers?.[
                 'content-length'
             ];

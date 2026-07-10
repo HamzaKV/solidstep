@@ -23,19 +23,28 @@ export const serializeAttributes = (
     Object.entries(attributes)
         .map(
             ([attrKey, attrValue]) =>
-                `${attrKey}="${escapeHtml(String(attrValue))}"`,
+                `${escapeHtml(attrKey)}="${escapeHtml(String(attrValue))}"`,
         )
         .join(' ');
+
+// Boot-time meta keys the client router never rewrites or removes; everything
+// else is stamped `data-ss-meta` so the soft-nav meta diff (see
+// `applyMeta` in utils/router-context.ts) can drop tags a new route no longer
+// declares. Keep in sync with PRESERVED_META there.
+const PRESERVED_META_KEYS = new Set(['charset', 'viewport', 'build_time']);
 
 /** Render a route's {@link Meta} into `<title>`/`<meta>`/`<link>`/… head tags. */
 export const generateHtmlHead = (meta: Meta): string =>
     Object.entries(meta)
-        .map(([_key, value]) => {
+        .map(([key, value]) => {
             if (value.type === 'title') {
                 return `<title>${escapeHtml(String(value.content ?? ''))}</title>`;
             }
             if (value.type === 'meta') {
-                return `<meta ${serializeAttributes(value.attributes)}>`;
+                const stamp = PRESERVED_META_KEYS.has(key)
+                    ? ''
+                    : ' data-ss-meta';
+                return `<meta ${serializeAttributes(value.attributes)}${stamp}>`;
             }
             if (
                 value.type === 'link' ||
@@ -118,7 +127,15 @@ export const renderAssetsToHtml = (
                 return `<link ${attributeString}>`;
             }
             if (asset.tag === 'style') {
-                return `<style ${attributeString}>${escapeHtml(asset.children || '')}</style>`;
+                // Browsers never HTML-decode entities inside <style>, so a
+                // full escapeHtml would corrupt valid CSS (child combinators,
+                // quoted `content:` values). Only neutralize a `</style`
+                // breakout, case-insensitively.
+                const safeCss = (asset.children || '').replace(
+                    /<\/style/gi,
+                    '<\\/style',
+                );
+                return `<style ${attributeString}>${safeCss}</style>`;
             }
             return '';
         })

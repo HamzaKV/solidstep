@@ -58,6 +58,8 @@ vi.mock('solid-js/web/storage', () => ({
 }));
 
 import { handleServerFunction } from '../utils/server-action.server';
+import { isTrustedServerActionOrigin } from '../utils/server-action-origin';
+import { createResponseStub } from '../utils/server-action.server';
 
 const makeEvent = (req: Request, extra?: Record<string, unknown>) => ({
     req,
@@ -839,5 +841,55 @@ describe('handleServerFunction origin check', () => {
         const res = await handleServerFunction(makeEvent(req) as any);
 
         expect(res).toBeInstanceOf(ReadableStream);
+    });
+});
+
+describe('isTrustedServerActionOrigin allowlist semantics', () => {
+    const url = new URL('https://example.com/_server');
+    const reqWith = (origin: string) =>
+        new Request('https://example.com/_server', {
+            method: 'POST',
+            headers: { Origin: origin },
+        });
+
+    it('accepts a bare-host allowlist entry', () => {
+        expect(
+            isTrustedServerActionOrigin(reqWith('https://trusted.test'), url, [
+                'trusted.test',
+            ]),
+        ).toBe(true);
+    });
+
+    it('accepts a full-origin allowlist entry (matching cors.ts semantics)', () => {
+        expect(
+            isTrustedServerActionOrigin(reqWith('https://trusted.test'), url, [
+                'https://trusted.test',
+            ]),
+        ).toBe(true);
+    });
+
+    it('matches allowlist entries case-insensitively', () => {
+        expect(
+            isTrustedServerActionOrigin(reqWith('https://trusted.test'), url, [
+                'TRUSTED.TEST',
+            ]),
+        ).toBe(true);
+    });
+
+    it('rejects an origin not in the allowlist', () => {
+        expect(
+            isTrustedServerActionOrigin(reqWith('https://evil.test'), url, [
+                'https://trusted.test',
+            ]),
+        ).toBe(false);
+    });
+});
+
+describe('createResponseStub headers', () => {
+    it('has() reflects whether a header is actually set', () => {
+        const resp = createResponseStub({} as any);
+        expect(resp.headers.has('X-Never-Set')).toBe(false);
+        resp.headers.set('X-Now-Set', '1');
+        expect(resp.headers.has('X-Now-Set')).toBe(true);
     });
 });

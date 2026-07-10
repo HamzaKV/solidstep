@@ -112,6 +112,30 @@ describe('<Form>', () => {
         errSpy.mockRestore();
     });
 
+    it('ignores a second submit while the first is still pending', async () => {
+        let resolveAction: () => void;
+        const action = vi.fn(
+            () =>
+                new Promise<void>((r) => {
+                    resolveAction = r;
+                }),
+        );
+        const { container } = render(() => (
+            <Form action={action}>
+                <input name='x' />
+            </Form>
+        ));
+        const form = container.querySelector('form')!;
+        form.requestSubmit();
+        form.requestSubmit();
+        form.requestSubmit();
+        await vi.waitFor(() => expect(action).toHaveBeenCalled());
+        // A fast double/triple-click must not fire the server action more
+        // than once while the first submission is still in flight.
+        expect(action).toHaveBeenCalledTimes(1);
+        resolveAction!();
+    });
+
     it('calls onError instead of console.error when the action throws and onError is provided', async () => {
         const boom = new Error('nope');
         const action = vi.fn(async () => {

@@ -20,10 +20,16 @@ export function isTrustedServerActionOrigin(
     if (origin) {
         try {
             const parsedOrigin = new URL(origin);
-            return (
-                parsedOrigin.origin === url.origin ||
-                trustedOrigins.includes(parsedOrigin.host)
-            );
+            if (parsedOrigin.origin === url.origin) return true;
+            // Accept either a bare host (`app.example.com`) or a full origin
+            // (`https://app.example.com`) entry, case-insensitively — matching
+            // cors.ts/csrf.ts so one allowlist value works across all three.
+            const host = parsedOrigin.host.toLowerCase();
+            const fullOrigin = parsedOrigin.origin.toLowerCase();
+            return trustedOrigins.some((entry) => {
+                const trusted = entry.toLowerCase();
+                return trusted === host || trusted === fullOrigin;
+            });
         } catch {
             return false;
         }

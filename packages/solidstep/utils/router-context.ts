@@ -203,11 +203,20 @@ export const initRouter = (initial: RouteState) => {
 // Scroll restoration (per history entry)
 // ---------------------------------------------------------------------------
 
+const MAX_SCROLL_POSITIONS = 100;
 const scrollPositions = new Map<string, { x: number; y: number }>();
 const scrollKey = () => `${location.pathname}${location.search}`;
 const saveScroll = () => {
     if (isServer) return;
-    scrollPositions.set(scrollKey(), { x: window.scrollX, y: window.scrollY });
+    const key = scrollKey();
+    // Refresh insertion order so the cap below evicts the least-recent entry.
+    scrollPositions.delete(key);
+    scrollPositions.set(key, { x: window.scrollX, y: window.scrollY });
+    if (scrollPositions.size > MAX_SCROLL_POSITIONS) {
+        // Oldest-first eviction (Map preserves insertion order); losing an
+        // ancient entry only means that entry restores to top instead.
+        scrollPositions.delete(scrollPositions.keys().next().value!);
+    }
 };
 
 // ---------------------------------------------------------------------------
@@ -215,6 +224,7 @@ const saveScroll = () => {
 // ---------------------------------------------------------------------------
 
 const PREFETCH_TTL = 30_000;
+const MAX_PREFETCH_ENTRIES = 64;
 const prefetchCache = new Map<
     string,
     { expires: number; promise: Promise<RouteEnvelope> }
@@ -233,23 +243,40 @@ export const prefetchRoute = (target: string): void => {
     if (isServer) return;
     const cached = prefetchCache.get(target);
     if (cached && cached.expires > Date.now()) return;
+    // Re-inserting deletes first so the entry moves to the back of the Map's
+    // insertion order (fairness for the oldest-first cap below).
+    prefetchCache.delete(target);
     const promise = fetchEnvelope(target);
     prefetchCache.set(target, { expires: Date.now() + PREFETCH_TTL, promise });
+    if (prefetchCache.size > MAX_PREFETCH_ENTRIES) {
+        // Never-navigated prefetches (e.g. many viewport links) must not
+        // accumulate resolved envelopes for the whole session.
+        prefetchCache.delete(prefetchCache.keys().next().value!);
+    }
     // Warm the component modules for the target path.
     try {
         const url = new URL(target, location.href);
         const match = matchClientRoute(url.pathname);
-        if (match) void preloadHandler(match.handler);
+        // Prefetch is speculative: a failed chunk load is not actionable here.
+        if (match) preloadHandler(match.handler).catch(() => undefined);
     } catch {
         // ignore — prefetch is best-effort
     }
 };
 
+/** Test-only visibility into the module-private caches. Not public API. */
+export const __routerInternals = {
+    prefetchCacheSize: () => prefetchCache.size,
+    scrollPositionsSize: () => scrollPositions.size,
+};
+
 const takeEnvelope = (target: string): Promise<RouteEnvelope> => {
     const cached = prefetchCache.get(target);
-    if (cached && cached.expires > Date.now()) {
+    if (cached) {
+        // Consuming removes the entry either way: fresh ones are used, expired
+        // ones are dead weight that would otherwise sit in the map forever.
         prefetchCache.delete(target);
-        return cached.promise;
+        if (cached.expires > Date.now()) return cached.promise;
     }
     return fetchEnvelope(target);
 };
@@ -263,16 +290,24 @@ const PRESERVED_META = new Set(['charset', 'viewport', 'build_time']);
 
 const applyMeta = (meta: Record<string, any> | undefined) => {
     if (isServer || !meta) return;
+    // Every tag this pass creates/updates is stamped `data-ss-meta` and
+    // recorded; any previously stamped tag NOT touched by this route's meta is
+    // removed afterwards, so tags never leak across navigations. Server-emitted
+    // meta carries the same stamp (see utils/html.ts) so first-load tags
+    // participate in the diff too.
+    const touched = new Set<Element>();
     for (const [key, value] of Object.entries(meta)) {
         if (PRESERVED_META.has(key)) continue;
         if (value?.type === 'title') {
             document.title = String(value.content ?? '');
         } else if (value?.type === 'meta' && value.attributes) {
             const { name, property } = value.attributes;
+            // CSS.escape keeps a quote/bracket in the value from breaking the
+            // selector (escapes are valid inside quoted attribute strings).
             const selector = name
-                ? `meta[name="${name}"]`
+                ? `meta[name="${CSS.escape(String(name))}"]`
                 : property
-                  ? `meta[property="${property}"]`
+                  ? `meta[property="${CSS.escape(String(property))}"]`
                   : null;
             let el = selector
                 ? document.head.querySelector<HTMLMetaElement>(selector)
@@ -284,7 +319,12 @@ const applyMeta = (meta: Record<string, any> | undefined) => {
             for (const [k, v] of Object.entries(value.attributes)) {
                 el.setAttribute(k, String(v));
             }
+            el.setAttribute('data-ss-meta', '');
+            touched.add(el);
         }
+    }
+    for (const el of document.head.querySelectorAll('meta[data-ss-meta]')) {
+        if (!touched.has(el)) el.remove();
     }
 };
 
@@ -303,6 +343,12 @@ export type NavigateOptions = {
 };
 
 const isModifiedHardNav = (url: URL): boolean => url.origin !== location.origin;
+
+// Monotonic navigation generation, shared by `navigate` and `onPopState`.
+// Each navigation stamps itself at entry and re-checks after every await:
+// only the latest navigation may touch history, commit state, or clear the
+// pending signal — a slower, older response is silently discarded.
+let navGen = 0;
 
 // Commit with `batch` (NOT a transition): a Solid transition would hold the old
 // UI until the new tree's resources settle, which would defeat the instant-shell
@@ -394,6 +440,7 @@ export const navigate = async (
         location.assign(to);
         return;
     }
+    const gen = ++navGen;
     const target = url.pathname + url.search;
     saveScroll();
     setPending(true);
@@ -401,12 +448,16 @@ export const navigate = async (
         // The route match is derivable synchronously from the URL, so start
         // warming its component modules in parallel with the envelope fetch
         // instead of waiting for the fetch to land first. `preloadHandler`
-        // never rejects (it swallows failures internally), so leaving this
-        // dangling on the redirect/route/not-found paths below is safe.
+        // rejects on a failed chunk load; the immediate `.catch` below only
+        // keeps a *dangling* preload (redirect/route/not-found paths) from
+        // becoming an unhandled rejection — the `await preload` further down
+        // still observes the rejection and triggers the hard-nav fallback.
         const match = matchClientRoute(url.pathname);
         const preload = match ? preloadHandler(match.handler) : undefined;
+        preload?.catch(() => undefined);
 
         const envelope = await takeEnvelope(target);
+        if (gen !== navGen) return; // superseded by a newer navigation
         switch (envelope.type) {
             case 'redirect':
                 await navigate(envelope.location, { replace: true });
@@ -425,6 +476,7 @@ export const navigate = async (
             preload
         ) {
             await preload;
+            if (gen !== navGen) return; // superseded while preloading
         }
 
         // Record the view-transition preference on this entry's own history
@@ -455,24 +507,32 @@ export const navigate = async (
             }
         }
     } catch {
-        // Network/parse/module failure → hard navigate so the user still moves.
-        location.assign(to);
+        // Network/parse/module failure → hard navigate so the user still
+        // moves. A superseded navigation's failure is not ours to handle.
+        if (gen === navGen) location.assign(to);
     } finally {
-        setPending(false);
+        // Only the latest navigation clears pending; an older one finishing
+        // (or being discarded) must not flip it off under the one in flight.
+        if (gen === navGen) setPending(false);
     }
 };
 
 const onPopState = async () => {
+    const gen = ++navGen;
     const url = new URL(location.href);
     const target = url.pathname + url.search;
     setPending(true);
     try {
         // Same rationale as `navigate()`: warm modules in parallel with the
-        // envelope fetch instead of after it.
+        // envelope fetch instead of after it; the immediate `.catch` only
+        // guards the dangling (redirect/route) paths against an unhandled
+        // rejection — `await preload` below still sees the failure.
         const match = matchClientRoute(url.pathname);
         const preload = match ? preloadHandler(match.handler) : undefined;
+        preload?.catch(() => undefined);
 
         const envelope = await fetchEnvelope(target);
+        if (gen !== navGen) return; // superseded by a newer navigation
         if (envelope.type === 'redirect') {
             location.assign(envelope.location);
             return;
@@ -485,7 +545,10 @@ const onPopState = async () => {
             history.state as { viewTransition?: boolean } | null
         )?.viewTransition;
         if (envelope.type === 'page' || envelope.type === 'error') {
-            if (preload) await preload;
+            if (preload) {
+                await preload;
+                if (gen !== navGen) return; // superseded while preloading
+            }
             const meta = 'meta' in envelope ? envelope.meta : undefined;
             withViewTransition(viewTransition, () => {
                 commit(stateFromEnvelope(envelope, url));
@@ -501,9 +564,9 @@ const onPopState = async () => {
         if (saved)
             requestAnimationFrame(() => window.scrollTo(saved.x, saved.y));
     } catch {
-        location.reload();
+        if (gen === navGen) location.reload();
     } finally {
-        setPending(false);
+        if (gen === navGen) setPending(false);
     }
 };
 

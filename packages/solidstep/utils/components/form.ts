@@ -86,6 +86,9 @@ const Form = (props: FormProps) => {
 
     const handleSubmit = async (e: Event) => {
         e.preventDefault();
+        // A fast double/triple-click must not fire the action more than once
+        // while the first submission is still in flight.
+        if (pending()) return;
 
         const form = e.currentTarget as HTMLFormElement;
         const submitter = (e as SubmitEvent).submitter;

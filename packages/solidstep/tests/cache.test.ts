@@ -150,6 +150,38 @@ describe('getCacheEntry', () => {
             vi.useRealTimers();
         }
     });
+
+    it('coalesces concurrent reads of the same just-expired key into a single store delete', async () => {
+        const original = getCacheStore();
+        const deleteSpy = vi.fn((key: string) => original.delete(key));
+        const spied: any = {
+            get: (key: string) => original.get(key),
+            set: (...a: unknown[]) => (original.set as any)(...a),
+            delete: deleteSpy,
+            clear: (...a: unknown[]) => (original.clear as any)(...a),
+            invalidateTag: (...a: unknown[]) =>
+                (original.invalidateTag as any)(...a),
+        };
+        setCacheStore(spied);
+        try {
+            vi.useFakeTimers();
+            await setCacheWithOptions('burst-expired', 'v', { ttl: 1000 });
+            vi.advanceTimersByTime(2000); // past expiresAt
+
+            // A burst of concurrent readers hitting the same hard-expired key
+            // must not each independently issue a redundant store delete.
+            const results = await Promise.all(
+                Array.from({ length: 20 }, () =>
+                    getCacheEntry('burst-expired'),
+                ),
+            );
+            expect(results.every((r) => r === null)).toBe(true);
+            expect(deleteSpy).toHaveBeenCalledTimes(1);
+        } finally {
+            vi.useRealTimers();
+            setCacheStore(original);
+        }
+    });
 });
 
 describe('invalidateCache', () => {

@@ -45,6 +45,18 @@ test.describe('ISR (render: isr)', () => {
     const readValue = (html: string) =>
         Number(stripComments(html).match(/n:(\d+)/)?.[1] ?? 'NaN');
 
+    test('emits a valued stale-while-revalidate directive (RFC 5861)', async ({
+        request,
+    }) => {
+        const res = await request.get('/isr');
+        expect(res.status()).toBe(200);
+        // Bare `stale-while-revalidate` (no =seconds) is non-conformant and
+        // ignored by CDNs; the SWR window must carry a value.
+        expect(res.headers()['cache-control']).toMatch(
+            /stale-while-revalidate=\d+/,
+        );
+    });
+
     test('serves a cached artifact and regenerates after the revalidate window', async ({
         request,
     }) => {

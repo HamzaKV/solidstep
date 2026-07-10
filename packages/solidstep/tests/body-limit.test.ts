@@ -18,6 +18,17 @@ describe('parseContentLength', () => {
         expect(parseContentLength('0')).toBe(0);
     });
 
+    it('rejects non-decimal numeric forms (RFC 9110: Content-Length is 1*DIGIT)', () => {
+        // Number() would accept these; a proxy/back-end pair disagreeing on
+        // them is exactly the ambiguity smuggling exploits.
+        expect(parseContentLength('0x10')).toBeNaN();
+        expect(parseContentLength('1e6')).toBeNaN();
+        expect(parseContentLength('+5')).toBeNaN();
+        expect(parseContentLength('5.0')).toBeNaN();
+        expect(parseContentLength(' 5')).toBeNaN();
+        expect(parseContentLength('Infinity')).toBeNaN();
+    });
+
     it('returns NaN (present but unusable) for non-numeric or negative values, not null (unknown)', () => {
         // A header that IS present but doesn't parse cleanly (garbage, a
         // negative number, or -- critically -- a comma-joined duplicate like
@@ -57,7 +68,6 @@ describe('bodyLimit middleware', () => {
                             : { 'content-length': contentLength },
                 },
             },
-            // biome-ignore lint/suspicious/noExplicitAny: minimal fake H3 event.
         }) as any;
 
     it('rejects an oversized body with 413', async () => {

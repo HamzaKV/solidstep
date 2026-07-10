@@ -1,6 +1,18 @@
 import { describe, it, expect } from 'vitest';
 import { MemoryCacheStore } from '../utils/cache-store';
 
+describe('MemoryCacheStore — degenerate bounds', () => {
+    it('survives maxEntries: 0 (caches nothing, never crashes)', () => {
+        const store = new MemoryCacheStore({ maxEntries: 0 });
+        expect(() => {
+            store.set('a', 1);
+            store.set('b', 2);
+        }).not.toThrow();
+        expect(store.get('a')).toBeNull();
+        expect(store.get('b')).toBeNull();
+    });
+});
+
 describe('MemoryCacheStore — basics', () => {
     it('returns null for a miss and the entry for a hit', () => {
         const store = new MemoryCacheStore();

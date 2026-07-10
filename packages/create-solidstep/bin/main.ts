@@ -4,6 +4,7 @@ import { parseArgs } from 'node:util';
 import { sep, join } from 'node:path';
 import { mkdir, cp } from 'node:fs/promises';
 import packageJson from '../package.json' with { type: 'json' };
+import { shouldIncludeInScaffold } from './scaffold-filter.js';
 
 const { values, positionals } = parseArgs({
     args: process.argv.slice(2),
@@ -58,14 +59,7 @@ const main = async () => {
 
         await cp(templateDir, targetDir, {
             recursive: true,
-            filter: (src) => {
-                // Exclude node_modules and .git directories
-                const relativePath = src.replace(templateDir, '');
-                return (
-                    !relativePath.startsWith('node_modules') &&
-                    !relativePath.startsWith('.git')
-                );
-            },
+            filter: (src) => shouldIncludeInScaffold(templateDir, src),
         });
 
         console.log(`SolidStep app created successfully in ${targetDir}`);

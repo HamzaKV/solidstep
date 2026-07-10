@@ -32,6 +32,14 @@ export const setCacheStore = (store: CacheStore): void => {
 /** Get the active {@link CacheStore} backend. */
 export const getCacheStore = (): CacheStore => activeStore;
 
+// Reads of the same hard-expired key arriving in a burst (before anything
+// repopulates it) would otherwise each independently call `store.delete` —
+// redundant I/O on a store like FilesystemCacheStore. The entry is already
+// functionally a miss to every caller the moment it's expired (see below), so
+// only the first reader needs to actually evict it; concurrent ones just wait
+// on that same in-flight delete instead of issuing their own.
+const pendingDeletes = new Map<string, Promise<void>>();
+
 /**
  * Read a raw cache entry, enforcing **hard expiry**: an entry past its
  * `expiresAt` (wall-clock) is deleted and reported as a miss. A stale-but-not-
@@ -47,7 +55,16 @@ export const getCacheEntry = async <T>(
     const entry = await activeStore.get<T>(key);
     if (!entry) return null;
     if (entry.expiresAt !== null && entry.expiresAt <= Date.now()) {
-        await activeStore.delete(key);
+        let deletion = pendingDeletes.get(key);
+        if (!deletion) {
+            deletion = Promise.resolve(activeStore.delete(key)).finally(() => {
+                if (pendingDeletes.get(key) === deletion) {
+                    pendingDeletes.delete(key);
+                }
+            });
+            pendingDeletes.set(key, deletion);
+        }
+        await deletion;
         return null;
     }
     return entry;

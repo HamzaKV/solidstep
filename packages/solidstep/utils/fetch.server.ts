@@ -52,7 +52,10 @@ const Fetch = async <T, S extends boolean = true>(
 
         if (response?.status >= 400 && response?.status <= 599) {
             if (json) {
-                throw await response.json();
+                // A non-JSON error body (HTML error page, empty) must not
+                // replace the real failure with a SyntaxError — fall back to
+                // throwing the Response so callers keep the status.
+                throw await response.json().catch(() => response);
             }
             throw response;
         }

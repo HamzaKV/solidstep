@@ -101,9 +101,15 @@ export type SearchParams = Record<string, string | string[]>;
  */
 export const parseSearchParams = (sp: URLSearchParams): SearchParams => {
     const out: SearchParams = {};
-    for (const key of new Set(sp.keys())) {
-        const all = sp.getAll(key);
-        out[key] = all.length > 1 ? all : all[0];
+    for (const [key, value] of sp) {
+        const existing = out[key];
+        if (existing === undefined) {
+            out[key] = value;
+        } else if (Array.isArray(existing)) {
+            existing.push(value);
+        } else {
+            out[key] = [existing, value];
+        }
     }
     return out;
 };

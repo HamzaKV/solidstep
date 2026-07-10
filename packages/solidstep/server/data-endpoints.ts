@@ -38,7 +38,7 @@ export const serveHoleData = async (
 
     const targetUrl = new URL(target, reqUrl.origin);
     const match = matchRoute(routeManifest, targetUrl.pathname);
-    if (!match || match.handler.type !== 'page') return null;
+    if (match?.handler.type !== 'page') return null;
     const page = match.handler as RoutePageHandler;
 
     // Find the loader import for `manifest`, but only among nodes that belong to
@@ -59,6 +59,9 @@ export const serveHoleData = async (
     const { loader: loaderFn } =
         await getCachedModule<LoaderModule>(loaderImport);
     if (!loaderFn) return null;
+    // Only deferred loaders are holes; refuse to run a regular loader that
+    // happens to be addressable by manifest path.
+    if (loaderFn.options?.type !== 'defer') return null;
 
     // Run the loader against the original page URL so its params/search (and
     // loader cache key) are correct. The client-disconnect signal is forwarded
@@ -67,11 +70,36 @@ export const serveHoleData = async (
         headers: req.headers,
         signal: req.signal,
     });
-    const data = await getCachedLoaderData(loaderFn, manifest, pageReq, {
-        locals,
-        signal: pageReq.signal,
-    });
-    return serialize({ data }, { plugins: SEROVAL_PLUGINS });
+    try {
+        const data = await getCachedLoaderData(loaderFn, manifest, pageReq, {
+            locals,
+            signal: pageReq.signal,
+        });
+        return serialize({ data }, { plugins: SEROVAL_PLUGINS });
+    } catch (err) {
+        // A throwing hole loader must yield a seroval `{ error }` envelope the
+        // client can deserialize and rethrow under its ErrorBoundary — never a
+        // raw 500 with an HTML body. Same message policy as `serveRouteData`:
+        // real message in dev, generic + correlation id in production.
+        const rawMessage = err instanceof Error ? err.message : String(err);
+        let message: string;
+        if (import.meta.env.DEV) {
+            message = rawMessage;
+        } else {
+            const errorId = randomUUID();
+            logger.error(
+                {
+                    errorId,
+                    err: rawMessage,
+                    manifest,
+                    route: targetUrl.pathname,
+                },
+                'Deferred hole loader failed',
+            );
+            message = `An unexpected error occurred (ref: ${errorId}).`;
+        }
+        return serialize({ error: message }, { plugins: SEROVAL_PLUGINS });
+    }
 };
 
 /**

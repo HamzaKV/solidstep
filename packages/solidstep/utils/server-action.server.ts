@@ -50,7 +50,8 @@ class HeaderProxy {
         return Array.isArray(h) ? h.join(', ') : (h as string) || null;
     }
     has(key: string) {
-        return this.get(key) !== undefined;
+        // `get` normalizes a missing header to null (never undefined).
+        return this.get(key) !== null;
     }
     set(key: string, value: string) {
         return setResponseHeader(this.event, key, value);
@@ -102,7 +103,7 @@ class HeaderProxy {
     }
 }
 
-function createResponseStub(event: HTTPEvent) {
+export function createResponseStub(event: HTTPEvent) {
     return {
         get status() {
             return getResponseStatus(event);

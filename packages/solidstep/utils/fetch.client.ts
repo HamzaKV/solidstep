@@ -68,13 +68,16 @@ const Fetch = async <T, S extends boolean = true>(
 
         return response as FetchResponse<T, S>;
     } catch (error) {
-        if (controller.signal.aborted) {
-            throw new Error('Timeout');
-        }
+        // A timed-out request is still just "an error" from serverAction's
+        // point of view — it must follow the same return-not-throw contract
+        // as every other caught error, not bypass it.
+        const finalError = controller.signal.aborted
+            ? new Error('Timeout')
+            : error;
         if (options?.serverAction) {
-            return error as FetchResponse<T, S>;
+            return finalError as FetchResponse<T, S>;
         }
-        throw error;
+        throw finalError;
     } finally {
         clearTimeout(timeout);
     }

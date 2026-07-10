@@ -88,7 +88,7 @@ export const getCachedLoaderData = async (
     const cacheOpts = loaderFn.options?.cache;
     if (!cacheOpts) {
         const result = await invokeLoader(loaderFn, req, invocation);
-        return result.data || {};
+        return result.data ?? {};
     }
 
     const url = new URL(req.url);
@@ -104,7 +104,7 @@ export const getCachedLoaderData = async (
 
     const run = async () => {
         const result = await invokeLoader(loaderFn, req, invocation);
-        const data = result.data || {};
+        const data = result.data ?? {};
         await setCacheWithOptions(key, data, {
             ttl: cacheOpts.ttl || 0,
             swr: cacheOpts.swr,

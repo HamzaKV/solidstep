@@ -31,10 +31,21 @@ const fetchHole = (manifest: string): Promise<any> =>
             manifest,
         )}&url=${encodeURIComponent(location.pathname + location.search)}`,
     )
+        .then((r) => {
+            // A non-2xx body is not a seroval envelope — fail the resource so
+            // the ErrorBoundary handles it instead of a deserialize crash.
+            if (!r.ok) throw new Error(`Hole fetch failed (${r.status})`);
+            return r.text();
+        })
         // The hole envelope is seroval-serialized (see `serveHoleData`), so
         // deserialize rather than `r.json()` — this preserves Date/Map/Set/etc.
-        .then((r) => r.text())
-        .then((t) => (deserialize(t) as { data: any }).data);
+        .then((t) => {
+            const envelope = deserialize(t) as { data?: any; error?: string };
+            // A failed hole loader arrives as an `{ error }` envelope; rethrow
+            // it so <Suspense>/<ErrorBoundary> treat it as the loader failure.
+            if (envelope.error !== undefined) throw new Error(envelope.error);
+            return envelope.data;
+        });
 
 /** Synchronously read a preloaded component's default export. */
 const comp = (imp: { src: string }) => getModule(imp.src)?.default;
@@ -448,7 +459,20 @@ export const main = async (
         kind === 'not-found'
             ? matchClientRoute('/')?.handler
             : matchClientRoute(location.pathname)?.handler;
-    if (handler) await preloadHandler(handler);
+    if (handler) {
+        try {
+            await preloadHandler(handler);
+        } catch (e) {
+            // A chunk failed on first load: hydrating would render a blank
+            // tree from missing modules. Leave the server HTML as-is (links
+            // hard-navigate without the router).
+            console.error(
+                '[solidstep] failed to load route modules; skipping hydration:',
+                e,
+            );
+            return;
+        }
+    }
 
     initRouter(initial);
     hydrate(() => renderTree(), document);

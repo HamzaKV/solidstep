@@ -94,13 +94,37 @@ describe('serveHoleData', () => {
         expect(body).toBeNull();
     });
 
+    it('returns null when the addressed loader is not a deferred one', async () => {
+        matchRoute.mockReturnValue({
+            handler: {
+                type: 'page',
+                mainPage: {
+                    manifestPath: '/p',
+                    // A regular (non-defer) loader: never a hole, so the
+                    // endpoint must refuse to run it.
+                    loader: { src: 'l', import: async () => ({ loader: {} }) },
+                },
+                layouts: [],
+                groups: {},
+            },
+            params: {},
+        });
+        expect(await serveHoleData(holeReq('manifest=/p&url=/p'))).toBeNull();
+        expect(getCachedLoaderData).not.toHaveBeenCalled();
+    });
+
     it("resolves the page's own deferred loader", async () => {
         matchRoute.mockReturnValue({
             handler: {
                 type: 'page',
                 mainPage: {
                     manifestPath: '/p',
-                    loader: { src: 'l', import: async () => ({ loader: {} }) },
+                    loader: {
+                        src: 'l',
+                        import: async () => ({
+                            loader: { options: { type: 'defer' } },
+                        }),
+                    },
                 },
                 layouts: [],
                 groups: {},
@@ -123,7 +147,9 @@ describe('serveHoleData', () => {
                         manifestPath: '/layout',
                         loader: {
                             src: 'l',
-                            import: async () => ({ loader: {} }),
+                            import: async () => ({
+                                loader: { options: { type: 'defer' } },
+                            }),
                         },
                     },
                 ],
@@ -148,7 +174,9 @@ describe('serveHoleData', () => {
                         manifestPath: '/group/sidebar',
                         loader: {
                             src: 'l',
-                            import: async () => ({ loader: {} }),
+                            import: async () => ({
+                                loader: { options: { type: 'defer' } },
+                            }),
                         },
                     },
                 },
@@ -159,6 +187,34 @@ describe('serveHoleData', () => {
             holeReq('manifest=/group/sidebar&url=/p'),
         )) as unknown as { data: unknown };
         expect(body.data).toEqual({ n: 1 });
+    });
+
+    it('encodes an error envelope (not a rejection) when the deferred loader throws', async () => {
+        matchRoute.mockReturnValue({
+            handler: {
+                type: 'page',
+                mainPage: {
+                    manifestPath: '/p',
+                    loader: {
+                        src: 'l',
+                        import: async () => ({
+                            loader: { options: { type: 'defer' } },
+                        }),
+                    },
+                },
+                layouts: [],
+                groups: {},
+            },
+            params: {},
+        });
+        getCachedLoaderData.mockRejectedValue(new Error('hole exploded'));
+
+        const body = (await serveHoleData(
+            holeReq('manifest=/p&url=/p'),
+        )) as unknown as { error: string };
+
+        // import.meta.env.DEV is true under vitest -> real message.
+        expect(body.error).toBe('hole exploded');
     });
 });
 
