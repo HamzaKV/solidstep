@@ -47,7 +47,7 @@ For each incoming request, `matchRoute(manifest, pathname)` walks the trie and r
 
 - `/_server` — the server-action handler. Arguments and return values are seroval-serialized (see section 6).
 - `/__solidstep_route` — the **soft-navigation envelope**. Returns a seroval-serialized string describing how the client should render a target route (loader data, metadata, redirect/error/not-found state). See [Soft Navigation](#soft-navigation).
-- `/__solidstep_loader` — **deferred / PPR hole data**. The client fetches a single deferred loader's resolved data here to fill a hole left pending in the initial shell. See [Streaming, Deferred Loaders & PPR](#streaming-deferred-loaders--ppr).
+- `/__solidstep_loader` — **deferred / PPR hole data**. The client fetches one or more deferred loaders' resolved data here (batched into a single request per navigation) to fill holes left pending in the initial shell. See [Streaming, Deferred Loaders & PPR](#streaming-deferred-loaders--ppr).
 
 Otherwise:
 
@@ -120,11 +120,12 @@ The `<head>` (metadata + assets) is fully populated by the awaited compose step,
 
 ```
 PPR shell (static)            client hydration
-  hole A (fallback)  ──fetch──►  GET /__solidstep_loader?…  ──► seroval data ──► hole A filled
-  hole B (fallback)  ──fetch──►  GET /__solidstep_loader?…  ──► seroval data ──► hole B filled
+  hole A (fallback) ┐
+  hole B (fallback) ┴─fetch──►  GET /__solidstep_loader?manifest=A&manifest=B&…
+                                   └► seroval { results: [...] } ──► hole A + B filled
 ```
 
-Each `/__solidstep_loader` response runs a single deferred loader and returns its data seroval-serialized.
+Holes discovered during the same synchronous tree walk (first-load PPR, and every soft navigation) are **batched into one request**: the client collects every hole fetch issued in that walk (`utils/hole-batch.ts`) and flushes them as a single `GET /__solidstep_loader` with one `manifest` param per hole, rather than one request per hole. The server resolves the whole batch with a single route match + tree walk and returns one `{ results: [{ manifest, data }, ...] }` envelope, seroval-serialized. A bad/unresolvable manifest yields a per-item `{ manifest, error }` entry rather than failing its siblings. Tradeoff: the response only completes once every loader in the batch settles, so a fast hole next to a slow one on the same page/navigation now waits for the slowest — a deliberate choice trading per-hole latency isolation for far fewer route-matches and round trips.
 
 ## 7. Client Hydration
 

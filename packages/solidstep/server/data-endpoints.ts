@@ -13,34 +13,32 @@ import {
     type RoutePageHandler,
 } from '../utils/path-router.js';
 import { ensureRouteManifest, getCachedModule } from './route-manifest.js';
+import { MAX_HOLE_BATCH } from './constants.js';
 import type { LoaderModule, MetaModule } from './types.js';
 
+/** One manifest's outcome within a batched hole response. */
+type HoleOutcome =
+    | { manifest: string; data: unknown }
+    | { manifest: string; error: string };
+
+/** A protocol-level (not loader-execution) failure: unknown/non-servable manifest. */
+const PROTOCOL_ERROR = 'This loader cannot be fetched as a hole.';
+
 /**
- * Run a single deferred loader for a PPR page's hole and return its data as a
- * seroval-serialized envelope. `manifest` identifies the page/layout/group node;
- * it is validated against the route matched for `url` so only loaders on that
- * route can run. Returns `null` (→ 400) on a bad/unknown request.
- *
- * Uses seroval (not JSON) to match the soft-navigation envelope and the
- * first-load streamed path, so deferred loader data containing `Date` / `Map` /
- * `Set` / `BigInt` survives the round trip identically across every data path.
+ * Resolve one manifest's deferred loader against an already-matched `page`,
+ * given the shared `pageReq` (already scoped to the target URL + forwarding
+ * the batch's abort signal). Never throws — both protocol-level failures
+ * (manifest doesn't belong to this route, or isn't a servable hole) and
+ * loader-execution failures resolve to a `{manifest, error}` outcome, so one
+ * bad manifest in a batch can't fail the whole request.
  */
-export const serveHoleData = async (
-    req: Request,
-    locals?: Record<string, unknown>,
-): Promise<string | null> => {
-    const reqUrl = new URL(req.url);
-    const manifest = reqUrl.searchParams.get('manifest');
-    const target = reqUrl.searchParams.get('url');
-    if (!manifest || !target) return null;
-
-    const routeManifest = await ensureRouteManifest();
-
-    const targetUrl = new URL(target, reqUrl.origin);
-    const match = matchRoute(routeManifest, targetUrl.pathname);
-    if (match?.handler.type !== 'page') return null;
-    const page = match.handler as RoutePageHandler;
-
+const resolveOneHole = async (
+    manifest: string,
+    page: RoutePageHandler,
+    pageReq: Request,
+    locals: Record<string, unknown> | undefined,
+    targetPathname: string,
+): Promise<HoleOutcome> => {
     // Find the loader import for `manifest`, but only among nodes that belong to
     // this matched route (page, its layouts, its groups).
     let loaderImport: Import | undefined;
@@ -58,32 +56,27 @@ export const serveHoleData = async (
             }
         }
     }
-    if (!loaderImport) return null;
+    if (!loaderImport) return { manifest, error: PROTOCOL_ERROR };
 
     const { loader: loaderFn } =
         await getCachedModule<LoaderModule>(loaderImport);
-    if (!loaderFn) return null;
+    if (!loaderFn) return { manifest, error: PROTOCOL_ERROR };
     // Holes are exactly what the render engine can emit as one: deferred
     // page/layout loaders, and ANY boundary-group loader (under PPR the shell
     // never resolves group resources, so even non-defer group loaders become
     // client-filled holes — see server/render.ts). Refuse everything else.
-    if (!isGroup && loaderFn.options?.type !== 'defer') return null;
+    if (!isGroup && loaderFn.options?.type !== 'defer') {
+        return { manifest, error: PROTOCOL_ERROR };
+    }
 
-    // Run the loader against the original page URL so its params/search (and
-    // loader cache key) are correct. The client-disconnect signal is forwarded
-    // so a hung hole loader can be cancelled.
-    const pageReq = new Request(targetUrl.toString(), {
-        headers: req.headers,
-        signal: req.signal,
-    });
     try {
         const data = await getCachedLoaderData(loaderFn, manifest, pageReq, {
             locals,
             signal: pageReq.signal,
         });
-        return serialize({ data }, { plugins: SEROVAL_PLUGINS });
+        return { manifest, data };
     } catch (err) {
-        // A throwing hole loader must yield a seroval `{ error }` envelope the
+        // A throwing hole loader must yield a seroval `{ error }` outcome the
         // client can deserialize and rethrow under its ErrorBoundary — never a
         // raw 500 with an HTML body. Same message policy as `serveRouteData`:
         // real message in dev, generic + correlation id in production.
@@ -98,14 +91,66 @@ export const serveHoleData = async (
                     errorId,
                     err: rawMessage,
                     manifest,
-                    route: targetUrl.pathname,
+                    route: targetPathname,
                 },
                 'Deferred hole loader failed',
             );
             message = `An unexpected error occurred (ref: ${errorId}).`;
         }
-        return serialize({ error: message }, { plugins: SEROVAL_PLUGINS });
+        return { manifest, error: message };
     }
+};
+
+/**
+ * Resolve a batch of deferred loaders for a PPR page's holes and return their
+ * data/errors as one seroval-serialized envelope, `{ results: [...] }`. Each
+ * `manifest` identifies a page/layout/group node; every one is validated
+ * against the route matched for `url` so only loaders on that route can run.
+ * Returns `null` (→ 400) when the request itself is malformed (no manifests,
+ * no `url`, no matching page route, or over `MAX_HOLE_BATCH`) — a manifest
+ * that doesn't resolve within an otherwise-valid batch instead yields a
+ * per-item `{manifest, error}`, so one bad hole can't fail its siblings.
+ *
+ * Batched (rather than one request per loader) so a page with K holes costs
+ * one `matchRoute` + route-tree walk instead of K — see `client.ts`'s
+ * `fetchHole` for the matching client-side batching.
+ *
+ * Uses seroval (not JSON) to match the soft-navigation envelope and the
+ * first-load streamed path, so deferred loader data containing `Date` / `Map` /
+ * `Set` / `BigInt` survives the round trip identically across every data path.
+ */
+export const serveHoleData = async (
+    req: Request,
+    locals?: Record<string, unknown>,
+): Promise<string | null> => {
+    const reqUrl = new URL(req.url);
+    const manifests = [...new Set(reqUrl.searchParams.getAll('manifest'))];
+    const target = reqUrl.searchParams.get('url');
+    if (manifests.length === 0 || !target) return null;
+    if (manifests.length > MAX_HOLE_BATCH) return null;
+
+    const routeManifest = await ensureRouteManifest();
+
+    const targetUrl = new URL(target, reqUrl.origin);
+    const match = matchRoute(routeManifest, targetUrl.pathname);
+    if (match?.handler.type !== 'page') return null;
+    const page = match.handler as RoutePageHandler;
+
+    // Run every loader against the original page URL so its params/search
+    // (and loader cache key) are correct. The client-disconnect signal is
+    // forwarded so a hung hole loader can be cancelled; aborting the incoming
+    // batched request cancels every loader still in flight for it.
+    const pageReq = new Request(targetUrl.toString(), {
+        headers: req.headers,
+        signal: req.signal,
+    });
+
+    const results = await Promise.all(
+        manifests.map((manifest) =>
+            resolveOneHole(manifest, page, pageReq, locals, targetUrl.pathname),
+        ),
+    );
+    return serialize({ results }, { plugins: SEROVAL_PLUGINS });
 };
 
 /**

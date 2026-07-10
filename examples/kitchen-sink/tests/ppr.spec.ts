@@ -68,7 +68,7 @@ test.describe('PPR (render: ppr)', () => {
         );
     });
 
-    test('the loader endpoint returns the hole data as a seroval envelope', async ({
+    test('the loader endpoint returns a batched results envelope, seroval-serialized', async ({
         request,
     }) => {
         const res = await request.get(
@@ -82,7 +82,48 @@ test.describe('PPR (render: ppr)', () => {
         expect(res.headers()['content-type']).toContain('text/plain');
         const body = await res.text();
         expect(() => JSON.parse(body)).toThrow();
+        // `results` array, keyed by manifest -- not a bare top-level `data`.
+        expect(body).toContain('results');
+        expect(body).toContain('/group/ppr/@now');
         expect(body).toMatch(/tick:\d+|"tick":\d+|tick.*\d/);
         expect(body).toContain('new Date');
+    });
+
+    test('one request can batch multiple manifests, each resolving independently', async ({
+        request,
+    }) => {
+        const url = new URL('http://x/__solidstep_loader');
+        url.searchParams.append('manifest', '/group/ppr/@now');
+        url.searchParams.append('manifest', '/group/ppr/@fresh');
+        url.searchParams.set('url', '/ppr');
+        const res = await request.get(url.pathname + url.search);
+        expect(res.status()).toBe(200);
+        const body = await res.text();
+        expect(body).toContain('/group/ppr/@now');
+        expect(body).toContain('/group/ppr/@fresh');
+        expect(body).toContain('fresh-group-data');
+    });
+
+    test('the two first-load PPR holes on this page are fetched in ONE request, not two', async ({
+        page,
+    }) => {
+        const loaderRequests: string[] = [];
+        page.on('request', (req) => {
+            if (req.url().includes('/__solidstep_loader')) {
+                loaderRequests.push(req.url());
+            }
+        });
+
+        await page.goto('/ppr');
+        await expect(page.getByTestId('now-value')).toHaveText(/tick:\d+/);
+        await expect(page.getByTestId('fresh-value')).toHaveText(
+            'fresh-group-data',
+        );
+
+        expect(loaderRequests).toHaveLength(1);
+        const requested = new URL(loaderRequests[0]);
+        expect(requested.searchParams.getAll('manifest').sort()).toEqual(
+            ['/group/ppr/@fresh', '/group/ppr/@now'].sort(),
+        );
     });
 });

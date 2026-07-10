@@ -1,8 +1,8 @@
 import { hydrate, createComponent } from 'solid-js/web';
 import { Suspense, ErrorBoundary, createUniqueId, untrack } from 'solid-js';
-import { deserialize } from 'seroval';
 import 'vinxi/client';
 import { createDeferredResource } from './utils/deferred.js';
+import { fetchHoleBatched } from './utils/hole-batch.js';
 import {
     matchClientRoute,
     getNotFoundHandler,
@@ -25,31 +25,13 @@ import {
 } from './utils/router-context.js';
 
 /**
- * Fetch a PPR hole's loader data from the server (first-load only). `manifest`
- * identifies the page/group node; the current URL gives the loader its
- * params/search.
+ * Fetch a PPR hole's loader data from the server (first-load PPR, and every
+ * soft navigation). `manifest` identifies the page/layout/group node; the
+ * current URL gives the loader its params/search. Batched with every other
+ * hole fetched during the same navigation's tree walk — see `utils/hole-batch.js`.
  */
 const fetchHole = (manifest: string): Promise<any> =>
-    fetch(
-        `/__solidstep_loader?manifest=${encodeURIComponent(
-            manifest,
-        )}&url=${encodeURIComponent(location.pathname + location.search)}`,
-    )
-        .then((r) => {
-            // A non-2xx body is not a seroval envelope — fail the resource so
-            // the ErrorBoundary handles it instead of a deserialize crash.
-            if (!r.ok) throw new Error(`Hole fetch failed (${r.status})`);
-            return r.text();
-        })
-        // The hole envelope is seroval-serialized (see `serveHoleData`), so
-        // deserialize rather than `r.json()` — this preserves Date/Map/Set/etc.
-        .then((t) => {
-            const envelope = deserialize(t) as { data?: any; error?: string };
-            // A failed hole loader arrives as an `{ error }` envelope; rethrow
-            // it so <Suspense>/<ErrorBoundary> treat it as the loader failure.
-            if (envelope.error !== undefined) throw new Error(envelope.error);
-            return envelope.data;
-        });
+    fetchHoleBatched(manifest, location.pathname + location.search);
 
 /** Synchronously read a preloaded component's default export. */
 const comp = (imp: { src: string }) => getModule(imp.src)?.default;

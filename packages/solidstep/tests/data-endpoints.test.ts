@@ -63,7 +63,7 @@ describe('serveHoleData', () => {
         expect(body).toBeNull();
     });
 
-    it('returns null when manifest does not match the page, any layout, or group', async () => {
+    it('yields a per-item error when a manifest does not match the page, any layout, or group', async () => {
         matchRoute.mockReturnValue({
             handler: {
                 type: 'page',
@@ -73,11 +73,14 @@ describe('serveHoleData', () => {
             },
             params: {},
         });
-        const body = await serveHoleData(holeReq('manifest=/unknown&url=/p'));
-        expect(body).toBeNull();
+        const body = (await serveHoleData(
+            holeReq('manifest=/unknown&url=/p'),
+        )) as unknown as { results: { manifest: string; error?: string }[] };
+        expect(body.results).toHaveLength(1);
+        expect(body.results[0].error).toBeTruthy();
     });
 
-    it('returns null when the resolved loader import has no loader export', async () => {
+    it('yields a per-item error when the resolved loader import has no loader export', async () => {
         matchRoute.mockReturnValue({
             handler: {
                 type: 'page',
@@ -90,11 +93,14 @@ describe('serveHoleData', () => {
             },
             params: {},
         });
-        const body = await serveHoleData(holeReq('manifest=/p&url=/p'));
-        expect(body).toBeNull();
+        const body = (await serveHoleData(
+            holeReq('manifest=/p&url=/p'),
+        )) as unknown as { results: { manifest: string; error?: string }[] };
+        expect(body.results).toHaveLength(1);
+        expect(body.results[0].error).toBeTruthy();
     });
 
-    it('returns null when the addressed loader is not a deferred one', async () => {
+    it('yields a per-item error when the addressed loader is not a deferred one', async () => {
         matchRoute.mockReturnValue({
             handler: {
                 type: 'page',
@@ -109,7 +115,11 @@ describe('serveHoleData', () => {
             },
             params: {},
         });
-        expect(await serveHoleData(holeReq('manifest=/p&url=/p'))).toBeNull();
+        const body = (await serveHoleData(
+            holeReq('manifest=/p&url=/p'),
+        )) as unknown as { results: { manifest: string; error?: string }[] };
+        expect(body.results).toHaveLength(1);
+        expect(body.results[0].error).toBeTruthy();
         expect(getCachedLoaderData).not.toHaveBeenCalled();
     });
 
@@ -133,8 +143,8 @@ describe('serveHoleData', () => {
         });
         const body = (await serveHoleData(
             holeReq('manifest=/p&url=/p'),
-        )) as unknown as { data: unknown };
-        expect(body.data).toEqual({ n: 1 });
+        )) as unknown as { results: { manifest: string; data: unknown }[] };
+        expect(body.results).toEqual([{ manifest: '/p', data: { n: 1 } }]);
     });
 
     it("resolves a layout's deferred loader when manifest matches a layout", async () => {
@@ -159,8 +169,8 @@ describe('serveHoleData', () => {
         });
         const body = (await serveHoleData(
             holeReq('manifest=/layout&url=/p'),
-        )) as unknown as { data: unknown };
-        expect(body.data).toEqual({ n: 1 });
+        )) as unknown as { results: { manifest: string; data: unknown }[] };
+        expect(body.results).toEqual([{ manifest: '/layout', data: { n: 1 } }]);
     });
 
     it("resolves a group's deferred loader when manifest matches a parallel-route slot", async () => {
@@ -185,8 +195,10 @@ describe('serveHoleData', () => {
         });
         const body = (await serveHoleData(
             holeReq('manifest=/group/sidebar&url=/p'),
-        )) as unknown as { data: unknown };
-        expect(body.data).toEqual({ n: 1 });
+        )) as unknown as { results: { manifest: string; data: unknown }[] };
+        expect(body.results).toEqual([
+            { manifest: '/group/sidebar', data: { n: 1 } },
+        ]);
     });
 
     it("resolves a boundary group's NON-deferred loader (PPR emits those as holes too)", async () => {
@@ -212,8 +224,10 @@ describe('serveHoleData', () => {
         });
         const body = (await serveHoleData(
             holeReq('manifest=/group/sidebar&url=/p'),
-        )) as unknown as { data: unknown };
-        expect(body.data).toEqual({ n: 1 });
+        )) as unknown as { results: { manifest: string; data: unknown }[] };
+        expect(body.results).toEqual([
+            { manifest: '/group/sidebar', data: { n: 1 } },
+        ]);
     });
 
     it('encodes an error envelope (not a rejection) when the deferred loader throws', async () => {
@@ -238,10 +252,153 @@ describe('serveHoleData', () => {
 
         const body = (await serveHoleData(
             holeReq('manifest=/p&url=/p'),
-        )) as unknown as { error: string };
+        )) as unknown as { results: { manifest: string; error: string }[] };
 
         // import.meta.env.DEV is true under vitest -> real message.
-        expect(body.error).toBe('hole exploded');
+        expect(body.results).toEqual([
+            { manifest: '/p', error: 'hole exploded' },
+        ]);
+    });
+
+    it('batches multiple manifests into one response, resolving each independently', async () => {
+        matchRoute.mockReturnValue({
+            handler: {
+                type: 'page',
+                mainPage: {
+                    manifestPath: '/p',
+                    loader: {
+                        src: 'l',
+                        import: async () => ({
+                            loader: { options: { type: 'defer' } },
+                        }),
+                    },
+                },
+                layouts: [
+                    {
+                        manifestPath: '/layout',
+                        loader: {
+                            src: 'll',
+                            import: async () => ({
+                                loader: { options: { type: 'defer' } },
+                            }),
+                        },
+                    },
+                ],
+                groups: {},
+            },
+            params: {},
+        });
+        getCachedLoaderData.mockImplementation(
+            async (_loaderFn: unknown, manifestPath: string) => ({
+                from: manifestPath,
+            }),
+        );
+
+        const body = (await serveHoleData(
+            holeReq('manifest=/p&manifest=/layout&url=/p'),
+        )) as unknown as {
+            results: { manifest: string; data: unknown }[];
+        };
+
+        // matchRoute (and thus the route-tree walk) runs ONCE for the whole
+        // batch, not once per manifest — the entire point of batching.
+        expect(matchRoute).toHaveBeenCalledTimes(1);
+        const byManifest = Object.fromEntries(
+            body.results.map((r) => [r.manifest, r.data]),
+        );
+        expect(byManifest['/p']).toEqual({ from: '/p' });
+        expect(byManifest['/layout']).toEqual({ from: '/layout' });
+    });
+
+    it('a bad manifest in a batch yields a per-item error, without failing sibling manifests', async () => {
+        matchRoute.mockReturnValue({
+            handler: {
+                type: 'page',
+                mainPage: {
+                    manifestPath: '/p',
+                    loader: {
+                        src: 'l',
+                        import: async () => ({
+                            loader: { options: { type: 'defer' } },
+                        }),
+                    },
+                },
+                layouts: [],
+                groups: {},
+            },
+            params: {},
+        });
+
+        const body = (await serveHoleData(
+            holeReq('manifest=/p&manifest=/unknown&url=/p'),
+        )) as unknown as {
+            results: { manifest: string; data?: unknown; error?: string }[];
+        };
+
+        const byManifest = Object.fromEntries(
+            body.results.map((r) => [r.manifest, r]),
+        );
+        expect(byManifest['/p'].data).toEqual({ n: 1 });
+        expect(byManifest['/unknown'].error).toBeTruthy();
+        expect(byManifest['/unknown'].data).toBeUndefined();
+    });
+
+    it('dedupes a manifest requested more than once in the same batch', async () => {
+        matchRoute.mockReturnValue({
+            handler: {
+                type: 'page',
+                mainPage: {
+                    manifestPath: '/p',
+                    loader: {
+                        src: 'l',
+                        import: async () => ({
+                            loader: { options: { type: 'defer' } },
+                        }),
+                    },
+                },
+                layouts: [],
+                groups: {},
+            },
+            params: {},
+        });
+
+        const body = (await serveHoleData(
+            holeReq('manifest=/p&manifest=/p&url=/p'),
+        )) as unknown as { results: { manifest: string }[] };
+
+        expect(body.results).toHaveLength(1);
+        expect(getCachedLoaderData).toHaveBeenCalledTimes(1);
+    });
+
+    it('rejects a batch exceeding the manifest cap with 400 (null), even when manifest[0] would otherwise resolve', async () => {
+        matchRoute.mockReturnValue({
+            handler: {
+                type: 'page',
+                mainPage: {
+                    manifestPath: '/p',
+                    // A genuinely resolvable deferred loader at the FIRST
+                    // requested manifest -- proves the whole batch is
+                    // rejected for exceeding the cap, not incidentally
+                    // returning null because nothing in the batch matched.
+                    loader: {
+                        src: 'l',
+                        import: async () => ({
+                            loader: { options: { type: 'defer' } },
+                        }),
+                    },
+                },
+                layouts: [],
+                groups: {},
+            },
+            params: {},
+        });
+        const manyManifests = ['manifest=/p']
+            .concat(Array.from({ length: 65 }, (_, i) => `manifest=/m${i}`))
+            .join('&');
+
+        const body = await serveHoleData(holeReq(`${manyManifests}&url=/p`));
+
+        expect(body).toBeNull();
     });
 });
 

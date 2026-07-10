@@ -304,12 +304,22 @@ export async function render(args: RenderArgs): Promise<RenderResult> {
             }
             const slots: Record<string, () => unknown> = {};
             const slotPromises: Promise<unknown>[] = [children()];
+            // Sibling groups render concurrently (each is one of `slotPromises`,
+            // raced via `Promise.all` below), so their asset fetches can settle
+            // in any order — pushing straight to the shared `assets` array here
+            // would make head-tag order (and CSS cascade / modulepreload
+            // priority) nondeterministic across otherwise-identical renders.
+            // Each group buffers into its own array instead; the flatten pass
+            // after `Promise.all(slotPromises)` below pushes them in DECLARED
+            // (`Object.entries` insertion) order, regardless of resolution order.
+            const groupAssetsByName: Record<string, RenderAsset[]> = {};
             if (index === entry.layouts.length - 1) {
                 // last layout, we can render slots
                 const groups = entry.groups || {};
                 for (const [groupName, group] of Object.entries(groups)) {
                     slotPromises.push(
                         (async () => {
+                            const localAssets: RenderAsset[] = [];
                             const slotName = groupName.replace('@', '');
                             const moduleSrc = `${group.page.src}&pick=$css`;
                             // Only Promise.all the loader fetch in when the
@@ -346,7 +356,9 @@ export async function render(args: RenderArgs): Promise<RenderResult> {
                                 groupPage = pageResult.default;
                                 groupLoader = null;
                             }
-                            assets.push(...(moduleAssets as RenderAsset[]));
+                            localAssets.push(
+                                ...(moduleAssets as RenderAsset[]),
+                            );
 
                             const groupDeferred =
                                 groupLoader?.options?.type === 'defer';
@@ -378,6 +390,7 @@ export async function render(args: RenderArgs): Promise<RenderResult> {
                                         searchParams,
                                         loaderData: data,
                                     });
+                                groupAssetsByName[groupName] = localAssets;
                                 return;
                             }
 
@@ -418,14 +431,16 @@ export async function render(args: RenderArgs): Promise<RenderResult> {
                             if (loadingFetch) {
                                 const [loadingAssets, loadingModule] =
                                     loadingFetch;
-                                assets.push(
+                                localAssets.push(
                                     ...(loadingAssets as RenderAsset[]),
                                 );
                                 GroupLoading = loadingModule.default;
                             }
                             if (errorFetch) {
                                 const [errorAssets, errorModule] = errorFetch;
-                                assets.push(...(errorAssets as RenderAsset[]));
+                                localAssets.push(
+                                    ...(errorAssets as RenderAsset[]),
+                                );
                                 GroupError = errorModule.default;
                             }
                             // A boundary group with a loader streams its data in
@@ -497,11 +512,22 @@ export async function render(args: RenderArgs): Promise<RenderResult> {
                                     inner,
                                 );
                             };
+                            groupAssetsByName[groupName] = localAssets;
                         })(),
                     );
                 }
             }
             const [childrenRendered] = await Promise.all(slotPromises);
+            // Flatten group assets in DECLARED order (matching the loop above,
+            // not each group's resolution timing) — see the comment on
+            // `groupAssetsByName`'s declaration. Final order: this layout's own
+            // assets (pushed above) → the page/inner-layout subtree's assets
+            // (already pushed by the time `childrenRendered` resolves) → each
+            // group's assets, in declared order.
+            for (const groupName of Object.keys(entry.groups || {})) {
+                const groupAssets = groupAssetsByName[groupName];
+                if (groupAssets) assets.push(...groupAssets);
+            }
 
             // Deferred layout loader: stream its data in under <Suspense>,
             // matching the page-level pattern. Falls back to the route's own

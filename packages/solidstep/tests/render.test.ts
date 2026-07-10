@@ -17,13 +17,23 @@ const pageCacheKey = vi.fn((_url: URL) => 'page:key');
 // behavior for every existing test); the asset-ordering test below swaps in
 // a per-src tag so it can assert push order across nodes.
 const clientManifestAssets = vi.fn((_src: string): unknown[] => []);
+// Per-src artificial resolution delay, so a test can force one node's asset
+// fetch to resolve before a DECLARED-earlier sibling's — proving an ordering
+// fix enforces declared order rather than happening to pass under the mock's
+// default (synchronous, in-order) resolution timing.
+const clientManifestDelay: Record<string, number> = {};
+const delay = (ms: number) =>
+    ms > 0 ? new Promise((r) => setTimeout(r, ms)) : Promise.resolve();
 vi.mock('vinxi/manifest', () => ({
     getManifest: () => ({
         inputs: new Proxy(
             {},
             {
                 get: (_t, src: string) => ({
-                    assets: async () => clientManifestAssets(src),
+                    assets: async () => {
+                        await delay(clientManifestDelay[src] ?? 0);
+                        return clientManifestAssets(src);
+                    },
                 }),
             },
         ),
@@ -95,6 +105,8 @@ beforeEach(() => {
     isPreviewActive.mockReset().mockReturnValue(false);
     pageCacheKey.mockClear();
     clientManifestAssets.mockReset().mockReturnValue([]);
+    for (const k of Object.keys(clientManifestDelay))
+        delete clientManifestDelay[k];
 });
 
 describe('render', () => {
@@ -287,6 +299,95 @@ describe('render', () => {
         // Layout's own CSS asset is pushed before the page's, mirroring the
         // reduceRight tree order (outer layout resolves and pushes first).
         expect(hrefs).toEqual([layoutSrc, pageSrc]);
+    });
+
+    it('pushes group assets in DECLARED order, not resolution order', async () => {
+        clientManifestAssets.mockImplementation((src: string) => [
+            { tag: 'link', attrs: { href: src } },
+        ]);
+        const groupAPage = imp({ default: () => 'A' });
+        const groupBPage = imp({ default: () => 'B' });
+        const groupASrc = `${groupAPage.src}&pick=$css`;
+        const groupBSrc = `${groupBPage.src}&pick=$css`;
+        // Group "a" is declared FIRST but resolves SLOWER than group "b" —
+        // if push order followed resolution order (the bug), "b" would land
+        // before "a" despite being declared second.
+        clientManifestDelay[groupASrc] = 20;
+        clientManifestDelay[groupBSrc] = 0;
+
+        const entry = baseEntry({
+            groups: {
+                a: { manifestPath: '/group/a', page: groupAPage },
+                b: { manifestPath: '/group/b', page: groupBPage },
+            },
+        });
+        const layoutSrc = `${entry.layouts[0].layout.src}&pick=$css`;
+        const pageSrc = `${entry.mainPage.page.src}&pick=$css`;
+
+        const result = await render({
+            toRender: 'main',
+            entry,
+            routeParams: {},
+            searchParams: {},
+            req: req(),
+        });
+        const hrefs = result.documentAssets.map(
+            (a) => (a as any).attrs.href as string,
+        );
+        expect(hrefs).toEqual([layoutSrc, pageSrc, groupASrc, groupBSrc]);
+    });
+
+    it("keeps a boundary group's own/loading/error assets together and in sub-order, alongside a sibling group", async () => {
+        clientManifestAssets.mockImplementation((src: string) => [
+            { tag: 'link', attrs: { href: src } },
+        ]);
+        const boundaryPage = imp({ default: () => 'BOUNDARY' });
+        const loadingImp = imp({ default: () => 'LOADING' });
+        const errorImp = imp({ default: () => 'ERROR' });
+        const siblingPage = imp({ default: () => 'SIBLING' });
+        const boundarySrc = `${boundaryPage.src}&pick=$css`;
+        const loadingSrc = `${loadingImp.src}&pick=$css`;
+        const errorSrc = `${errorImp.src}&pick=$css`;
+        const siblingSrc = `${siblingPage.src}&pick=$css`;
+        // Sibling resolves faster than the boundary group's own/loading/error
+        // fetches, to prove sub-order survives the cross-group race too.
+        clientManifestDelay[boundarySrc] = 10;
+        clientManifestDelay[loadingSrc] = 10;
+        clientManifestDelay[errorSrc] = 10;
+        clientManifestDelay[siblingSrc] = 0;
+
+        const entry = baseEntry({
+            groups: {
+                boundary: {
+                    manifestPath: '/group/boundary',
+                    page: boundaryPage,
+                    loadingPage: loadingImp,
+                    errorPage: errorImp,
+                },
+                sibling: { manifestPath: '/group/sibling', page: siblingPage },
+            },
+        });
+        const layoutSrc = `${entry.layouts[0].layout.src}&pick=$css`;
+        const pageSrc = `${entry.mainPage.page.src}&pick=$css`;
+
+        const result = await render({
+            toRender: 'main',
+            entry,
+            routeParams: {},
+            searchParams: {},
+            req: req(),
+        });
+        const hrefs = result.documentAssets.map(
+            (a) => (a as any).attrs.href as string,
+        );
+        expect(hrefs).toEqual([
+            layoutSrc,
+            pageSrc,
+            boundarySrc,
+            loadingSrc,
+            errorSrc,
+            siblingSrc,
+        ]);
     });
 
     it('returns a deferred result when a layout loader defers', async () => {

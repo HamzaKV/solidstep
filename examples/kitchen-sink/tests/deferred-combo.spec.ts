@@ -48,4 +48,28 @@ test.describe('a route with both a deferred layout and a deferred page', () => {
         ).toHaveText('combo-page-loaded');
         await expect(page).toHaveURL(/\/deferred-combo$/);
     });
+
+    test('soft-navigating fetches both deferred holes (layout + page) in ONE batched request', async ({
+        page,
+    }) => {
+        const loaderRequests: string[] = [];
+        page.on('request', (req) => {
+            if (req.url().includes('/__solidstep_loader')) {
+                loaderRequests.push(req.url());
+            }
+        });
+
+        await page.goto('/');
+        await page.getByRole('link', { name: 'Layout+Page Streaming' }).click();
+        await expect(
+            page.getByTestId('deferred-combo-layout-greeting'),
+        ).toHaveText('combo-layout-loaded');
+        await expect(
+            page.getByTestId('deferred-combo-page-greeting'),
+        ).toHaveText('combo-page-loaded');
+
+        expect(loaderRequests).toHaveLength(1);
+        const requested = new URL(loaderRequests[0]);
+        expect(requested.searchParams.getAll('manifest')).toHaveLength(2);
+    });
 });
