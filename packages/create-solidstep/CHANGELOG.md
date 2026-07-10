@@ -1,5 +1,11 @@
 # @varlabs/create-solidstep
 
+## 1.0.0
+
+### Major Changes
+
+- 9972325: Scaffolded apps now declare and require Node.js `>=22.19.0`, matching `solidstep`'s new minimum supported Node version.
+
 ## 0.3.3
 
 ### Patch Changes

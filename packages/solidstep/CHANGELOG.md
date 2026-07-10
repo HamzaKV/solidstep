@@ -1,5 +1,15 @@
 # solidstep
 
+## 1.0.0
+
+### Major Changes
+
+- 9972325: Raise the minimum supported Node.js version to `>=22.19.0`. The framework's direct `undici@^8.7.0` dependency itself requires Node `>=22.19.0` and unconditionally calls a `node:worker_threads` API absent on earlier Node versions — so any solidstep app running on Node 20 or 21 was crashing immediately at server startup, despite `engines.node` previously (incorrectly) claiming `>=20` support. This change makes the declared requirement match reality instead of downgrading `undici`.
+
+### Patch Changes
+
+- ee2ee59: Performance: cache static per-build work on the server hot path (client-manifest payload, per-route streaming/defer flags, per-module asset lists — all prod-only, dev/HMR unaffected), thread one parsed request URL through the dispatcher instead of re-parsing it repeatedly, skip building instrumentation request/response contexts when no hooks are registered, reuse `TextEncoder`/`TextDecoder` in the seroval transport instead of allocating per chunk, use a cheaper asset-dedupe key, and skip a redundant `Request` clone in loader invocation when there's nothing to change. On the client, navigation now starts warming a route's component modules in parallel with its data fetch instead of sequentially after it, and `prefetch="viewport"` `<Link>`s share a single `IntersectionObserver` instead of one per link.
+
 ## 0.9.1
 
 ### Patch Changes
