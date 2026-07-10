@@ -12,6 +12,6 @@ export const shouldIncludeInScaffold = (
     const relativePath = src.replace(templateDir, '').replace(/^[/\\]/, '');
     return (
         !relativePath.startsWith('node_modules') &&
-        !relativePath.startsWith('.git')
+        !/^\.git($|[/\\])/.test(relativePath)
     );
 };
