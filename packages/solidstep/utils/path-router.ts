@@ -135,12 +135,14 @@ export type RouteNode = {
     paramChild?: {
         name: string;
         node: RouteNode;
+        sourcePath?: string;
     };
 
     catchAllChild?: {
         name: string;
         optional: boolean;
         node: RouteNode;
+        sourcePath?: string;
     };
 
     handler?: RouteHandler;
@@ -205,9 +207,11 @@ const parseSegment = (segment: string): ParseSegment => {
  * classified by {@link parseSegment}; static segments key into
  * `staticChildren`, a `[param]` reuses/creates the node's single `paramChild`,
  * and a catch-all reuses/creates `catchAllChild` and then stops (a catch-all
- * always consumes the rest of the path). Inserting two routes whose segments
- * differ only by the param/catch-all *name* reuses the existing child node, so
- * the first inserted name wins. The handler is assigned to the terminal node.
+ * always consumes the rest of the path). Two routes whose segments differ only
+ * by the param/catch-all *name* at the same trie position throws -- sibling
+ * routes at a shared position must agree on the dynamic segment's name (same
+ * spirit as the catch-all-not-last guard below). The handler is assigned to
+ * the terminal node.
  *
  * @param root - The trie root (from {@link createNode}).
  * @param path - Clean route path, e.g. `/blog/[slug]` or `/docs/[...path]`.
@@ -238,7 +242,14 @@ export const insertRoute = (
                 node.paramChild = {
                     name: parsed.name,
                     node: createNode(),
+                    sourcePath: path,
                 };
+            } else if (node.paramChild.name !== parsed.name) {
+                throw new Error(
+                    `Invalid route "${path}": param "[${parsed.name}]" conflicts with the sibling param ` +
+                        `"[${node.paramChild.name}]" already registered by "${node.paramChild.sourcePath}" at this position. ` +
+                        `Routes at the same folder depth must use the same dynamic segment name.`,
+                );
             }
             node = node.paramChild.node;
             continue;
@@ -257,7 +268,14 @@ export const insertRoute = (
                 name: catchAll.name,
                 optional: catchAll.optional,
                 node: createNode(),
+                sourcePath: path,
             };
+        } else if (node.catchAllChild.name !== catchAll.name) {
+            throw new Error(
+                `Invalid route "${path}": catch-all "[...${catchAll.name}]" conflicts with the sibling catch-all ` +
+                    `"[...${node.catchAllChild.name}]" already registered by "${node.catchAllChild.sourcePath}" at this position. ` +
+                    `Only one catch-all name is allowed per folder.`,
+            );
         }
         node = node.catchAllChild.node;
         break; // catch-all always consumes the rest

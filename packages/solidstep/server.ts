@@ -135,7 +135,9 @@ const onStart = async () => {
     await seedIsrFromManifest(serverDir);
 };
 
-instrumentationReady = onStart();
+instrumentationReady = onStart().catch((e) => {
+    console.error('Error initializing instrumentation:', e);
+});
 
 /**
  * Handle a matched API route (`route.ts`): dispatch to the export matching the
@@ -224,8 +226,6 @@ const handleApiRoute = async (
 };
 
 const handler = eventHandler(async (event) => {
-    if (instrumentationReady) await instrumentationReady;
-
     const req = toWebRequest(event);
     // Parsed once and threaded through the rest of the dispatcher instead of
     // re-parsing `req.url` at every branch below.
@@ -233,6 +233,8 @@ const handler = eventHandler(async (event) => {
     const pathnamePart = urlObj.pathname;
 
     try {
+        if (instrumentationReady) await instrumentationReady;
+
         if (
             pathnamePart === '/.well-known/appspecific/com.chrome.devtools.json'
         ) {

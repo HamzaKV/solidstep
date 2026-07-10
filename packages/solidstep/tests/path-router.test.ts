@@ -301,6 +301,36 @@ describe('insertRoute — segment after a catch-all', () => {
     });
 });
 
+describe('insertRoute — sibling param/catch-all name mismatch', () => {
+    it('throws when two sibling [param] routes at the same position use different names', () => {
+        insertRoute(root, '/shop/[id]', makePageHandler('/shop/[id]'));
+        expect(() =>
+            insertRoute(root, '/shop/[slug]', makePageHandler('/shop/[slug]')),
+        ).toThrow(/param/i);
+    });
+
+    it('throws when two sibling catch-all routes at the same position use different names', () => {
+        insertRoute(root, '/docs/[...a]', makePageHandler('/docs/[...a]'));
+        expect(() =>
+            insertRoute(root, '/docs/[...b]', makePageHandler('/docs/[...b]')),
+        ).toThrow(/catch-all/i);
+    });
+
+    it('throws when an optional and non-optional catch-all with different names collide', () => {
+        insertRoute(root, '/docs/[[...a]]', makePageHandler('/docs/[[...a]]'));
+        expect(() =>
+            insertRoute(root, '/docs/[...b]', makePageHandler('/docs/[...b]')),
+        ).toThrow(/catch-all/i);
+    });
+
+    it('does not throw when the same param name is reused (existing shadowing behavior)', () => {
+        insertRoute(root, '/shop/[id]/a', makePageHandler('/shop/[id]/a'));
+        expect(() =>
+            insertRoute(root, '/shop/[id]/b', makePageHandler('/shop/[id]/b')),
+        ).not.toThrow();
+    });
+});
+
 describe('param/catch-all decoding', () => {
     it('decodes a percent-encoded param value (e.g. a space)', () => {
         insertRoute(root, '/blog/[slug]', makePageHandler('/blog/[slug]'));
