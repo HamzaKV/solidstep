@@ -56,6 +56,14 @@ describe('create-solidstep scaffold', () => {
         });
     });
 
+    it('pins the scaffolded solidstep dependency to a real range, not "latest"', () => {
+        const pkg = JSON.parse(
+            readFileSync(join(appDir, 'package.json'), 'utf-8'),
+        );
+        expect(pkg.dependencies.solidstep).not.toBe('latest');
+        expect(pkg.dependencies.solidstep).toMatch(/^[\^~]?\d+\.\d+\.\d+/);
+    });
+
     it('generates a syntactically valid app/middleware.ts', () => {
         const source = readFileSync(join(appDir, 'app/middleware.ts'), 'utf-8');
         const { diagnostics } = ts.transpileModule(source, {

@@ -151,4 +151,34 @@ describe('fetchHoleBatched', () => {
         expect(await pSecond).toBe('second');
         expect(fetchMock).toHaveBeenCalledTimes(2);
     });
+
+    it('a fetch that never resolves rejects after a timeout instead of hanging forever', async () => {
+        vi.useFakeTimers();
+        try {
+            // Mirrors real `fetch`: never settles on its own, but rejects with
+            // an AbortError once its signal is aborted.
+            fetchMock.mockImplementation(
+                (_url: string, init?: RequestInit) =>
+                    new Promise<Response>((_resolve, reject) => {
+                        init?.signal?.addEventListener('abort', () => {
+                            reject(new DOMException('Aborted', 'AbortError'));
+                        });
+                    }),
+            );
+
+            const pA = fetchHoleBatched('/a', '/page');
+            const pB = fetchHoleBatched('/b', '/page');
+            // Attach rejection handlers before the timer fires, so the
+            // rejection is never briefly "unhandled" once the abort resolves.
+            const assertA = expect(pA).rejects.toThrow(/Timeout/);
+            const assertB = expect(pB).rejects.toThrow(/Timeout/);
+
+            await vi.advanceTimersByTimeAsync(10_000);
+
+            await assertA;
+            await assertB;
+        } finally {
+            vi.useRealTimers();
+        }
+    });
 });

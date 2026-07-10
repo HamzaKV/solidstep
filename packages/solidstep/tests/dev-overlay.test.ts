@@ -36,6 +36,19 @@ describe('renderDevOverlayDocument', () => {
         expect(html).toContain('<div class="ss-msg"></div>');
         expect(html).toContain('<pre class="ss-stack"></pre>');
     });
+
+    it('does not throw when an Error subclass reassigns name/message to non-strings', () => {
+        // Legal JS: TS's `string` type on Error#name/#message isn't enforced
+        // at runtime.
+        class WeirdError extends Error {
+            constructor() {
+                super('boom');
+                (this as unknown as { name: unknown }).name = 500;
+                (this as unknown as { message: unknown }).message = 404;
+            }
+        }
+        expect(() => renderDevOverlayDocument(new WeirdError())).not.toThrow();
+    });
 });
 
 describe('devOverlayClientScript', () => {

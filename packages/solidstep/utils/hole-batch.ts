@@ -34,10 +34,14 @@ const flush = async (url: string): Promise<void> => {
     // hang that manifest's promise forever with no future flush scheduled).
     batches.delete(url);
     const manifests = [...batch.queue.keys()];
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 4000);
     try {
         const params = new URLSearchParams({ url });
         for (const m of manifests) params.append('manifest', m);
-        const res = await fetch(`/__solidstep_loader?${params}`);
+        const res = await fetch(`/__solidstep_loader?${params}`, {
+            signal: controller.signal,
+        });
         if (!res.ok) throw new Error(`Hole fetch failed (${res.status})`);
         const text = await res.text();
         const envelope = deserialize(text) as { results: HoleResult[] };
@@ -57,9 +61,12 @@ const flush = async (url: string): Promise<void> => {
             }
         }
     } catch (err) {
+        const finalErr = controller.signal.aborted ? new Error('Timeout') : err;
         for (const waiters of batch.queue.values()) {
-            for (const w of waiters) w.reject(err);
+            for (const w of waiters) w.reject(finalErr);
         }
+    } finally {
+        clearTimeout(timeout);
     }
 };
 

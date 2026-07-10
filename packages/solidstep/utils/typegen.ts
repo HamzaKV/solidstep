@@ -17,6 +17,10 @@ const isGroupSegment = (seg: string) =>
 // `_private` dirs and `@slot` parallel-route dirs are not standalone URLs.
 const isNonRouteSegment = (seg: string) =>
     seg.startsWith('_') || seg.startsWith('@');
+// Single-quoted string literal, safe for any route segment/param name --
+// e.g. an apostrophe in a folder name or a kebab-case param key.
+const quote = (value: string): string =>
+    `'${value.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
 
 type RouteInfo = {
     /** Route id keeping bracket syntax, e.g. `/blog/[slug]`. */
@@ -64,19 +68,22 @@ export const pageFileToRoute = (file: string): RouteInfo | null => {
     const id = `/${urlSegments.join('/')}`;
     const hrefBase = `/${hrefSegments.join('/')}`;
     const isDynamic = hrefSegments.some((s) => s.includes('${string}'));
-    const hrefs: string[] = [isDynamic ? `\`${hrefBase}\`` : `'${hrefBase}'`];
+    const hrefs: string[] = [isDynamic ? `\`${hrefBase}\`` : quote(hrefBase)];
     // An optional catch-all also matches its parent path without the segment.
     if (optionalCatchAll) {
         const parent = `/${hrefSegments.slice(0, -1).join('/')}`;
-        hrefs.push(`'${parent === '/' ? '/' : parent}'`);
+        hrefs.push(quote(parent === '/' ? '/' : parent));
     }
 
     return { id, hrefs, params };
 };
 
+const isValidIdentifier = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 const paramsType = (params: [string, 'string' | 'string[]'][]): string => {
     if (params.length === 0) return '{}';
-    return `{ ${params.map(([k, t]) => `${k}: ${t}`).join('; ')} }`;
+    return `{ ${params
+        .map(([k, t]) => `${isValidIdentifier.test(k) ? k : quote(k)}: ${t}`)
+        .join('; ')} }`;
 };
 
 /**
@@ -90,10 +97,10 @@ export const generateRouteTypes = (files: string[]): string => {
         // Stable, deterministic order.
         .sort((a, b) => a.id.localeCompare(b.id));
 
-    const ids = routes.map((r) => `'${r.id}'`);
+    const ids = routes.map((r) => quote(r.id));
     const hrefs = Array.from(new Set(routes.flatMap((r) => r.hrefs)));
     const paramsEntries = routes.map(
-        (r) => `        '${r.id}': ${paramsType(r.params)};`,
+        (r) => `        ${quote(r.id)}: ${paramsType(r.params)};`,
     );
 
     const routesUnion = ids.length ? ids.join(' | ') : 'never';

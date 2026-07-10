@@ -50,6 +50,11 @@ describe('pageFileToRoute', () => {
         expect(pageFileToRoute('api/health/route.ts')).toBeNull();
         expect(pageFileToRoute('blog/[slug]/loading.tsx')).toBeNull();
     });
+
+    it('escapes a static segment containing a single quote', () => {
+        const r = pageFileToRoute("shop/o'brien/page.tsx");
+        expect(r?.hrefs).toEqual(["'/shop/o\\'brien'"]);
+    });
 });
 
 describe('generateRouteTypes', () => {
@@ -74,5 +79,11 @@ describe('generateRouteTypes', () => {
         const out = generateRouteTypes(['api/health/route.ts']);
         expect(out).toContain('routes: never;');
         expect(out).toContain('hrefs: never;');
+    });
+
+    it('quotes a kebab-case param key so the params type is valid TypeScript', () => {
+        const out = generateRouteTypes(['blog/[user-id]/page.tsx']);
+        expect(out).toContain("'/blog/[user-id]': { 'user-id': string };");
+        expect(out).not.toContain('{ user-id: string }');
     });
 });

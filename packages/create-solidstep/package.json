@@ -39,9 +39,6 @@
         "typescript": "^6.0.3",
         "vitest": "^4.1.10"
     },
-    "dependencies": {
-        "inquirer": "^14.0.2"
-    },
     "keywords": [
         "solidjs",
         "cli",

@@ -42,6 +42,13 @@ jobs:
       - name: Unit tests & coverage
         run: pnpm run test:coverage
 
+      # test:coverage only covers `solidstep` (it's the only package with a
+      # coverage config) -- create-solidstep's suite, including the scaffold
+      # e2e test that asserts the generated app's security defaults, needs
+      # its own step or it silently never runs.
+      - name: create-solidstep unit tests
+        run: pnpm --filter @varlabs/create-solidstep test
+
       - name: Build framework
         run: pnpm --filter solidstep build
 

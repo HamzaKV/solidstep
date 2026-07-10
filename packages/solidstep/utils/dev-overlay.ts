@@ -37,9 +37,11 @@ export const renderDevOverlayDocument = (
     ctx: { method?: string; url?: string } = {},
 ): string => {
     const err = toError(error);
-    const name = escapeHtml(err.name || 'Error');
-    const message = escapeHtml(err.message || '');
-    const stack = escapeHtml(err.stack || '');
+    // `.name`/`.message`/`.stack` are typed `string` but not enforced at
+    // runtime -- an Error subclass can reassign them to anything.
+    const name = escapeHtml(String(err.name || 'Error'));
+    const message = escapeHtml(String(err.message || ''));
+    const stack = escapeHtml(String(err.stack || ''));
     const req = escapeHtml(`${ctx.method ?? ''} ${ctx.url ?? ''}`.trim());
     return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${name} — SolidStep (dev)</title><style>${OVERLAY_CSS}</style></head><body><div class="ss-devoverlay"><div class="ss-box"><span class="ss-tag">Unhandled server error · dev</span><div class="ss-msg">${message}</div>${req ? `<div class="ss-req">${req}</div>` : ''}<pre class="ss-stack">${stack}</pre></div></div></body></html>`;
 };

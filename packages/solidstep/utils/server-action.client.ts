@@ -97,6 +97,7 @@ async function fetchServerFunction(
     if (response.headers.has('X-Error')) {
         if (result.name === 'RedirectError') {
             window.location.href = result.message;
+            return;
         }
         // Dev: surface the server-action error in the in-browser overlay (the
         // mounter is installed by the dev-only client script on the page).
