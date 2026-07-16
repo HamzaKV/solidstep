@@ -65,9 +65,44 @@ const action = async () => {
 };
 ```
 
+## Hydration mismatch from `<Show>` as a top-level visibility toggle
+
+**Symptom:** The dev overlay shows:
+
+> Hydration Mismatch. Unable to find DOM nodes for hydration key: N
+
+usually pointing at a `<button>` or `<div>` inside a dialog, dropdown, or collapsible sidebar section — and it gets more frequent the longer a dev session with many edits runs.
+
+**Cause:** `<Show when={signal()}>` gating an **entire interactive subtree** (a dialog's open/closed content, a dropdown's open/closed menu, a sidebar's collapsed/expanded submenu) as a top-level, signal-driven switch. `Show`'s SSR-emitted comment-boundary markers can desync from what the client's hydration walk expects when it wraps a whole subtree like this — the mismatch compounds under `solid-refresh`'s dev-mode HMR patching across a long-lived browser session. A small `<Show>` nested inside an always-rendered container (guarding one conditional field, say) is fine; the problem is specifically using `<Show>` as the switch for the whole thing.
+
+**Fix:** Render every branch unconditionally and toggle visibility with `classList` instead of removing/re-adding the subtree:
+
+```tsx
+// ❌ Breaks hydration - Show removes/re-adds the whole subtree
+<Show when={open()}>
+  <div class="dialog-content">...</div>
+</Show>
+
+// ✅ Always rendered, toggled via CSS - server and client agree on DOM shape
+<div class="dialog-content" classList={{ hidden: !open() }}>...</div>
+```
+
+For content that's genuinely interactive-only and never needs to exist in the SSR payload at all (so it never goes through the hydration walk in the first place), use [`ClientOnly`](./client-only.md) instead:
+
+```tsx
+import { ClientOnly } from 'solidstep/client-only';
+
+<ClientOnly fallback={null}>
+  {() => <div class="dialog-content">...</div>}
+</ClientOnly>
+```
+
+If you're still seeing occasional mismatches unrelated to this pattern after a very long dev session, see [Getting Started → Disabling client-side HMR](./getting-started.md#disabling-client-side-hmr).
+
 ## Related
 
 - [Deployment](./deployment.md)
 - [Caching](./caching.md)
 - [Server Actions & Forms](./server-actions-and-forms.md)
 - [Architecture](./architecture.md)
+- [ClientOnly](./client-only.md)

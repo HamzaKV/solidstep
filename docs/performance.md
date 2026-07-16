@@ -87,7 +87,7 @@ export default defineConfig({
 ```
 
 Keep heavy, client-only widgets out of the server/critical path with
-[`clientOnly`](./utilities.md), and avoid importing large libraries into shared
+[`clientOnly`](./client-only.md), and avoid importing large libraries into shared
 layouts (they end up in every chunk).
 
 ## Prefetch on intent

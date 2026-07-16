@@ -93,6 +93,11 @@ are the feature set you can build on right now (see the linked guides for detail
   `server-only` boundaries. Loader errors no longer leak their message to the
   client in production (logged server-side under a correlation id instead). See
   [Security](./security.md).
+- **Client-only rendering** — the `clientOnly` HOC (defer a whole component to
+  the browser) and the newer `<ClientOnly>` JSX boundary (defer inline
+  content, e.g. dialog/dropdown/portal subtrees, sidestepping the
+  `<Show>`-as-toggle hydration-mismatch pitfall). See
+  [Client-Only Rendering](./client-only.md).
 - **Instrumentation** — observability hooks (including OpenTelemetry), structured
   logging, and a built-in `createMetricsInstrumentation` that emits a per-request
   metric record (timing, status, route, render strategy). See
@@ -122,8 +127,11 @@ area. Most of the committed direction here has now landed:
 
 Still in progress:
 
-- **Broaden test coverage** of the remaining browser-coupled boundaries
-  (`client-only`, the prefetch path), which are covered by E2E today.
+- ✅ **Client-only rendering now has unit coverage.** Both `clientOnly` and
+  `<ClientOnly>` have dedicated client/server-branch tests (previously
+  covered by E2E only).
+- **Broaden test coverage** of the remaining browser-coupled boundaries (the
+  prefetch path), which are covered by E2E today.
 
 ## Future / under consideration
 

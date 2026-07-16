@@ -17,6 +17,8 @@ Every public import from the `solidstep` package, mapped to a one-line descripti
 | `solidstep/form` | `Form` component for submitting forms to server actions (with progressive enhancement). | [Server Actions & Forms](./server-actions-and-forms.md#form-actions) |
 | `solidstep/hooks/action-state` | `useActionState` — track form action state, pending, and errors. | [Server Actions & Forms](./server-actions-and-forms.md#form-actions) |
 | `solidstep/hooks/form-status` | `useFormStatus` — read the pending status of the enclosing `<Form>`. | [Server Actions & Forms](./server-actions-and-forms.md#form-actions) |
+| `solidstep/client-only` | `<ClientOnly>` — a JSX boundary that renders `children()` only after client mount, never during SSR/hydration. | [Client-Only Rendering](./client-only.md) |
+| `solidstep/utils/client-only` | `clientOnly(component, {fallback})` — a HOC that lazy-loads and renders a component client-side only, showing `fallback` during SSR/pre-mount. | [Client-Only Rendering](./client-only.md) |
 
 ## Data & Metadata
 
@@ -48,7 +50,6 @@ Every public import from the `solidstep` package, mapped to a one-line descripti
 | `solidstep/utils/csp` | `createBasePolicy`, `withNonce`, `serializePolicy` for Content Security Policy. | [Security](./security.md#csp) |
 | `solidstep/utils/csrf` | `csrf()` — CSRF protection middleware. | [Security](./security.md#csrf-protection) |
 | `solidstep/utils/server-only` | Side-effect import that throws if a module is loaded on the client. | [Security](./security.md#server-only-code) |
-| `solidstep/utils/client-only` | Side-effect import that marks a module as client-only. | [Security](./security.md) |
 
 ## Utilities
 

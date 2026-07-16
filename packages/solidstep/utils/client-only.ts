@@ -1,13 +1,8 @@
 // @refresh skip
 import type { Component, ComponentProps, JSX, Setter } from 'solid-js';
-import {
-    createMemo,
-    createSignal,
-    onMount,
-    sharedConfig,
-    untrack,
-} from 'solid-js';
+import { createMemo, createSignal, sharedConfig, untrack } from 'solid-js';
 import { isServer } from 'solid-js/web';
+import { useHydrationMounted } from './internal/hydration-mounted.js';
 
 const load = <T>(
     fn: () => Promise<{
@@ -48,13 +43,11 @@ const clientOnly = <T extends Component<any>>(
     load(async () => ({ default: component }), setComp);
     return (props: ComponentProps<T>) => {
         let Comp: T | undefined;
-        let m: boolean;
         if ((Comp = comp()) && !sharedConfig.context) return Comp(props);
-        const [mounted, setMounted] = createSignal(!sharedConfig.context);
-        onMount(() => setMounted(true));
+        const mounted = useHydrationMounted();
         return createMemo(() => {
             Comp = comp();
-            m = mounted();
+            const m = mounted();
             return untrack(() => (Comp && m ? Comp(props) : options?.fallback));
         }) as unknown as JSX.Element;
     };

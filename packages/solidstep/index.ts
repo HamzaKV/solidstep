@@ -103,6 +103,18 @@ type Config = {
         | ((options: {
               router: 'server' | 'client';
           }) => ViteCustomizableConfig);
+    /**
+     * Overrides for SolidStep's internal `vite-plugin-solid` invocation.
+     * Currently exposes only `hot` — an escape hatch for troubleshooting
+     * dev-mode HMR churn interacting with SSR hydration (see
+     * docs/troubleshooting.md). Not a general options passthrough: `ssr`
+     * is managed internally and no other option has a demonstrated need
+     * yet.
+     */
+    solid?: {
+        /** Disable solid-refresh HMR injection. Default `true` (enabled). */
+        hot?: boolean;
+    };
 };
 
 /**
@@ -203,7 +215,7 @@ export const defineConfig = (
                             ),
                         ),
                     }),
-                    solid({ ssr: true }),
+                    solid({ ssr: true, hot: config.solid?.hot }),
                     viteConfigPlugin('app-client', {
                         ...(viteConfig({ router: 'client' }) || {}),
                     }),
@@ -237,7 +249,7 @@ export const defineConfig = (
                     // Typed-routes codegen: emits `solidstep-env.d.ts` in dev + build.
                     routeTypegen(),
                     serverFunctions.server(),
-                    solid({ ssr: true }),
+                    solid({ ssr: true, hot: config.solid?.hot }),
                     viteConfigPlugin(
                         'app-server',
                         (() => {

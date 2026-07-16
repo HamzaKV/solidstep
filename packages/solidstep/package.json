@@ -18,6 +18,10 @@
             "types": "./utils/hooks/action-state.d.ts",
             "default": "./utils/hooks/action-state.js"
         },
+        "./client-only": {
+            "types": "./utils/components/client-only.d.ts",
+            "default": "./utils/components/client-only.js"
+        },
         "./form": {
             "types": "./utils/components/form.d.ts",
             "default": "./utils/components/form.js"

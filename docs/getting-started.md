@@ -107,6 +107,18 @@ export default defineConfig({
 
 See also: [Troubleshooting](./troubleshooting.md#blocked-request-host).
 
+__Disabling client-side HMR__
+
+If you hit dev-mode hydration mismatches that trace back to `solid-refresh` (SolidJS's HMR plugin) — usually surfacing as `Hydration Mismatch. Unable to find DOM nodes for hydration key: N` after a long dev session with many edits — you can disable HMR entirely as a troubleshooting escape hatch:
+
+```tsx
+export default defineConfig({
+  solid: { hot: false },
+});
+```
+
+This only affects the dev-mode client bundle (HMR is already excluded from SSR); expect full page reloads on every edit instead of hot patches while it's set. See also: [Troubleshooting](./troubleshooting.md#hydration-mismatch-from-show-as-a-top-level-visibility-toggle).
+
 ## Project Structure
 
 ```

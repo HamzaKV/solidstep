@@ -23,6 +23,7 @@ This is the documentation index. Pages are grouped into **Guides**, **Reference*
 - [Security](./security.md) — cookies, CORS, CSP, CSRF, redirects, error handling, server-only code.
 - [Utilities](./utilities.md) — logging, fetch wrappers, preloading/prefetching strategies.
 - [Assets & Environment](./assets-and-env.md) — fonts, images, environment variables.
+- [Client-Only Rendering](./client-only.md) — `ClientOnly` vs `clientOnly`, and avoiding `<Show>`-driven hydration mismatches.
 
 ## Reference
 
