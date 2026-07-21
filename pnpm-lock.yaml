@@ -89,8 +89,8 @@ importers:
         specifier: ^8.7.0
         version: 8.7.0
       vite-plugin-solid:
-        specifier: ^2.11.12
-        version: 2.11.12(@testing-library/jest-dom@6.9.1)(solid-js@1.9.14)(vite@6.4.3(@types/node@26.1.0)(jiti@2.7.0)(terser@5.48.0)(tsx@4.23.0))
+        specifier: ^2.11.13
+        version: 2.11.13(@testing-library/jest-dom@6.9.1)(solid-js@1.9.14)(vite@6.4.3(@types/node@26.1.0)(jiti@2.7.0)(terser@5.48.0)(tsx@4.23.0))
     devDependencies:
       '@solidjs/testing-library':
         specifier: ^0.8.10
@@ -3539,12 +3539,12 @@ packages:
     resolution: {integrity: sha512-1pGA+cU1G9feBQ1sd5FMftPuLUT8NSX880AvELhNWqoqWhe2jeSOQxjDPxlA3f1AC+Bbknl4UPKHyVXmfLZQjw==}
     hasBin: true
 
-  vite-plugin-solid@2.11.12:
-    resolution: {integrity: sha512-FgjPcx2OwX9h6f28jli7A4bG7PP3te8uyakE5iqsmpq3Jqi1TWLgSroC9N6cMfGRU2zXsl4Q6ISvTr2VL0QHpA==}
+  vite-plugin-solid@2.11.13:
+    resolution: {integrity: sha512-YaCNMzwIawUO8K16uj5jaxUJIYCstBEjkUppC5OKElBz/K2+R7Q7MWycHDgqzjBca5WWy/2ZQQ45IHexaabYew==}
     peerDependencies:
       '@testing-library/jest-dom': ^5.16.6 || ^5.17.0 || ^6.*
       solid-js: ^1.7.2
-      vite: ^3.0.0 || ^4.0.0 || ^5.0.0 || ^6.0.0 || ^7.0.0 || ^8.0.0
+      vite: ^3.0.0 || ^4.0.0 || ^5.0.0 || ^6.0.0 || ^7.0.0 || ^8.0.0 || ^9.0.0
     peerDependenciesMeta:
       '@testing-library/jest-dom':
         optional: true
@@ -7168,7 +7168,7 @@ snapshots:
       - xml2js
       - yaml
 
-  vite-plugin-solid@2.11.12(@testing-library/jest-dom@6.9.1)(solid-js@1.9.14)(vite@6.4.3(@types/node@26.1.0)(jiti@2.7.0)(terser@5.48.0)(tsx@4.23.0)):
+  vite-plugin-solid@2.11.13(@testing-library/jest-dom@6.9.1)(solid-js@1.9.14)(vite@6.4.3(@types/node@26.1.0)(jiti@2.7.0)(terser@5.48.0)(tsx@4.23.0)):
     dependencies:
       '@babel/core': 7.29.7
       '@types/babel__core': 7.20.5
