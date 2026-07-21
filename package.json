@@ -20,7 +20,7 @@
     "prepare": "lefthook install"
   },
   "dependencies": {
-    "@biomejs/biome": "^2.5.2",
+    "@biomejs/biome": "^2.5.4",
     "@varlabs/monorun": "^0.1.4"
   },
   "devDependencies": {
