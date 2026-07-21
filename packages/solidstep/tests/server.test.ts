@@ -86,7 +86,7 @@ vi.mock('../server/render-page', () => ({
     renderPage: (...a: unknown[]) => renderPage(...a),
 }));
 
-import handler from '../server';
+import handler, { resolveServerDir } from '../server';
 import { RedirectError } from '../utils/redirect';
 
 const makeEvent = (url: string) => ({ req: new Request(url) });
@@ -125,6 +125,34 @@ const hookNames = () => safeExecuteHook.mock.calls.map((c) => c[0]);
 describe('server startup', () => {
     it('wires the shutdown handler during onStart', () => {
         expect(registerShutdownHandler).toHaveBeenCalled();
+    });
+});
+
+describe('resolveServerDir', () => {
+    it('prefers the argv[1] dir (Node/Docker) when it has .config.json', () => {
+        const exists = (p: string) => p === '/app/.output/server/.config.json';
+        expect(
+            resolveServerDir('/app/.output/server/index.mjs', '/app', exists),
+        ).toBe('/app/.output/server');
+    });
+
+    it('falls back to cwd (Netlify/Lambda) when argv[1] points at the platform runtime', () => {
+        const exists = (p: string) => p === '/var/task/.config.json';
+        expect(
+            resolveServerDir('/var/runtime/index.mjs', '/var/task', exists),
+        ).toBe('/var/task');
+    });
+
+    it('falls back to the argv[1] dir when neither candidate has the file', () => {
+        const exists = () => false;
+        expect(
+            resolveServerDir('/app/.output/server/index.mjs', '/app', exists),
+        ).toBe('/app/.output/server');
+    });
+
+    it('falls back to cwd when argv[1] is unset and nothing exists', () => {
+        const exists = () => false;
+        expect(resolveServerDir(undefined, '/app', exists)).not.toBe('');
     });
 });
 

@@ -11,6 +11,7 @@ import { MemoryCacheStore, FilesystemCacheStore } from './utils/cache-store.js';
 import { handleServerFunction } from './utils/server-action.server.js';
 import { renderDevOverlayDocument } from './utils/dev-overlay.js';
 import { readFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -62,18 +63,39 @@ type ApiRouteHandler = Extract<RouteHandler, { type: 'route' }> & {
 
 let instrumentationReady: Promise<void> | null = null;
 
-const onStart = async () => {
-    // The built server's `import.meta.url` is not always a usable absolute file
-    // URL (notably on Windows in the Nitro bundle), so derive the server output
-    // directory from the entry path (`node .output/server/index.mjs`). This is
-    // where `.config.json` and `prerender-manifest.json` are written at build.
-    let serverDir: string;
+// `.config.json` and `prerender-manifest.json` are written at build into the
+// Nitro server output dir (`nitro.options.output.serverDir`, see index.ts).
+// `dirname(process.argv[1])` finds it correctly for `node
+// .output/server/index.mjs` (Node/Docker presets), but serverless presets
+// (Netlify et al.) load the bundled handler inside an existing platform
+// runtime process, where `argv[1]` is the *platform's own* entry (e.g. AWS
+// Lambda's Node runtime lives at /var/runtime) rather than the deployed
+// function code — which is `process.cwd()` there (Lambda's documented
+// /var/task working dir). Try both and use whichever one actually has the
+// file; `exists` is injectable so this stays unit-testable without mocking
+// `node:fs`.
+export const resolveServerDir = (
+    argv1: string | undefined,
+    cwd: string,
+    exists: (path: string) => boolean = existsSync,
+): string => {
+    const argv1Dir = argv1 ? dirname(argv1) : undefined;
+    const found = [argv1Dir, cwd].find(
+        (d): d is string => !!d && exists(`${d}/.config.json`),
+    );
+    if (found) return found;
+    if (argv1Dir) return argv1Dir;
+    // The built server's `import.meta.url` is not always a usable absolute
+    // file URL (notably on Windows in the Nitro bundle), hence the try/catch.
     try {
-        serverDir = dirname(process.argv[1] || fileURLToPath(import.meta.url));
-        /* v8 ignore next 3 -- defensive fallback for the rare Windows/Nitro bundle case documented above; process.argv[1] is always present in any environment these tests or e2e run in. */
+        return dirname(fileURLToPath(import.meta.url));
     } catch {
-        serverDir = process.cwd();
+        return cwd;
     }
+};
+
+const onStart = async () => {
+    const serverDir = resolveServerDir(process.argv[1], process.cwd());
     /* v8 ignore start -- onStart runs once at module-import time, fixed to a
        single mocked path for the whole test file; its config-load/cache-
        selection branches are exercised on every real request in the

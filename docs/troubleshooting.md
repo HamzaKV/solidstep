@@ -99,6 +99,16 @@ import { ClientOnly } from 'solidstep/client-only';
 
 If you're still seeing occasional mismatches unrelated to this pattern after a very long dev session, see [Getting Started → Disabling client-side HMR](./getting-started.md#disabling-client-side-hmr).
 
+## `ENOENT ... .config.json` on Netlify (or other serverless deploys)
+
+**Symptom:** In production logs on a serverless preset (e.g. `netlify`):
+
+> Error creating route manifest: Error: ENOENT: no such file or directory, open '/var/runtime/.config.json'
+
+**Cause:** SolidStep locates the build-generated `.config.json` (see [Deployment → Build Output Notes](./deployment.md#build-output-notes)) relative to the running server's entry path. On serverless platforms, the handler is loaded inside an existing platform runtime process rather than started as `node .output/server/index.mjs`, so that entry path points at the *platform's* own runtime (`/var/runtime` on AWS Lambda, which Netlify Functions runs on) instead of the deployed function code. The server still starts and serves requests, but the resolved logger/cache/`loaderTimeout` config and ISR seeding from `prerender-manifest.json` silently don't load.
+
+**Fix:** Fixed as of the version that added `resolveServerDir` fallback-to-`process.cwd()` behavior — update SolidStep. If you're still on an older version and can't upgrade immediately, this is otherwise harmless (routing/rendering keep working); it just means `defineConfig({ logger, cache, loaderTimeout })` and ISR seeding are inactive on that deploy.
+
 ## Related
 
 - [Deployment](./deployment.md)
