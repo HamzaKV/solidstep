@@ -6,7 +6,7 @@ export const getLogger = (): pino.Logger => {
     if (logger) {
         return logger;
     }
-    // @ts-ignore
+    // @ts-expect-error -- untyped global set by the SolidStep runtime
     const sharedConfig = globalThis.__SOLIDSTEP_CONFIG__;
     const loggerConfig = sharedConfig?.logger;
 
