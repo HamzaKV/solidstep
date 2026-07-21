@@ -15,7 +15,7 @@ import { escapeHtml } from './escape.js';
 const OVERLAY_CSS = `
 .ss-devoverlay{position:fixed;inset:0;z-index:2147483647;background:rgba(10,10,14,.85);
 color:#e6e6e6;font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-padding:24px;overflow:auto;backdrop-filter:blur(2px)}
+padding:24px;overflow:auto;backdrop-filter:blur(2px);pointer-events:none}
 .ss-devoverlay .ss-box{max-width:920px;margin:24px auto;background:#16161c;border:1px solid #33333d;
 border-radius:8px;padding:20px 24px;box-shadow:0 10px 40px rgba(0,0,0,.5)}
 .ss-devoverlay .ss-tag{display:inline-block;background:#7f1d1d;color:#fecaca;border-radius:4px;
@@ -25,7 +25,7 @@ padding:2px 8px;font-size:11px;letter-spacing:.04em;text-transform:uppercase}
 .ss-devoverlay .ss-stack{white-space:pre-wrap;word-break:break-word;color:#c8c8d0;
 background:#0e0e12;border:1px solid #2a2a32;border-radius:6px;padding:12px;margin:0}
 .ss-devoverlay .ss-close{float:right;background:#2a2a32;color:#e6e6e6;border:1px solid #44444f;
-border-radius:6px;padding:4px 10px;cursor:pointer;font:inherit}
+border-radius:6px;padding:4px 10px;cursor:pointer;font:inherit;pointer-events:auto}
 `.trim();
 
 const toError = (error: unknown): Error =>
