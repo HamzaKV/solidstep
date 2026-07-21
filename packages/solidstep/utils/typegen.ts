@@ -52,14 +52,17 @@ export const pageFileToRoute = (file: string): RouteInfo | null => {
         if (seg.startsWith('[[...') && seg.endsWith(']]')) {
             params.push([seg.slice(5, -2), 'string[]']);
             optionalCatchAll = true;
+            // biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder text emitted into generated TS source, not a template literal
             return '${string}';
         }
         if (seg.startsWith('[...') && seg.endsWith(']')) {
             params.push([seg.slice(4, -1), 'string[]']);
+            // biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder text emitted into generated TS source, not a template literal
             return '${string}';
         }
         if (seg.startsWith('[') && seg.endsWith(']')) {
             params.push([seg.slice(1, -1), 'string']);
+            // biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder text emitted into generated TS source, not a template literal
             return '${string}';
         }
         return seg;
@@ -67,6 +70,7 @@ export const pageFileToRoute = (file: string): RouteInfo | null => {
 
     const id = `/${urlSegments.join('/')}`;
     const hrefBase = `/${hrefSegments.join('/')}`;
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: matching the literal placeholder text produced above, not a template literal
     const isDynamic = hrefSegments.some((s) => s.includes('${string}'));
     const hrefs: string[] = [isDynamic ? `\`${hrefBase}\`` : quote(hrefBase)];
     // An optional catch-all also matches its parent path without the segment.
