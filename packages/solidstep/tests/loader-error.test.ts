@@ -37,6 +37,9 @@ describe('runSequentialLoader', () => {
     });
 
     it('isolates a layout/group loader failure as a serializable sentinel', async () => {
+        const consoleError = vi
+            .spyOn(console, 'error')
+            .mockImplementation(() => undefined);
         const data = await runSequentialLoader(
             throwingLoader(new Error('db down')),
             '/layout',
@@ -48,9 +51,21 @@ describe('runSequentialLoader', () => {
         expect(JSON.parse(JSON.stringify(data))).toEqual({
             [LOADER_ERROR_KEY]: 'db down',
         });
+        // A layout/group loader failure must never be completely silent even
+        // with the (default) silent pino logger - this is the only signal an
+        // author has that something degraded to the error sentinel instead of
+        // rendering real content.
+        expect(consoleError).toHaveBeenCalledWith(
+            expect.stringContaining('/layout'),
+            expect.stringContaining('db down'),
+        );
+        consoleError.mockRestore();
     });
 
     it('stringifies a non-Error throw in the sentinel', async () => {
+        const consoleError = vi
+            .spyOn(console, 'error')
+            .mockImplementation(() => undefined);
         const data = await runSequentialLoader(
             throwingLoader('plain string'),
             '/layout',
@@ -58,6 +73,11 @@ describe('runSequentialLoader', () => {
             false,
         );
         expect(data).toEqual({ [LOADER_ERROR_KEY]: 'plain string' });
+        expect(consoleError).toHaveBeenCalledWith(
+            expect.stringContaining('/layout'),
+            expect.stringContaining('plain string'),
+        );
+        consoleError.mockRestore();
     });
 
     it('re-throws a RedirectError from a layout/group loader (auth gating)', async () => {

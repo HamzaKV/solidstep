@@ -5,6 +5,7 @@ import solid from 'vite-plugin-solid';
 import { serverFunctions } from '@vinxi/server-functions/plugin';
 import { ServerRouter, ClientRouter } from './utils/router.js';
 import { join, dirname } from 'node:path';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { cpSync, mkdirSync, existsSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
@@ -178,6 +179,18 @@ export const defineConfig = (
             : () => config.vite || {}
     ) as (options: { router: 'server' | 'client' }) => ViteCustomizableConfig;
 
+    // NOTE: Nitro re-bundles vinxi's already-correctly-chunked SSR output
+    // (this file's `app-server` manualChunks fix below) into its own final
+    // server bundle via a SEPARATE Rollup build, reachable via a
+    // `server.hooks['rollup:before']` hook - and the same cross-chunk
+    // missing-import bug can reappear there for large/complex apps, one
+    // level removed. A hook-based mitigation was attempted here and reverted:
+    // forcing every non-vendor module into its own chunk at Nitro's stage
+    // produced circular-chunk errors and broke prerendering in the
+    // kitchen-sink example. Needs a narrower rule (matching specifically the
+    // `app-<hash>.mjs` chunks this file's own vite-stage fix produces, not
+    // every project file) before it's safe to land - tracked as a known gap,
+    // not yet fixed.
     const app = createApp({
         server: {
             ...config.server,
@@ -290,6 +303,63 @@ export const defineConfig = (
                                 : userNoExternal === true
                                   ? true
                                   : ['solidstep'];
+                            // Vinxi generates a separate compiled SSR entry per
+                            // matched route, and several of those entries can
+                            // import the same source file (e.g. every route
+                            // under a layout imports that layout). Rollup's
+                            // default chunking can then split a single source
+                            // file's exports across DIFFERENT physical chunks
+                            // for different routes - and when one exported
+                            // binding calls a sibling exported binding from
+                            // the same file, some of the resulting chunks can
+                            // keep the call but drop the import, throwing a
+                            // ReferenceError at runtime for whichever routes
+                            // landed in the affected chunk (reproduced: a
+                            // layout's loader calling a sibling helper
+                            // function exported from the same file - some
+                            // routes' compiled chunks imported the helper
+                            // correctly, others silently didn't). Keying every
+                            // app route module to its own always-whole chunk
+                            // (by its own id) makes that split impossible - a
+                            // file's exports can never be separated from each
+                            // other. Only applied when the user hasn't already
+                            // configured their own `manualChunks` (respect
+                            // their config rather than silently overriding
+                            // it); skipped entirely for a multi-output config,
+                            // which this isn't set up to merge into.
+                            const userBuild = userServerVite.build ?? {};
+                            const userRollupOptions =
+                                userBuild.rollupOptions ?? {};
+                            const userOutput = userRollupOptions.output;
+                            const canInjectManualChunks =
+                                !Array.isArray(userOutput) &&
+                                !userOutput?.manualChunks;
+                            const forceOneChunkPerAppModule = (id: string) => {
+                                // Rollup/Vite module ids are POSIX-normalized
+                                // (forward slashes) even on Windows, unlike
+                                // `node:path`'s `sep` - match on the literal
+                                // separator, not the OS-specific one.
+                                const [bareId] = id.split('?');
+                                const matched =
+                                    bareId.includes('/app/') &&
+                                    /\.(tsx?|jsx?|mjs)$/.test(bareId);
+                                if (matched) {
+                                    // manualChunks' return value becomes the
+                                    // chunk's *name*, substituted into
+                                    // `output.chunkFileNames`'s `[name]`
+                                    // placeholder - it must be a plain,
+                                    // filename-safe string, not an absolute
+                                    // path. Hash the id so every distinct
+                                    // source file still gets its own stable,
+                                    // unique chunk name.
+                                    const hash = createHash('sha1')
+                                        .update(bareId)
+                                        .digest('hex')
+                                        .slice(0, 12);
+                                    return `app-${hash}`;
+                                }
+                                return undefined;
+                            };
                             return {
                                 ...userServerVite,
                                 resolve: {
@@ -313,6 +383,19 @@ export const defineConfig = (
                                     // ERR_PACKAGE_PATH_NOT_EXPORTED under Node's real
                                     // ESM resolver.
                                     noExternal: mergedNoExternal,
+                                },
+                                build: {
+                                    ...userBuild,
+                                    rollupOptions: {
+                                        ...userRollupOptions,
+                                        output: canInjectManualChunks
+                                            ? {
+                                                  ...userOutput,
+                                                  manualChunks:
+                                                      forceOneChunkPerAppModule,
+                                              }
+                                            : userOutput,
+                                    },
                                 },
                             };
                         })(),

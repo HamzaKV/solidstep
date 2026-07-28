@@ -59,6 +59,14 @@ export const runWithLoaderTimeout = <T>(
             // the error surfaces meaningfully through loader-error isolation.
             if (timeoutSignal.aborted) {
                 logger.warn({ timeoutMs }, 'Loader timed out');
+                // `logger` is silent by default (see `defineConfig`'s `logger`
+                // option and `utils/pino.ts`) - a hung loader is a real,
+                // already-caught failure an author needs to know about, not
+                // routine trace noise, so it must not depend on opting into
+                // pino logging to be visible at all.
+                console.error(
+                    `[solidstep] loader exceeded its ${timeoutMs}ms timeout`,
+                );
                 reject(new LoaderTimeoutError(timeoutMs));
             } else {
                 reject(signal.reason);

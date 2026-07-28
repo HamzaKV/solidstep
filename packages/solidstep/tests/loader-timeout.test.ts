@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import {
     resolveLoaderTimeout,
     runWithLoaderTimeout,
@@ -63,12 +63,22 @@ describe('runWithLoaderTimeout', () => {
     });
 
     it('rejects with LoaderTimeoutError when work exceeds the timeout', async () => {
+        const consoleError = vi
+            .spyOn(console, 'error')
+            .mockImplementation(() => undefined);
         const promise = runWithLoaderTimeout(
             () => new Promise<string>(() => undefined),
             { timeoutMs: 10 },
         );
         await expect(promise).rejects.toBeInstanceOf(LoaderTimeoutError);
         await expect(promise).rejects.toThrow('10ms');
+        // Must never be completely silent even with the (default) silent
+        // pino logger - a hung loader is the kind of failure an author needs
+        // to see, not routine trace noise.
+        expect(consoleError).toHaveBeenCalledWith(
+            expect.stringContaining('10ms'),
+        );
+        consoleError.mockRestore();
     });
 
     it('propagates the work rejection', async () => {

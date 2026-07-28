@@ -53,6 +53,15 @@ export const runSequentialLoader = async (
             { manifestPath, err: message },
             'Layout/group loader failed; rendering with error sentinel',
         );
+        // `logger` is silent by default (see `defineConfig`'s `logger` option
+        // and `utils/pino.ts`) - a layout/group loader degrading to the error
+        // sentinel is a real, already-caught failure an author needs to know
+        // about, not routine trace noise, so it must not depend on opting
+        // into pino logging to be visible at all.
+        console.error(
+            `[solidstep] layout/group loader at ${manifestPath} failed; rendering with error sentinel:`,
+            message,
+        );
         return {
             [LOADER_ERROR_KEY]: message,
         };
