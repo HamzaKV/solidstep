@@ -80,11 +80,11 @@ importers:
         specifier: ^10.3.1
         version: 10.3.1
       seroval:
-        specifier: ^1.5.6
-        version: 1.5.6
+        specifier: ^1.6.0
+        version: 1.6.0
       seroval-plugins:
         specifier: ^1.5.6
-        version: 1.5.6(seroval@1.5.6)
+        version: 1.5.6(seroval@1.6.0)
       undici:
         specifier: ^8.9.0
         version: 8.9.0
@@ -3167,8 +3167,8 @@ packages:
     resolution: {integrity: sha512-46uFvgrXTVxZcUorgSSRZ4y+ieqLLQRMlG4bnCZKW3qI6BZm7Rg4ntMW4p1mILEEBZWrFlcpp0AyIIlM6jD9iw==}
     engines: {node: '>=10'}
 
-  seroval@1.5.6:
-    resolution: {integrity: sha512-rVQVWjjSvlINzaQPZH5JFqsqEsIWdTxY3iJZCnTL/5gQbXIRooVZKI60tVCkOVfzcRPejboxO2t0P89dg5mQaA==}
+  seroval@1.6.0:
+    resolution: {integrity: sha512-TBwwKfscTEgnBEWmYKKeCcmCGmrJi0LV6qNUY//WBA3MDesh/zfn+KOMq/ckpxM4gZ0ouAE706A1eenekM2sug==}
     engines: {node: '>=10'}
 
   serve-placeholder@2.0.2:
@@ -6808,13 +6808,13 @@ snapshots:
     dependencies:
       seroval: 1.5.4
 
-  seroval-plugins@1.5.6(seroval@1.5.6):
+  seroval-plugins@1.5.6(seroval@1.6.0):
     dependencies:
-      seroval: 1.5.6
+      seroval: 1.6.0
 
   seroval@1.5.4: {}
 
-  seroval@1.5.6: {}
+  seroval@1.6.0: {}
 
   serve-placeholder@2.0.2:
     dependencies:
