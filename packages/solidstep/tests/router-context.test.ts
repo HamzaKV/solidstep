@@ -31,7 +31,11 @@ import {
     type RouteState,
 } from '../utils/router-context';
 
-type PendingFetch = { target: string; resolve: (envelope: unknown) => void };
+type PendingFetch = {
+    target: string;
+    resolve: (envelope: unknown) => void;
+    resolveRaw: (response: Response) => void;
+};
 let fetches: PendingFetch[] = [];
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
@@ -80,6 +84,7 @@ beforeEach(() => {
                                 status: 200,
                                 text: async () => JSON.stringify(envelope),
                             } as Response),
+                        resolveRaw: res,
                     });
                 }),
         ),
@@ -92,6 +97,19 @@ const resolveFetch = (target: string, envelope: unknown) => {
     const f = fetches.find((f) => f.target === target);
     if (!f) throw new Error(`no in-flight fetch for ${target}`);
     f.resolve(envelope);
+};
+
+// Simulates a static-export host (e.g. GitHub Pages) where `/__solidstep_route`
+// doesn't exist: `fetch()` resolves (it never rejects on HTTP error status),
+// but with a 404.
+const resolveFetch404 = (target: string) => {
+    const f = fetches.find((f) => f.target === target);
+    if (!f) throw new Error(`no in-flight fetch for ${target}`);
+    f.resolveRaw({
+        ok: false,
+        status: 404,
+        text: async () => '<html>Not Found</html>',
+    } as Response);
 };
 
 describe('navigation races', () => {
@@ -162,6 +180,48 @@ describe('module preload failures', () => {
         // The failed preload must reach navigate's hard-nav fallback instead
         // of committing a blank tree; reactive state stays on the old route.
         expect(routeStructure().manifestPath).not.toBe('/broken');
+    });
+});
+
+describe('static-export hard-nav fallback', () => {
+    it('falls back to a hard navigation when the route endpoint 404s', async () => {
+        // jsdom's location.assign is a non-configurable, read-only property;
+        // vi.stubGlobal replaces the whole `location` global (rather than
+        // redefining a property on the existing Location instance) so the
+        // fallback call is observable.
+        const assignSpy = vi.fn();
+        vi.stubGlobal('location', { ...window.location, assign: assignSpy });
+        try {
+            const nav = navigate('/static-only');
+            await tick();
+            resolveFetch404('/static-only');
+            await nav;
+            // No server to answer /__solidstep_route: reactive state stays
+            // put, the fallback in navigate()'s catch block does the real
+            // navigation.
+            expect(routeStructure().manifestPath).not.toBe('/static-only');
+            expect(assignSpy).toHaveBeenCalledWith('/static-only');
+        } finally {
+            vi.unstubAllGlobals();
+        }
+    });
+
+    it('a hover-triggered prefetch against a 404 endpoint never surfaces as an unhandled rejection', async () => {
+        const unhandled: unknown[] = [];
+        const onUnhandled = (reason: unknown) => unhandled.push(reason);
+        process.on('unhandledRejection', onUnhandled);
+        try {
+            prefetchRoute('/hover-only');
+            await tick();
+            resolveFetch404('/hover-only');
+            // Give the rejected promise's silencing `.catch` a turn to run
+            // before Node would otherwise report it as unhandled.
+            await tick();
+            await tick();
+            expect(unhandled).toEqual([]);
+        } finally {
+            process.off('unhandledRejection', onUnhandled);
+        }
     });
 });
 

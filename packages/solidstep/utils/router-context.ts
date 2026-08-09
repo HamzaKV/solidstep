@@ -232,7 +232,15 @@ const prefetchCache = new Map<
 
 const fetchEnvelope = (target: string): Promise<RouteEnvelope> =>
     fetch(`${ROUTE_ENDPOINT}?url=${encodeURIComponent(target)}`)
-        .then((r) => r.text())
+        .then((r) => {
+            // On a static-export host (no server, e.g. GitHub Pages) this
+            // endpoint doesn't exist and 404s. `fetch()` doesn't reject on
+            // HTTP error status, so without this check the hard-nav fallback
+            // in `navigate()`/`onPopState()` would only fire by accident (if
+            // `deserialize` happens to throw on the error body).
+            if (!r.ok) throw new Error(`Route fetch failed (${r.status})`);
+            return r.text();
+        })
         .then((text) => deserialize(text) as RouteEnvelope);
 
 /**
@@ -247,6 +255,12 @@ export const prefetchRoute = (target: string): void => {
     // insertion order (fairness for the oldest-first cap below).
     prefetchCache.delete(target);
     const promise = fetchEnvelope(target);
+    // `<Link>` defaults to `prefetch="hover"`, so on a static-export host
+    // (see `fetchEnvelope` above) *every hover* now deterministically rejects
+    // this promise. Silence it on this side reference only — `takeEnvelope`
+    // still awaits/rejects the same stored promise when the navigation
+    // actually happens, which is what drives the hard-nav fallback.
+    promise.catch(() => undefined);
     prefetchCache.set(target, { expires: Date.now() + PREFETCH_TTL, promise });
     if (prefetchCache.size > MAX_PREFETCH_ENTRIES) {
         // Never-navigated prefetches (e.g. many viewport links) must not
