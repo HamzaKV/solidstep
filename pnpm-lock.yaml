@@ -83,8 +83,8 @@ importers:
         specifier: ^1.5.6
         version: 1.5.6
       seroval-plugins:
-        specifier: ^1.5.6
-        version: 1.5.6(seroval@1.5.6)
+        specifier: ^1.6.2
+        version: 1.6.2(seroval@1.5.6)
       undici:
         specifier: ^8.9.0
         version: 8.9.0
@@ -3157,8 +3157,8 @@ packages:
     peerDependencies:
       seroval: ^1.0
 
-  seroval-plugins@1.5.6:
-    resolution: {integrity: sha512-HXuLAX2pu/UByPpaeo/TaMfvMIi+1QqIoPJYCcAtU8QkVNwgR6MPlGuCQTErV1JwraaMbYaWVIBX7mppzGLATQ==}
+  seroval-plugins@1.6.2:
+    resolution: {integrity: sha512-TfxuUjlbBESzUOWdTkTKqvSmav0ABym+itetDXLK6mDz8SmrpdI30aF8RTXE8Bvq+tH/1yIDkvy3W0lfQb1ipQ==}
     engines: {node: '>=10'}
     peerDependencies:
       seroval: ^1.0
@@ -6808,7 +6808,7 @@ snapshots:
     dependencies:
       seroval: 1.5.4
 
-  seroval-plugins@1.5.6(seroval@1.5.6):
+  seroval-plugins@1.6.2(seroval@1.5.6):
     dependencies:
       seroval: 1.5.6
 
