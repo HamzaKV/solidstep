@@ -1,5 +1,11 @@
 # solidstep
 
+## 1.1.3
+
+### Patch Changes
+
+- f50d8b8: Two hydration/navigation fixes surfaced while building a statically-exported app: (1) `navigate()`/`onPopState()`'s hard-navigation fallback for a failed `/__solidstep_route` fetch only fired by accident (relying on `deserialize` throwing on a non-envelope response body) rather than on an explicit `res.ok` check — on a static-export host (e.g. GitHub Pages) with no server to answer that endpoint, this now falls back deterministically every time instead of only when the error body happened to be unparseable; the accompanying hover-triggered `prefetchRoute` promise is also guarded against becoming an unhandled rejection on such hosts. (2) `ClientOnly` read its `mounted()` signal inside `untrack()`, so the memo computed once and never re-ran when hydration completed and the signal flipped to `true` -- content wrapped in `ClientOnly` stayed stuck on its `fallback` forever on any page that actually went through SSR-then-hydrate (a plain client-side mount, where `mounted()` starts `true`, happened to work, which is why this wasn't caught until then).
+
 ## 1.1.2
 
 ### Patch Changes
