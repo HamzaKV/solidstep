@@ -42,10 +42,13 @@ export const ClientOnly = (props: ClientOnlyProps): JSX.Element => {
 
     const mounted = useHydrationMounted();
 
+    // `mounted()` must be read outside `untrack` so the memo re-runs when it
+    // flips true — only the construction of children()/fallback is untracked
+    // (so reactive reads *inside* them don't add spurious deps to this memo).
     return createMemo(() =>
-        untrack(() =>
-            mounted() ? props.children() : (props.fallback ?? null),
-        ),
+        mounted()
+            ? untrack(() => props.children())
+            : untrack(() => props.fallback ?? null),
     ) as unknown as JSX.Element;
 };
 

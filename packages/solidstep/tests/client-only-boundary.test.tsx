@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { sharedConfig } from 'solid-js';
 import { render } from '@solidjs/testing-library';
 import { ClientOnly } from '../utils/components/client-only';
 
@@ -15,6 +16,42 @@ describe('ClientOnly (client)', () => {
             </ClientOnly>
         ));
         expect(await findByText('real-content')).toBeTruthy();
+    });
+
+    it('reacts to the mounted flip during a real SSR->hydrate transition (not just a fresh CSR mount)', async () => {
+        // Plain CSR mounts (the test above) never exercise the reactive
+        // flip: `sharedConfig.context` is already absent, so `mounted()`
+        // starts `true` and the boundary shows children on its first (and
+        // only) evaluation regardless of whether that read is tracked. Only
+        // a *hydrating* mount — where `mounted()` starts `false` and must
+        // later flip via `onMount` — actually exercises the memo's
+        // reactivity to that flip, which is what a bare `untrack(() =>
+        // mounted() ? ... )` around the read would silently break.
+        //
+        // Content here is plain text, not JSX elements: solid-js's dev
+        // build refuses to clone a *new* element template while
+        // `sharedConfig.context` (forced truthy below) marks the tree as
+        // hydrating, since a real hydration would adopt existing SSR nodes
+        // instead of creating them — an adoption target this plain
+        // `render()` (unlike real `hydrate()`) never provides. Text nodes
+        // don't go through that template-cloning path, so they sidestep the
+        // mismatch while still exercising the signal/memo reactivity this
+        // test is actually about.
+        (sharedConfig as { context?: unknown }).context = {};
+        try {
+            const { findByText } = render(() => (
+                <ClientOnly fallback='loading'>
+                    {() => 'real-content'}
+                </ClientOnly>
+            ));
+            // `mounted()` began `false` (hydrating) and must flip to `true`
+            // once `onMount` fires post-mount — if the memo's read of it is
+            // untracked, this never resolves (the buggy version stays on
+            // "loading" forever, so this throws on `findByText`'s timeout).
+            expect(await findByText('real-content')).toBeTruthy();
+        } finally {
+            (sharedConfig as { context?: unknown }).context = undefined;
+        }
     });
 });
 
