@@ -52,7 +52,7 @@ jobs:
       # With changesets present -> opens/updates the "Version Packages" PR.
       # With none remaining (that PR merged) -> runs the publish script.
       - name: Create Release PR or Publish
-        uses: changesets/action@v1
+        uses: changesets/action@v2
         with:
           version: pnpm run version-packages
           publish: bash scripts/release.sh
