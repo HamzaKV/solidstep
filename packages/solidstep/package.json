@@ -187,7 +187,7 @@
         "typescript": "^6.0.3",
         "vinxi": "0.5.8",
         "vitest": "^4.1.10",
-        "zod": "^4.4.3"
+        "zod": "^4.6.5"
     },
     "peerDependencies": {
         "solid-js": "^1.9.14",
