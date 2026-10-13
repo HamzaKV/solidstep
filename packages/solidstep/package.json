@@ -169,7 +169,7 @@
     "dependencies": {
         "@standard-schema/spec": "^1.1.0",
         "@vinxi/server-functions": "0.5.1",
-        "pino": "^10.3.1",
+        "pino": "^10.4.0",
         "seroval": "^1.5.6",
         "seroval-plugins": "^1.5.6",
         "undici": "^8.9.0",
